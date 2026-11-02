@@ -24,6 +24,15 @@ permissions:
   - action: shell
     resource: "ruff *"
     effect: allow
+  - action: shell
+    resource: ".venv/bin/*"
+    effect: allow
+  - action: shell
+    resource: "scripts/verify.sh*"
+    effect: allow
+  - action: shell
+    resource: "bash -n*"
+    effect: allow
 ---
 
 You are a **read-only reviewer** on `voxcpm2-openai`. You never edit files, commit, push, or
