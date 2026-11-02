@@ -46,7 +46,7 @@ def import_qwen3_speakers(
             continue
         key = meta.get("voice_name_lower") or path.stem
         name = meta.get("name") or key
-        if not overwrite and store.exists(name):
+        if not overwrite and store.exists(key):
             result["skipped"].append(name)
             continue
         consent = meta.get("consent") or "uploaded-via-studio"
@@ -56,11 +56,12 @@ def import_qwen3_speakers(
                 samples,
                 int(meta.get("sample_rate") or 24000),
                 ref_text=meta.get("ref_text", ""),
-                language=_language_for(name),
+                language=_language_for(key),
                 consent=consent,
                 source="designed" if consent == "own-generated-voice" else "uploaded",
                 metadata=meta,
                 overwrite=overwrite,
+                key=key,
             )
         except Exception as exc:  # noqa: BLE001 - invalid name or IO error: record and continue
             result["failed"].append((name, f"{type(exc).__name__}: {exc}"))

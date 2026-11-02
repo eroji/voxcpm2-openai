@@ -29,6 +29,7 @@ from app.models import VOICE_NAME_PATTERN
 NAME_RE = re.compile(VOICE_NAME_PATTERN)
 TAKE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{6,80}$")
 INDEX_VERSION = 1
+_URI_CACHE_MAX = 64
 Envelope = list[float]
 DEFAULT_SETTINGS = {
     "cfg": 2.0,
@@ -77,6 +78,7 @@ class Voice:
 
     def summary(self) -> dict[str, Any]:
         return {
+            "key": self.key,
             "name": self.name,
             "language": self.language,
             "source": self.source,
@@ -91,12 +93,14 @@ def _now() -> int:
 
 
 def _read_voice_file(path: Path) -> Voice:
+    # SPEC §5: the filename stem is the key. Metadata voice_name_lower is untrusted
+    # (a hand-placed file must never redirect reads, deletes or backups).
+    key = validate_voice_name(path.stem)
     with safe_open(str(path), framework="numpy") as handle:
         meta = {str(k): str(v) for k, v in (handle.metadata() or {}).items()}
         tensor = handle.get_tensor("audio")
     sample_rate = int(meta.get("sample_rate") or 0)
     samples = np.asarray(tensor, dtype=np.float32)
-    key = meta.get("voice_name_lower") or path.stem
     return Voice(
         key=key,
         name=meta.get("name") or key,
@@ -238,6 +242,8 @@ class VoiceStore:
         uri = audio_utils.to_wav_data_uri(*self.read_audio(voice.key))
         with self._lock:
             self._uri_cache[voice.key] = (mtime, uri)
+            while len(self._uri_cache) > _URI_CACHE_MAX:  # evict oldest (insertion order)
+                self._uri_cache.pop(next(iter(self._uri_cache)))
         return uri
 
     # ---------------------------------------------------------------- write
@@ -253,8 +259,9 @@ class VoiceStore:
         source: str = "uploaded",
         metadata: dict[str, str] | None = None,
         overwrite: bool = False,
+        key: str | None = None,
     ) -> Voice:
-        key = validate_voice_name(name)
+        key = validate_voice_name(key or name)
         samples = np.ascontiguousarray(samples, dtype=np.float32)
         if samples.ndim != 1 or samples.size == 0:
             raise BadRequest(
@@ -285,7 +292,8 @@ class VoiceStore:
             )
             # SPEC §5: import is lossless, so caller metadata wins and we only fill gaps.
             meta.setdefault("created_at", str(_now()))
-            meta.setdefault("file_size", str(len(audio_utils.wav_bytes(samples, sample_rate))))
+            if "file_size" not in meta:
+                meta["file_size"] = str(len(audio_utils.wav_bytes(samples, sample_rate)))
             meta = {str(k): str(v) for k, v in meta.items() if v is not None}
             tmp = path.with_suffix(".safetensors.tmp")
             save_file({"audio": samples}, str(tmp), metadata=meta)
@@ -315,7 +323,7 @@ class VoiceStore:
                 if key != old_key and (self.root / f"{key}.safetensors").exists():
                     raise Conflicting(f"Voice '{key}' already exists.")
                 meta["name"] = new_name.strip()
-                meta["voice_name_lower"] = key
+            meta["voice_name_lower"] = key
             if ref_text is not None:
                 meta["ref_text"] = ref_text
             if language is not None:
@@ -345,7 +353,8 @@ class VoiceStore:
     def backup(self, reason: str) -> Path:
         self.settings.backups_dir.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
-        target = self.settings.backups_dir / f"voices-{stamp}-{reason}.zip"
+        safe_reason = re.sub(r"[^A-Za-z0-9_-]", "_", reason)[:60]
+        target = self.settings.backups_dir / f"voices-{stamp}-{safe_reason}.zip"
         with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as zf:
             for path in sorted(self.root.glob("*.safetensors")):
                 zf.write(path, arcname=f"voices/{path.name}")
@@ -480,8 +489,9 @@ class TakeStore:
             take_id = item.get("id", "")
             if not TAKE_ID_RE.match(take_id):
                 continue
-            self.audio_path(take_id).unlink(missing_ok=True)
-            self._paths(take_id)[1].unlink(missing_ok=True)
+            wav_path, json_path = self.root / f"{take_id}.wav", self.root / f"{take_id}.json"
+            wav_path.unlink(missing_ok=True)  # wav may already be gone; must not raise
+            json_path.unlink(missing_ok=True)
             self._wave_cache.pop(take_id, None)
 
     def take_urls(self, take_id: str) -> dict[str, str]:

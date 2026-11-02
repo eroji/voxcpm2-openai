@@ -6,6 +6,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from app import store as app_store
 from app.importer import import_qwen3_speakers
 from app.store import VoiceStore
 from safetensors.numpy import save_file
@@ -165,3 +166,33 @@ def test_missing_or_empty_source_dir_is_not_an_error(store: VoiceStore, tmp_path
     empty = tmp_path / "empty"
     empty.mkdir()
     assert import_qwen3_speakers(store, empty) == empty_result
+
+
+def test_name_key_mismatch_imports_under_key(store: VoiceStore, tmp_path: Path):
+    """SPEC §5: the key is voice_name_lower, not the display name."""
+    src = tmp_path / "mismatch"
+    src.mkdir()
+    speaker_file(src, "ashley-en", name="Ashley EN", voice_name_lower="ashley-en")
+    result = import_qwen3_speakers(store, src)
+    assert result["imported"] == ["Ashley EN"]
+    assert result["failed"] == []
+    assert (store.root / "ashley-en.safetensors").exists()
+    voice = store.get("ashley-en")
+    assert voice.name == "Ashley EN"
+    assert voice.metadata["name"] == "Ashley EN"
+    assert voice.language == "en"  # inferred from the key, not the display name
+
+
+def test_import_preserves_file_size_without_reencoding(
+    store: VoiceStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    src = tmp_path / "sizes"
+    src.mkdir()
+    speaker_file(src, "ashley-en", file_size="48044")
+
+    def boom(*args: object, **kwargs: object) -> bytes:
+        raise AssertionError("wav_bytes must not run when file_size is present")
+
+    monkeypatch.setattr(app_store.audio_utils, "wav_bytes", boom)
+    assert import_qwen3_speakers(store, src)["imported"] == ["ashley-en"]
+    assert store.get("ashley-en").metadata["file_size"] == "48044"
