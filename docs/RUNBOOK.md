@@ -99,7 +99,10 @@ API_KEY=<litellm…key> STUDIO_AUTH=admin:<host-value> BASE_URL=http://127.0.0.1
 ```
 
 It checks `/health`, `/ready`, `/v1/models`, `/v1/audio/voices`, a 48 kHz WAV with
-`X-Sample-Rate: 48000`, streamed PCM bytes within 2 s, and `/api/engine` `ready:true`.
+`X-Sample-Rate: 48000` **and `X-RTF` present and ≤ 0.2** (SPEC §13), streamed PCM bytes within
+2 s, `/api/engine` `ready:true`, and a 20-request burst (below) — every call uses the same
+`API_KEY`/`STUDIO_AUTH` env auth as here, so run it with auth configured whenever the server has
+it.
 
 All eight imported voices (SPEC §5, §13) — the loop must fail loudly if any voice fails:
 
@@ -111,21 +114,35 @@ done
 exit $rc
 ```
 
+Warm RTF ≤ 0.2 (SPEC §13, measured ~0.14, SPEC §2) — asserted inside `scripts/smoke.sh`; the
+explicit host probe, authenticated the same way as every other `/v1` call:
+
+```bash
+cfg=$(mktemp); [ -n "${API_KEY:-}" ] && printf 'header = "Authorization: Bearer %s"\n' "$API_KEY" > "$cfg"
+curl -s --config "$cfg" -m 60 -D - -o /dev/null -H 'Content-Type: application/json' \
+  -d '{"model":"tts-1","voice":"ashley-en","input":"Real-time factor probe."}' \
+  http://127.0.0.1:8881/v1/audio/speech | grep -i '^x-rtf:'   # must be ≤ 0.2
+```
+
 Streamed first-chunk budget — warm first chunk ≤ 300 ms (measured ~154 ms, SPEC §2/§13):
 
 ```bash
 curl -s http://127.0.0.1:8881/api/engine | python3 -c 'import json,sys; d=json.load(sys.stdin); print("first_audio_ms:", d["first_audio_ms"]); assert d["first_audio_ms"] is not None and d["first_audio_ms"] <= 300, "over budget"'
 ```
 
-Queue behaviour — capacity is 2 active + 16 queued (Q-016); a burst of 20 must succeed or return
-clean `429` with `Retry-After`, never 5xx:
+Queue behaviour — capacity is 2 active + 16 queued (Q-016), so a burst of 20 concurrent requests
+admits **18** (2 synthesizing + 16 queued) and returns **2× `429`** with `Retry-After`, never 5xx.
+`scripts/smoke.sh` asserts exactly this with the same auth as its other calls; the explicit host
+probe (reuse `$cfg` from the RTF probe above — it carries the `API_KEYS` bearer token when set):
 
 ```bash
 for i in $(seq 20); do
-  curl -s -o /dev/null -w '%{http_code}\n' -H 'Content-Type: application/json' \
+  curl -s --config "$cfg" -m 60 -o /dev/null -w '%{http_code}\n' \
+    -H 'Content-Type: application/json' \
     -d '{"model":"tts-1","voice":"ashley-en","input":"Queue probe."}' \
     http://127.0.0.1:8881/v1/audio/speech &
 done; wait
+# expect: 18 lines "200", 2 lines "429"; 429 responses must carry Retry-After
 ```
 
 VRAM — engine ≤ 10 GB while `whisper-stt` and TEI keep running on the same card. On the **host**
@@ -144,6 +161,17 @@ nvidia-smi --query-gpu=name,memory.used,memory.total --format=csv,noheader,nouni
 podman exec voxcpm2-openai nvidia-smi --query-gpu=name,memory.used,memory.total \
   --format=csv,noheader,nounits -i 0
 ```
+
+Remaining hardware checks — proven on the `vllm` host, **not** by the fake-engine pytest suite
+(each name is the corresponding `pytest.mark.skip` in `tests/test_acceptance.py`):
+
+| Check | Where | Skip test |
+|---|---|---|
+| Warm RTF ≤ 0.2 + VRAM ≤ 10 GB + card sharing | RTF probe and `nvidia-smi` above | `test_hardware_rtf_and_vram` (Q-001 / M0) |
+| External clients (LiteLLM, Open WebUI, Hermes, Wyoming) | §4 cutover | `test_acceptance_external_clients_unchanged` |
+| Eight voices spot-checked by ear | human listener | `test_acceptance_voice_spot_check` |
+| Container build | CI `package` job | `test_acceptance_container_builds` |
+| UI parity + keyboard | Playwright e2e | `test_acceptance_ui_parity_and_keyboard` |
 
 Also verify by hand per SPEC §13: clone flow (upload → transcribe → save → usable by name on
 `/v1`), design flow (description → candidates → save), and UI parity with `ui/studio.html`.

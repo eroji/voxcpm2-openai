@@ -25,7 +25,16 @@ def _tone(seconds: float, note: int = 0) -> np.ndarray:
 
 class FakeEngine:
     def __init__(self) -> None:
-        self.state: dict[str, Any] = {"calls": 0, "active": 0, "max_active": 0, "last": None}
+        # "delay": seconds an input containing "slow" is held. Default 0.25; tests may widen it
+        # (M2-T13) so concurrency bursts overlap deterministically. "x_delay" in the request body
+        # overrides it per call (fake-only field, ignored by the real engine).
+        self.state: dict[str, Any] = {
+            "calls": 0,
+            "active": 0,
+            "max_active": 0,
+            "last": None,
+            "delay": 0.25,
+        }
         self.app = self._build()
         self.url = ""
         self._server: uvicorn.Server | None = None
@@ -46,7 +55,12 @@ class FakeEngine:
             self.state["active"] += 1
             self.state["max_active"] = max(self.state["max_active"], self.state["active"])
             try:
-                delay = 0.25 if "slow" in str(payload.get("input", "")).lower() else 0.02
+                if "x_delay" in payload:
+                    delay = float(payload["x_delay"])
+                elif "slow" in str(payload.get("input", "")).lower():
+                    delay = float(self.state["delay"])
+                else:
+                    delay = 0.02
                 await asyncio.sleep(delay)
                 note = abs(hash(str(payload.get("ref_text", "")))) % 4
                 if payload.get("stream"):
@@ -66,7 +80,7 @@ class FakeEngine:
 
         @app.post("/debug/reset")
         async def debug_reset() -> dict[str, str]:
-            self.state.update({"calls": 0, "active": 0, "max_active": 0, "last": None})
+            self.reset()
             return {"status": "reset"}
 
         return app
@@ -97,7 +111,7 @@ class FakeEngine:
             self._thread.join(timeout=5)
 
     def reset(self) -> None:
-        self.state.update({"calls": 0, "active": 0, "max_active": 0, "last": None})
+        self.state.update({"calls": 0, "active": 0, "max_active": 0, "last": None, "delay": 0.25})
 
 
 def read_wav_duration(data: bytes) -> float:

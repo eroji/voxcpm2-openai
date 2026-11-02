@@ -4,14 +4,15 @@ Every §13 bullet is either asserted here against the fake engine + temp data di
 or skipped with a reason naming the external blocker (Q-001 / M0 / CI / human
 ears). Mapping:
 
-- WAV 48 kHz + warm RTF ≤ 0.2      -> test_wav_48k_and_rtf
+- WAV 48 kHz + warm RTF ≤ 0.2      -> test_wav_48k_and_rtf (fake-engine plumbing smoke);
+                                      the 3090 RTF number -> test_hardware_rtf_and_vram (skipped)
 - Streamed PCM first chunk ≤ 300ms -> test_stream_first_chunk_and_total
 - Eight imported voices            -> test_import_eight_voices_synth (ear check skipped)
 - Warm-up before /ready            -> test_warm_start
 - Clone flow                       -> test_clone_flow
 - Design flow                      -> test_design_flow
 - LiteLLM/Open WebUI/Hermes/Wyoming-> skipped (external clients)
-- VRAM ≤ 10 GB / card sharing      -> skipped (needs nvidia-smi on the host)
+- VRAM ≤ 10 GB / card sharing      -> test_hardware_rtf_and_vram (skipped: host nvidia-smi)
 - Burst of 20: queue or clean 429  -> test_burst_queues_or_429s
 - UI matches ui/studio.html        -> static parts asserted, browser parity skipped
 """
@@ -74,7 +75,9 @@ def test_wav_48k_and_rtf(client: TestClient, library: Any) -> None:
     assert r.status_code == 200
     assert r.content[:4] == b"RIFF"
     assert int.from_bytes(r.content[24:28], "little") == 48000
-    # warm RTF (fake engine; the 3090 part is in the hardware skip)
+    # Smoke check only: RTF against the fake engine proves the X-RTF header plumbing,
+    # NOT the SPEC §13 hardware criterion — that is test_hardware_rtf_and_vram (skipped)
+    # and scripts/smoke.sh on the 3090 host.
     assert float(r.headers["X-RTF"]) <= 0.2
 
 
@@ -195,9 +198,14 @@ def test_design_flow(client: TestClient) -> None:
 # --- §13: burst / queueing ---------------------------------------------------------
 
 
-def test_burst_queues_or_429s(settings: Settings, library: Any) -> None:
+def test_burst_queues_or_429s(settings: Settings, library: Any, fake_engine: Any) -> None:
     with _client(settings, engine_concurrency=2, max_queue=16) as c:
         _until(lambda: c.get("/ready").status_code == 200)
+        # Hold each "slow" synth 1.0 s (instead of the 0.25 s default) so all 20
+        # barrier-released threads reach admission while the first 18 are still
+        # in flight — the 18-admitted/2-rejected split is deterministic even on
+        # a loaded runner, not a race against a 250 ms window.
+        fake_engine.state["delay"] = 1.0
         barrier = threading.Barrier(20, timeout=30)
 
         def fire(_: int) -> tuple[int, str | None]:
@@ -205,10 +213,13 @@ def test_burst_queues_or_429s(settings: Settings, library: Any) -> None:
             r = c.post("/v1/audio/speech", json={**BODY, "input": "slow and steady wins"})
             return r.status_code, r.headers.get("Retry-After")
 
-        with ThreadPoolExecutor(max_workers=20) as pool:
-            results = list(pool.map(fire, range(20)))
+        try:
+            with ThreadPoolExecutor(max_workers=20) as pool:
+                results = list(pool.map(fire, range(20)))
+        finally:
+            fake_engine.state["delay"] = 0.25
     codes = [code for code, _ in results]
-    assert all(code in (200, 429) for code in codes), codes
+    assert all(code in (200, 429) for code in codes), codes  # never 5xx
     assert codes.count(200) >= 18, codes  # 2 active + 16 queued (Q-016)
     assert 429 in codes, codes
     for code, retry_after in results:
@@ -269,11 +280,13 @@ def test_ui_assets_served(client: TestClient) -> None:
 
 
 @pytest.mark.skip(
-    reason="SPEC §13 VRAM ≤ 10 GB and whisper-stt/TEI card sharing need nvidia-smi on the "
-    "3090 host; unverifiable against the fake engine (Q-001 / M0)."
+    reason="SPEC §13 warm RTF ≤ 0.2 and VRAM ≤ 10 GB with whisper-stt/TEI sharing the card are "
+    "3090-host criteria: run scripts/smoke.sh (asserts X-RTF) and the nvidia-smi probe in "
+    "docs/RUNBOOK.md §3 on the host; unverifiable against the fake engine (Q-001 / M0)."
 )
-def test_acceptance_vram_and_card_sharing() -> None:
-    """Assert engine vram_used_mb ≤ 10240 via /api/engine on the real host."""
+def test_hardware_rtf_and_vram() -> None:
+    """Host probe: X-RTF ≤ 0.2 on a real synthesis (scripts/smoke.sh) and /api/engine
+    vram_used_mb ≤ 10240 from nvidia-smi on the shared 3090 (RUNBOOK §3)."""
 
 
 @pytest.mark.skip(

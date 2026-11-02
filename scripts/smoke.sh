@@ -67,7 +67,37 @@ c_speech_wav() {
     -d "{\"model\":\"tts-1\",\"voice\":\"$VOICE\",\"input\":\"Smoke test one two three.\",\"response_format\":\"wav\"}" \
     "$BASE_URL/v1/audio/speech" || return 1
   head -c 4 "$tmp/speech.wav" | grep -q RIFF || return 1
-  grep -qi '^x-sample-rate:[[:space:]]*48000' "$tmp/headers"
+  grep -qi '^x-sample-rate:[[:space:]]*48000' "$tmp/headers" || return 1
+  # SPEC §13 host criterion: warm RTF ≤ 0.2 on the real engine.
+  local rtf
+  rtf=$(grep -i '^x-rtf:' "$tmp/headers" | tr -dc '0-9.') || true
+  [ -n "$rtf" ] || { echo "X-RTF header missing"; return 1; }
+  awk -v r="$rtf" 'BEGIN { exit !(r + 0 <= 0.2) }' || { echo "X-RTF $rtf > 0.2"; return 1; }
+}
+
+c_queue() {
+  # Burst of 20 with the same auth as every other call. Capacity is 2 active +
+  # 16 queued (Q-016): expect 18x200 + 2x429 with Retry-After, never 5xx.
+  local i code n200=0 n429=0
+  for i in $(seq 20); do
+    v1 -s -m 60 -o /dev/null -w '%{http_code}' -D "$tmp/qh.$i" \
+      -H 'Content-Type: application/json' \
+      -d "{\"model\":\"tts-1\",\"voice\":\"$VOICE\",\"input\":\"Queue probe $i.\"}" \
+      "$BASE_URL/v1/audio/speech" >"$tmp/qc.$i" 2>/dev/null &
+  done
+  wait
+  for i in $(seq 20); do
+    code=$(cat "$tmp/qc.$i")
+    case "$code" in
+      200) n200=$((n200 + 1)) ;;
+      429)
+        n429=$((n429 + 1))
+        grep -qi '^retry-after:' "$tmp/qh.$i" || { echo "429 without Retry-After"; return 1; }
+        ;;
+      *) echo "burst request $i returned HTTP $code"; return 1 ;;
+    esac
+  done
+  [ "$n200" -ge 18 ] && [ "$n429" -ge 1 ] || { echo "burst: $n200 x200, $n429 x429"; return 1; }
 }
 
 c_stream_pcm() {
@@ -90,9 +120,10 @@ check "/health returns 200" c_health
 check "/ready returns 200 (warm-up done)" c_ready
 check "/v1/models lists voxcpm2" c_models
 check "/v1/audio/voices lists $VOICE" c_voices
-check "WAV speech: RIFF magic + X-Sample-Rate: 48000" c_speech_wav
+check "WAV speech: RIFF + X-Sample-Rate: 48000 + X-RTF ≤ 0.2" c_speech_wav
 check "streamed PCM bytes within 2 s" c_stream_pcm
 check "/api/engine reports ready:true" c_engine
+check "burst of 20: 18x200 + 429 with Retry-After, no 5xx" c_queue
 
 printf -- '----\n'
 printf 'smoke: %d passed, %d failed (%s, voice %s)\n' "$pass" "$fail" "$BASE_URL" "$VOICE"
