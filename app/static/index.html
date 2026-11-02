@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Voice Studio</title>
+<link rel="stylesheet" href="/static/tokens.css">
+<link rel="stylesheet" href="/static/studio.css">
+</head>
+<body>
+
+<header class="vs-header">
+  <div class="vs-brand-row">
+    <div class="vs-brand">
+      <span class="vs-mark" aria-hidden="true"></span>
+      <h1 class="vs-title">Voice Studio</h1>
+    </div>
+    <dl class="vs-meta">
+      <dt>Model</dt><dt>Engine</dt>
+      <dd>openbmb/VoxCPM2</dd><dd id="engine-status">…</dd>
+    </dl>
+  </div>
+  <nav class="vs-tabs" aria-label="Studio sections">
+    <button class="vs-tab" data-tab="speak" aria-current="page"><span class="num">01</span>Speak</button>
+    <button class="vs-tab" data-tab="voices"><span class="num">02</span>Voices</button>
+    <button class="vs-tab" data-tab="clone"><span class="num">03</span>Clone</button>
+    <button class="vs-tab" data-tab="design"><span class="num">04</span>Design</button>
+    <button class="vs-tab" data-tab="engine"><span class="num">05</span>Engine</button>
+  </nav>
+</header>
+
+<main class="vs-main">
+
+<!-- 01 SPEAK -->
+<div class="vs-screen" id="screen-speak">
+  <div class="vs-cols">
+    <section class="vs-col-main" aria-labelledby="speak-h">
+      <h2 class="vs-h2" id="speak-h">Synthesize</h2>
+      <div class="vs-row">
+        <span class="lbl" id="voice-lbl">Voice</span>
+        <div class="ctl vs-chips" role="group" aria-labelledby="voice-lbl" id="voice-chips"></div>
+      </div>
+      <div class="vs-row">
+        <label class="lbl" for="speak-text">Text</label>
+        <div class="ctl"><textarea class="vs-text" id="speak-text" rows="4"></textarea></div>
+      </div>
+      <div class="vs-row">
+        <label class="lbl" for="speak-style">Style control<span class="hint">Optional</span></label>
+        <div class="ctl"><input class="vs-input" id="speak-style" type="text" placeholder="calm, level, slightly brisk"></div>
+      </div>
+      <div class="vs-row">
+        <span class="lbl">Parameters</span>
+        <div class="ctl vs-grid-params">
+          <div class="vs-field"><label for="cfg">Guidance (CFG)</label><output class="vs-value" for="cfg" id="cfg-out">2.0</output><input id="cfg" type="range" min="1" max="4" step="0.1" value="2"></div>
+          <div class="vs-field"><label for="steps">Diffusion steps</label><output class="vs-value" for="steps" id="steps-out">10</output><input id="steps" type="range" min="4" max="30" step="1" value="10"></div>
+          <div class="vs-field"><label for="fmt">Format</label><select class="vs-select" id="fmt"><option value="wav">WAV · 48 kHz</option><option value="pcm">PCM stream</option><option value="mp3">MP3</option><option value="opus">Opus</option></select></div>
+        </div>
+      </div>
+      <p class="vs-error" id="speak-error" role="alert" hidden></p>
+      <div class="vs-actions">
+        <button class="vs-toggle" id="stream-toggle" aria-pressed="true"><span class="box" aria-hidden="true"></span>Stream audio</button>
+        <button class="btn-primary" id="generate">Generate</button>
+      </div>
+    </section>
+
+    <section class="vs-col-side" aria-labelledby="takes-h">
+      <div class="vs-head"><h2 class="vs-h2" id="takes-h">Takes</h2><span class="meta">This session</span></div>
+      <div id="takes-list"></div>
+    </section>
+  </div>
+</div>
+
+<!-- 02 VOICES -->
+<div class="vs-screen" id="screen-voices" hidden>
+  <section aria-labelledby="voices-h">
+    <div class="vs-head">
+      <h2 class="vs-h2" id="voices-h">Library <span class="count" id="voices-count">0</span></h2>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn-secondary" data-goto="clone">Clone from audio</button>
+        <button class="btn-primary" data-goto="design">Design a voice</button>
+      </div>
+    </div>
+    <div class="vs-toolbar">
+      <label class="sr" for="voice-search">Search voices</label>
+      <input class="vs-input" id="voice-search" type="search" placeholder="Search">
+      <div class="vs-filters" role="group" aria-label="Filter by language" id="lang-filters">
+        <button class="vs-filter" data-lang="all" aria-pressed="true">All</button>
+        <button class="vs-filter" data-lang="en" aria-pressed="false">English</button>
+        <button class="vs-filter" data-lang="ja" aria-pressed="false">Japanese</button>
+        <button class="vs-filter" data-lang="ko" aria-pressed="false">Korean</button>
+        <button class="vs-filter" data-lang="zh" aria-pressed="false">Chinese</button>
+      </div>
+    </div>
+    <p class="vs-error" id="voices-error" role="alert" hidden></p>
+    <div class="vs-table-wrap">
+      <table class="vs-table">
+        <thead><tr><th>Name</th><th>Language</th><th>Source</th><th>Reference</th><th>Transcript</th><th><span class="sr">Actions</span></th></tr></thead>
+        <tbody id="voice-rows"></tbody>
+      </table>
+    </div>
+  </section>
+</div>
+
+<!-- 03 CLONE -->
+<div class="vs-screen" id="screen-clone" hidden>
+  <div class="vs-cols">
+    <section class="vs-col-main" aria-labelledby="clone-h">
+      <h2 class="vs-h2" id="clone-h">Clone from a recording</h2>
+      <div class="vs-row">
+        <span class="lbl">Reference audio</span>
+        <label class="ctl vs-drop" id="drop-zone" for="ref-file">
+          <b>Drop a WAV, FLAC or MP3, or browse</b>
+          <span class="meta">5–20 seconds of clean, single-speaker speech</span>
+          <input class="sr" id="ref-file" type="file" accept="audio/*">
+        </label>
+      </div>
+      <div class="vs-row">
+        <label class="lbl" for="ref-text">Transcript<span class="hint">Exact words spoken</span></label>
+        <div class="ctl" style="display:flex;flex-direction:column;gap:10px;align-items:flex-start">
+          <textarea class="vs-text" id="ref-text" rows="3" placeholder="Paste or auto-fill the transcript"></textarea>
+          <button class="btn-link" id="auto-transcribe">Auto-transcribe with whisper-stt</button>
+        </div>
+      </div>
+      <div class="vs-row">
+        <label class="lbl" for="clone-name">Name</label>
+        <div class="ctl"><input class="vs-input" id="clone-name" type="text" placeholder="e.g. ashley-en"></div>
+      </div>
+      <div class="vs-row">
+        <label class="lbl" for="clone-lang">Language</label>
+        <div class="ctl"><select class="vs-select" id="clone-lang"><option value="en">English</option><option value="ja">Japanese</option><option value="ko">Korean</option><option value="zh">Chinese</option></select></div>
+      </div>
+      <p class="vs-error" id="clone-error" role="alert" hidden></p>
+      <div class="vs-actions">
+        <label style="display:flex;gap:10px;align-items:center;font-size:12px"><input type="checkbox" id="consent">I have the speaker’s consent to clone this voice</label>
+        <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn-secondary" id="test-line">Test a line</button><button class="btn-primary" id="save-voice">Save voice</button></div>
+      </div>
+    </section>
+    <aside class="vs-col-side vs-steps" aria-labelledby="clone-tips">
+      <h3 id="clone-tips">How cloning works</h3>
+      <p><b>1</b>  The clip and transcript are stored with the voice and sent as <code>ref_audio</code> and <code>ref_text</code> on every request. Callers pass only the voice name.</p>
+      <p><b>2</b>  An accurate transcript gives the highest similarity. Without one, VoxCPM2 falls back to reference-only cloning.</p>
+      <p><b>3</b>  Existing Qwen3 voices import directly: their stored audio and transcript carry over.</p>
+    </aside>
+  </div>
+</div>
+
+<!-- 04 DESIGN -->
+<div class="vs-screen" id="screen-design" hidden>
+  <div class="vs-cols">
+    <section class="vs-col-main" aria-labelledby="design-h">
+      <h2 class="vs-h2" id="design-h">Design from a description</h2>
+      <div class="vs-row">
+        <label class="lbl" for="design-desc">Description</label>
+        <div class="ctl" style="display:flex;flex-direction:column;gap:12px">
+          <textarea class="vs-text lg" id="design-desc" rows="3"></textarea>
+          <div id="design-tags" style="display:flex;flex-wrap:wrap;gap:6px">
+            <button class="btn-tag">+ calm</button><button class="btn-tag">+ warm</button><button class="btn-tag">+ bright</button><button class="btn-tag">+ low pitch</button><button class="btn-tag">+ brisk pace</button><button class="btn-tag">+ soft-spoken</button><button class="btn-tag">+ professional</button><button class="btn-tag">+ early 30s</button>
+          </div>
+        </div>
+      </div>
+      <div class="vs-row">
+        <span class="lbl">Options</span>
+        <div class="ctl vs-grid-params">
+          <div class="vs-field"><label for="design-lang">Language</label><select class="vs-select" id="design-lang"><option value="en">English</option><option value="ja">Japanese</option><option value="ko">Korean</option><option value="zh">Chinese</option></select></div>
+          <div class="vs-field"><label for="design-n">Candidates</label><select class="vs-select" id="design-n"><option>3</option><option>2</option><option>4</option></select></div>
+        </div>
+      </div>
+      <div class="vs-row">
+        <label class="lbl" for="design-sample">Sample line<span class="hint">Saved as the reference transcript</span></label>
+        <div class="ctl"><textarea class="vs-text" id="design-sample" rows="2" style="font-size:14px"></textarea></div>
+      </div>
+      <p class="vs-error" id="design-error" role="alert" hidden></p>
+      <div class="vs-actions" style="justify-content:flex-end"><button class="btn-primary" id="generate-candidates">Generate candidates</button></div>
+    </section>
+    <section class="vs-col-side" aria-labelledby="cand-h">
+      <h2 class="vs-h2" id="cand-h">Candidates</h2>
+      <div id="candidates"></div>
+      <div class="vs-actions" style="justify-content:flex-start">
+        <label class="sr" for="design-name">New voice name</label>
+        <input class="vs-input" id="design-name" type="text" style="flex:1 1 160px;width:auto;font-weight:700">
+        <button class="btn-primary" id="save-designed">Save as voice</button>
+      </div>
+    </section>
+  </div>
+</div>
+
+<!-- 05 ENGINE -->
+<div class="vs-screen" id="screen-engine" hidden>
+  <section aria-labelledby="engine-h">
+    <div class="vs-head">
+      <h2 class="vs-h2" id="engine-h">Engine</h2>
+      <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn-secondary" id="run-warmup">Run warm-up</button><button class="btn-inverse" id="restart-engine">Restart engine</button></div>
+    </div>
+    <p class="vs-error" id="engine-error" role="alert" hidden></p>
+    <div class="vs-stats" id="engine-stats"></div>
+    <div class="vs-row" style="border-top:none;padding-top:16px">
+      <h3 class="lbl" style="margin:0">Endpoint</h3>
+      <div class="ctl vs-code" id="engine-endpoint"><pre>POST /v1/audio/speech
+{ "model": "voxcpm2", "voice": "…",
+  "input": "…", "instructions": "calm, level",
+  "response_format": "pcm", "stream": true }</pre></div>
+    </div>
+  </section>
+</div>
+
+</main>
+
+<script type="module" src="/static/js/core.js"></script>
+<script type="module" src="/static/js/speak.js"></script>
+<script type="module" src="/static/js/voices.js"></script>
+<script type="module" src="/static/js/clone.js"></script>
+<script type="module" src="/static/js/design.js"></script>
+<script type="module" src="/static/js/engine.js"></script>
+</body>
+</html>
