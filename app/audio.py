@@ -40,6 +40,19 @@ def read_audio_file(path: str | Path) -> tuple[np.ndarray, int]:
     return read_audio(Path(path).read_bytes())
 
 
+def decode_any(data: bytes) -> tuple[np.ndarray, int]:
+    """Decode any container: libsndfile first, ffmpeg pipe as fallback.
+
+    libsndfile cannot decode streamed FLAC (unknown-length chunks), so those
+    bytes go through ``ffmpeg -i pipe:0 -f wav pipe:1``. Raises ``RuntimeError``
+    with the ffmpeg stderr when both decoders fail.
+    """
+    try:
+        return read_audio(data)
+    except Exception:  # noqa: BLE001 - container unsupported by libsndfile
+        return read_audio(_run_ffmpeg(["-i", "pipe:0", "-f", "wav", "pipe:1"], data))
+
+
 def info_duration_s(data: bytes) -> float:
     """Duration from the container header only — cheap enough to check before a full decode."""
     info = sf.info(io.BytesIO(data))

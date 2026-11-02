@@ -1,16 +1,43 @@
-"""M2-T3: /api/speak + /api/takes — take persistence, streaming, wave, save-as-voice."""
+"""M2-T3/M2-T11: /api/speak + /api/takes — persistence, streaming, wave, save-as-voice."""
 
 from __future__ import annotations
 
 import time
 from typing import Any
 
+import numpy as np
+import pytest
 from app import audio
 
 
 def _speak(client: Any, **fields: Any) -> Any:
-    body = {"voice": "ashley-en", "input": "hello there", **fields}
+    body = {"model": "voxcpm2", "voice": "ashley-en", "input": "hello there", **fields}
     return client.post("/api/speak", json=body)
+
+
+def _wait_for_take(client: Any, take_id: str, timeout: float = 5.0) -> dict[str, Any]:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        items = client.get("/api/takes").json()["takes"]
+        hit = next((item for item in items if item["id"] == take_id), None)
+        if hit is not None:
+            return hit
+        time.sleep(0.05)
+    raise AssertionError(f"take {take_id} was never saved")
+
+
+def _keyed_voice(store: Any) -> Any:
+    """Voice whose display name differs from its lookup key (SPEC §5 name vs key)."""
+    t = np.linspace(0, 1.0, 24000, endpoint=False)
+    return store.create(
+        "Qwen A",
+        (0.3 * np.sin(2 * np.pi * 220 * t)).astype(np.float32),
+        24000,
+        ref_text="Thanks for waiting. Everything checks out.",
+        language="ja",
+        consent="uploaded-via-studio",
+        key="qwen-a",
+    )
 
 
 def test_speak_non_stream_returns_take_info(client: Any, library: Any) -> None:
@@ -54,22 +81,17 @@ def test_speak_stream_advertises_take_and_saves_it(client: Any, library: Any) ->
     assert resp.headers["X-Sample-Rate"] == "48000"
     assert len(resp.content) % 2 == 0
     pcm_duration = len(resp.content) / 2 / 48000
-    assert abs(pcm_duration - 0.6) < 0.05
 
-    deadline = time.time() + 3.0
-    while time.time() < deadline:
-        items = client.get("/api/takes").json()["takes"]
-        if any(item["id"] == take_id for item in items):
-            break
-        time.sleep(0.05)
-    take = next(item for item in items if item["id"] == take_id)
+    take = _wait_for_take(client, take_id)
     assert abs(take["duration_s"] - pcm_duration) < 0.01
     assert take["language"] == "en"
     assert take["text"] == "hello there"
 
 
 def test_speak_rejects_too_long_input(client: Any, library: Any) -> None:
-    resp = client.post("/api/speak", json={"voice": "ashley-en", "input": "x" * 4001})
+    resp = client.post(
+        "/api/speak", json={"model": "voxcpm2", "voice": "ashley-en", "input": "x" * 4001}
+    )
     assert resp.status_code == 400
     assert "input" in resp.json()["error"]["message"]
 
@@ -124,3 +146,45 @@ def test_unknown_take_404_on_every_route(client: Any, library: Any) -> None:
         client.post("/api/takes/nosuchtake/save-as-voice", json={"name": "x1", "language": "en"}),
     ):
         assert resp.status_code == 404
+
+
+def test_take_language_resolved_by_key_non_stream(client: Any, library: Any, store: Any) -> None:
+    _keyed_voice(store)
+    resp = _speak(client, voice="qwen-a")
+    assert resp.status_code == 200
+    assert resp.json()["language"] == "ja"
+
+
+def test_take_language_resolved_by_key_stream(client: Any, library: Any, store: Any) -> None:
+    _keyed_voice(store)
+    resp = _speak(client, voice="qwen-a", stream=True)
+    assert resp.status_code == 200
+    assert resp.headers["X-Voice"] == "qwen-a"
+    take = _wait_for_take(client, resp.headers["X-Take-Id"])
+    assert take["language"] == "ja"
+
+
+def test_take_is_native_rate_despite_rate_and_speed(client: Any, library: Any) -> None:
+    # SPEC §5: takes are 48 kHz WAVs; caller sample_rate/speed never reach disk.
+    take = _speak(client, sample_rate=24000, speed=2.0).json()
+    samples, rate = audio.read_audio(client.get(take["audio_url"]).content)
+    assert rate == 48000
+    assert abs(take["duration_s"] - 0.6) < 0.05
+
+
+@pytest.mark.parametrize("fmt", ["pcm", "wav", "mp3", "opus", "flac"])
+def test_every_streamed_format_saves_a_take(client: Any, library: Any, fmt: str) -> None:
+    resp = _speak(client, stream=True, response_format=fmt)
+    assert resp.status_code == 200
+    take = _wait_for_take(client, resp.headers["X-Take-Id"])
+    samples, rate = audio.read_audio(client.get(take["audio_url"]).content)
+    assert rate == 48000
+    assert abs(audio.duration_s(samples, rate) - 0.6) < 0.1
+
+
+def test_configured_max_input_chars_guard(client: Any, library: Any, settings: Any) -> None:
+    # The SpeechRequest 4000-char cap must not mask the configured limit.
+    settings.max_input_chars = 10
+    resp = _speak(client, input="x" * 11)
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == "input_too_long"
