@@ -80,12 +80,11 @@ async def test_synth(fake_engine: Any) -> None:
 async def test_stream(fake_engine: Any) -> None:
     engine = EngineClient(fake_engine.url)
     await engine.start()
-    chunks = [
-        chunk
-        async for chunk in engine.stream(
-            SynthParams(text="hi", ref_audio="data:,", fmt="pcm", stream=True)
-        )
-    ]
+    handle = await engine.open_stream(
+        SynthParams(text="hi", ref_audio="data:,", fmt="pcm", stream=True)
+    )
+    chunks = [chunk async for chunk in handle.chunks]
+    await handle.aclose()  # idempotent after exhaustion
     assert len(chunks) >= 2
     pcm = b"".join(chunks)
     assert len(pcm) % 2 == 0

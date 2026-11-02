@@ -3,7 +3,10 @@
 Contract frozen for wave 2+:
 
 - ``synth`` returns the engine's WAV bytes and records rolling metrics.
-- ``stream`` yields normalized s16le mono PCM at 48 kHz.
+- ``open_stream`` admits the request (queue/readiness) **before** returning a
+  ``StreamHandle`` so 429/503 reach the router before response headers; the
+  handle yields normalized s16le mono PCM at 48 kHz and releases the slot
+  exactly once on exhaustion, cancel or ``aclose()``.
 - Concurrency is capped at ``settings.engine_concurrency``; at most
   ``settings.max_queue`` requests wait, then ``QueueFull`` (HTTP 429).
 - ``ready`` mirrors the last ``/health`` result. Warm-up is owned by
@@ -20,7 +23,7 @@ import shutil
 import subprocess
 import time
 from collections import deque
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version
@@ -76,6 +79,18 @@ class EngineStats:
     rtf: float | None
     first_audio_ms: float | None
     queue_depth: int
+
+
+@dataclass(slots=True)
+class StreamHandle:
+    """A live engine stream.
+
+    ``chunks`` yields s16le mono 48 kHz and releases the engine slot in its
+    ``finally``; ``aclose`` is idempotent and safe after exhaustion.
+    """
+
+    chunks: AsyncIterator[bytes]
+    aclose: Callable[[], Awaitable[None]]
 
 
 class EngineClient:
@@ -171,7 +186,10 @@ class EngineClient:
             started = time.perf_counter()
             resp = await self._post(params, stream=False)
             wall = time.perf_counter() - started
-        samples, rate = read_audio(resp.content)
+        try:
+            samples, rate = read_audio(resp.content)
+        except Exception as exc:  # noqa: BLE001 - undecodable upstream body
+            raise EngineError(f"engine returned undecodable audio: {exc}") from exc
         dur = duration_s(samples, rate)
         rtf = wall / dur if dur > 0 else None
         # First-audio latency is meaningful for streaming only (SPEC §4).
@@ -184,17 +202,73 @@ class EngineClient:
             first_audio_ms=None,
         )
 
-    def stream(self, params: SynthParams) -> AsyncIterator[bytes]:
-        return self._stream(params)
+    async def open_stream(self, params: SynthParams) -> StreamHandle:
+        """Admit the request (queue/readiness) *before* returning, then open the stream.
+
+        Admission raises ``QueueFull``/``EngineNotReady`` here — never after the
+        router has already sent ``200`` (SPEC §4/§6). The slot is held by the
+        returned handle and released exactly once when its chunks finish.
+        """
+        await self._acquire()
+        try:
+            await self._ensure_ready()
+            resp = await self._post(params, stream=True)
+        except BaseException:
+            # _post closes any error response it received before raising.
+            self._release()
+            raise
+
+        released = False
+
+        async def aclose() -> None:
+            nonlocal released
+            if released:
+                return
+            released = True
+            with contextlib.suppress(Exception):
+                await resp.aclose()
+            self._release()
+
+        async def chunks() -> AsyncIterator[bytes]:
+            """Engine streams s16le mono 48 kHz (SPEC §6); pass it through unchanged."""
+            started = time.perf_counter()
+            first_ms: float | None = None
+            total = 0
+            try:
+                buf = bytearray()
+                try:
+                    async for raw in resp.aiter_bytes():
+                        buf += raw
+                        frames = len(buf) - len(buf) % 2
+                        if frames == 0:
+                            continue
+                        out = bytes(buf[:frames])
+                        del buf[:frames]
+                        if first_ms is None:
+                            first_ms = (time.perf_counter() - started) * 1000.0
+                        total += len(out)
+                        yield out
+                except httpx.HTTPError as exc:
+                    raise EngineError(f"engine stream failed: {exc}") from exc
+                wall = time.perf_counter() - started
+                dur = total / 2 / _SAMPLE_RATE
+                self._record(wall / dur if dur > 0 else None, first_ms)
+            finally:
+                await aclose()
+
+        return StreamHandle(chunks=chunks(), aclose=aclose)
 
     async def restart(self) -> None:
-        proc = await asyncio.create_subprocess_exec(
-            "s6-svc",
-            "-r",
-            f"{self.service_dir}/{self.s6_service}",
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.PIPE,
-        )
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "s6-svc",
+                "-r",
+                f"{self.service_dir}/{self.s6_service}",
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
+            )
+        except OSError as exc:
+            raise EngineError(f"cannot run s6-svc: {exc}") from exc
         try:
             _, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
         except TimeoutError:
@@ -232,8 +306,7 @@ class EngineClient:
             await self.health()
             await asyncio.sleep(2.0)
 
-    @asynccontextmanager
-    async def _slot(self) -> AsyncIterator[None]:
+    async def _acquire(self) -> None:
         if self._sem.locked() and self._waiting >= self.max_queue:
             raise QueueFull()
         self._waiting += 1
@@ -241,10 +314,17 @@ class EngineClient:
             await self._sem.acquire()
         finally:
             self._waiting -= 1
+
+    def _release(self) -> None:
+        self._sem.release()
+
+    @asynccontextmanager
+    async def _slot(self) -> AsyncIterator[None]:
+        await self._acquire()
         try:
             yield
         finally:
-            self._sem.release()
+            self._release()
 
     async def _ensure_ready(self) -> None:
         if not self._ready:
@@ -282,16 +362,19 @@ class EngineClient:
         client = self._http()
         body = self._payload(params, cfg_steps=self._supports_cfg_steps)
         while True:
-            if stream:
-                request = client.build_request("POST", _SPEECH_PATH, json=body)
-                resp = await client.send(request, stream=True)
-            else:
-                resp = await client.post(_SPEECH_PATH, json=body)
+            try:
+                if stream:
+                    request = client.build_request("POST", _SPEECH_PATH, json=body)
+                    resp = await client.send(request, stream=True)
+                else:
+                    resp = await client.post(_SPEECH_PATH, json=body)
+            except httpx.HTTPError as exc:
+                raise EngineError(f"engine request failed: {exc}") from exc
             if resp.status_code < 400:
                 return resp
             message = await _error_message(resp)
             rejected = (
-                resp.status_code < 500
+                resp.status_code in (400, 415, 422)  # only a schema rejection (Q-004)
                 and self._supports_cfg_steps
                 and ("cfg" in body or "steps" in body)
             )
@@ -306,33 +389,6 @@ class EngineClient:
                 body = self._payload(params, cfg_steps=False)
                 continue
             raise EngineError(message)
-
-    async def _stream(self, params: SynthParams) -> AsyncIterator[bytes]:
-        """Engine streams s16le mono 48 kHz (SPEC §6); pass it through unchanged."""
-        async with self._slot():
-            await self._ensure_ready()
-            started = time.perf_counter()
-            resp = await self._post(params, stream=True)
-            first_ms: float | None = None
-            total = 0
-            try:
-                buf = bytearray()
-                async for raw in resp.aiter_raw():
-                    buf += raw
-                    frames = len(buf) - len(buf) % 2
-                    if frames == 0:
-                        continue
-                    out = bytes(buf[:frames])
-                    del buf[:frames]
-                    if first_ms is None:
-                        first_ms = (time.perf_counter() - started) * 1000.0
-                    total += len(out)
-                    yield out
-            finally:
-                await resp.aclose()
-            wall = time.perf_counter() - started
-        dur = total / 2 / _SAMPLE_RATE
-        self._record(wall / dur if dur > 0 else None, first_ms)
 
     def _record(self, rtf: float | None, first_ms: float | None) -> None:
         if rtf is not None:

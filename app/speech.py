@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import struct
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from dataclasses import dataclass
 
 from app import audio as audio_utils
 from app.config import Settings
-from app.engine import EngineClient, SynthParams
+from app.engine import EngineClient, StreamHandle, SynthParams
 from app.errors import BadRequest, EngineError
 from app.models import SpeechRequest
 from app.store import VoiceStore
@@ -102,7 +103,7 @@ def _ffmpeg_args(fmt: str, sample_rate_in: int, sample_rate_out: int) -> list[st
 
 
 async def ffmpeg_stream(
-    chunks: AsyncIterator[bytes], sample_rate_in: int, sample_rate_out: int, fmt: str
+    chunks: AsyncGenerator[bytes, None], sample_rate_in: int, sample_rate_out: int, fmt: str
 ) -> AsyncIterator[bytes]:
     proc = await asyncio.create_subprocess_exec(
         *_ffmpeg_args(fmt, sample_rate_in, sample_rate_out),
@@ -133,12 +134,30 @@ async def ffmpeg_stream(
             if not out:
                 break
             yield out
-    finally:
-        await feeder
+        # Normal end of stream: stdout hit EOF, so ffmpeg is finishing; safe to join.
+        feed_result = (await asyncio.gather(feeder, return_exceptions=True))[0]
+        if proc.returncode is None:
+            await proc.wait()
         stderr = await stderr_pipe.read()
-        code = await proc.wait()
-        if code != 0:
+        if isinstance(feed_result, Exception):
+            raise feed_result
+        if proc.returncode != 0:
             raise EngineError(f"ffmpeg stream failed: {stderr.decode('utf-8', 'replace')[:500]}")
+    finally:
+        # Client disconnect / cancel: never `await feeder` while stdout is unread —
+        # ffmpeg would block on a full stdout pipe and the engine slot would leak.
+        if not feeder.done():
+            feeder.cancel()
+        with contextlib.suppress(BaseException):
+            await asyncio.gather(feeder, return_exceptions=True)
+        if proc.returncode is None:
+            proc.kill()
+        with contextlib.suppress(Exception):
+            await proc.wait()
+        with contextlib.suppress(Exception):
+            await stderr_pipe.read()
+        with contextlib.suppress(Exception):
+            await chunks.aclose()
 
 
 class SpeechService:
@@ -236,7 +255,8 @@ class SpeechService:
 
         voice = self.resolve(request)
         target_rate = request.sample_rate or self.settings.sample_rate
-        source = self.engine.stream(self._params(request, voice, stream=True))
+        handle = await self.engine.open_stream(self._params(request, voice, stream=True))
+        source = self._hold(handle)
         fmt = request.response_format
 
         if fmt == "pcm" and target_rate == self.settings.sample_rate:
@@ -253,9 +273,21 @@ class SpeechService:
             chunks=chunks,
         )
 
+    @staticmethod
+    async def _hold(handle: StreamHandle) -> AsyncGenerator[bytes, None]:
+        """Pass chunks through, guaranteeing the engine slot is released on any exit."""
+        try:
+            async for chunk in handle.chunks:
+                yield chunk
+        finally:
+            await handle.aclose()
+
     async def _wav_native(
-        self, source: AsyncIterator[bytes], sample_rate: int
+        self, source: AsyncGenerator[bytes, None], sample_rate: int
     ) -> AsyncIterator[bytes]:
         yield wav_stream_header(sample_rate)
-        async for chunk in source:
-            yield chunk
+        try:
+            async for chunk in source:
+                yield chunk
+        finally:
+            await source.aclose()
