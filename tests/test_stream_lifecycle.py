@@ -30,7 +30,8 @@ async def test_queue_full_raised_before_headers(fake_engine: Any) -> None:
     with pytest.raises(QueueFull):
         await engine.open_stream(SynthParams(text="next", fmt="pcm", stream=True))
     await held.aclose()
-    assert engine.stats().queue_depth == 0
+    result = await asyncio.wait_for(engine.synth(SynthParams(text="hi")), timeout=2.0)
+    assert result.audio  # aclose returned the slot
     await engine.aclose()
 
 
@@ -38,7 +39,7 @@ async def test_engine_not_ready_raised_before_headers() -> None:
     engine = EngineClient(_closed_port_url())
     with pytest.raises(EngineNotReady):
         await engine.open_stream(SynthParams(text="hi", fmt="pcm", stream=True))
-    assert engine.stats().queue_depth == 0  # the failed admission released the slot
+    assert engine._sem._value == engine.concurrency  # the failed admission released the slot
     await engine.aclose()
 
 
@@ -106,10 +107,42 @@ async def test_transport_error_mid_body() -> None:
         with pytest.raises(EngineError):
             async for _ in handle.chunks:
                 pass
-        assert engine.stats().queue_depth == 0  # slot released even on failure
+        assert engine._sem._value == engine.concurrency  # slot released even on failure
         await engine.aclose()
     finally:
         sock.close()
+        thread.join(timeout=5)
+
+
+async def test_unrelated_400_does_not_disable_cfg_steps() -> None:
+    calls: list[dict[str, Any]] = []
+    app = FastAPI()
+
+    @app.get("/health")
+    async def health() -> dict[str, str]:
+        return {"status": "ok"}
+
+    @app.post("/v1/audio/speech")
+    async def speech(request: Request) -> Response:
+        body = await request.json()
+        calls.append(body)
+        if len(calls) == 1:
+            return JSONResponse({"error": {"message": "input too long"}}, status_code=400)
+        t = np.linspace(0, 0.6, int(SAMPLE_RATE * 0.6), endpoint=False)
+        tone = (0.2 * np.sin(2 * np.pi * 220 * t)).astype(np.float32)
+        return Response(wav_bytes(tone, SAMPLE_RATE), media_type="audio/wav")
+
+    url, server, thread = _serve(app)
+    try:
+        engine = EngineClient(url)
+        await engine.start()
+        with pytest.raises(EngineError):  # an unrelated 400 is a 502, not a schema error
+            await engine.synth(SynthParams(text="hi", cfg=2.0, steps=4))
+        await engine.synth(SynthParams(text="hi", cfg=2.0, steps=4))
+        assert "cfg" in calls[1] and "steps" in calls[1]  # knobs were never disabled
+        await engine.aclose()
+    finally:
+        server.should_exit = True
         thread.join(timeout=5)
 
 

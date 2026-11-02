@@ -210,6 +210,7 @@ class EngineClient:
         returned handle and released exactly once when its chunks finish.
         """
         await self._acquire()
+        started = time.perf_counter()  # includes the engine's pre-header latency
         try:
             await self._ensure_ready()
             resp = await self._post(params, stream=True)
@@ -225,13 +226,16 @@ class EngineClient:
             if released:
                 return
             released = True
-            with contextlib.suppress(Exception):
-                await resp.aclose()
-            self._release()
+            try:
+                with contextlib.suppress(Exception):
+                    await resp.aclose()
+            finally:
+                # CancelledError is a BaseException: the slot must come back
+                # even when resp.aclose() is interrupted.
+                self._release()
 
         async def chunks() -> AsyncIterator[bytes]:
             """Engine streams s16le mono 48 kHz (SPEC §6); pass it through unchanged."""
-            started = time.perf_counter()
             first_ms: float | None = None
             total = 0
             try:
@@ -273,6 +277,7 @@ class EngineClient:
             _, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
         except TimeoutError:
             proc.kill()
+            await proc.wait()  # reap, no zombie
             raise EngineError("engine restart timed out after 30 s") from None
         if proc.returncode != 0:
             detail = stderr.decode("utf-8", "replace").strip()[:300] if stderr else ""
@@ -373,10 +378,12 @@ class EngineClient:
             if resp.status_code < 400:
                 return resp
             message = await _error_message(resp)
+            lowered = message.lower()
             rejected = (
                 resp.status_code in (400, 415, 422)  # only a schema rejection (Q-004)
                 and self._supports_cfg_steps
                 and ("cfg" in body or "steps" in body)
+                and ("cfg" in lowered or "steps" in lowered)  # never on an unrelated 4xx
             )
             await resp.aclose()
             if rejected:

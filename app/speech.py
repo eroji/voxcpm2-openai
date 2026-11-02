@@ -14,10 +14,12 @@ from app.config import Settings
 from app.engine import EngineClient, StreamHandle, SynthParams
 from app.errors import BadRequest, EngineError
 from app.models import SpeechRequest
-from app.store import VoiceStore
+from app.store import VoiceNotFound, VoiceStore
 
 logger = logging.getLogger(__name__)
 _speed_stream_logged = False
+
+ENGINE_SAMPLE_RATE = 48000  # engine-native stream rate (SPEC §6); SAMPLE_RATE is output-only
 
 
 @dataclass(slots=True)
@@ -103,61 +105,76 @@ def _ffmpeg_args(fmt: str, sample_rate_in: int, sample_rate_out: int) -> list[st
 
 
 async def ffmpeg_stream(
-    chunks: AsyncGenerator[bytes, None], sample_rate_in: int, sample_rate_out: int, fmt: str
+    handle: StreamHandle, sample_rate_in: int, sample_rate_out: int, fmt: str
 ) -> AsyncIterator[bytes]:
-    proc = await asyncio.create_subprocess_exec(
-        *_ffmpeg_args(fmt, sample_rate_in, sample_rate_out),
-        stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    stdin, stdout, stderr_pipe = proc.stdin, proc.stdout, proc.stderr
-    if stdin is None or stdout is None or stderr_pipe is None:
-        raise EngineError("ffmpeg pipes unavailable")
+    """Transcode the engine stream through ffmpeg.
 
-    async def feed() -> None:
-        try:
-            async for chunk in chunks:
-                stdin.write(chunk)
-                await stdin.drain()
-        except Exception as exc:  # noqa: BLE001 - propagate to the reader below
-            proc.kill()
-            raise exc
-        finally:
-            if not stdin.is_closing():
-                stdin.close()
-
-    feeder = asyncio.create_task(feed())
+    Spawns eagerly so a spawn/pipe failure releases the engine slot and raises
+    ``EngineError`` before the router sends headers; the returned generator
+    owns the handle and closes it on any exit.
+    """
     try:
-        while True:
-            out = await stdout.read(8192)
-            if not out:
-                break
-            yield out
-        # Normal end of stream: stdout hit EOF, so ffmpeg is finishing; safe to join.
-        feed_result = (await asyncio.gather(feeder, return_exceptions=True))[0]
-        if proc.returncode is None:
-            await proc.wait()
-        stderr = await stderr_pipe.read()
-        if isinstance(feed_result, Exception):
-            raise feed_result
-        if proc.returncode != 0:
-            raise EngineError(f"ffmpeg stream failed: {stderr.decode('utf-8', 'replace')[:500]}")
-    finally:
-        # Client disconnect / cancel: never `await feeder` while stdout is unread —
-        # ffmpeg would block on a full stdout pipe and the engine slot would leak.
-        if not feeder.done():
-            feeder.cancel()
-        with contextlib.suppress(BaseException):
-            await asyncio.gather(feeder, return_exceptions=True)
-        if proc.returncode is None:
-            proc.kill()
-        with contextlib.suppress(Exception):
-            await proc.wait()
-        with contextlib.suppress(Exception):
-            await stderr_pipe.read()
-        with contextlib.suppress(Exception):
-            await chunks.aclose()
+        args = _ffmpeg_args(fmt, sample_rate_in, sample_rate_out)
+        proc = await asyncio.create_subprocess_exec(
+            *args,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdin, stdout, stderr_pipe = proc.stdin, proc.stdout, proc.stderr
+        if stdin is None or stdout is None or stderr_pipe is None:
+            raise EngineError("ffmpeg pipes unavailable")
+    except Exception as exc:  # noqa: BLE001 - ffmpeg missing or pipes refused
+        await handle.aclose()
+        raise EngineError(f"cannot start ffmpeg: {exc}") from exc
+
+    async def pump() -> AsyncIterator[bytes]:
+        async def feed() -> None:
+            try:
+                async for chunk in handle.chunks:
+                    stdin.write(chunk)
+                    await stdin.drain()
+            except Exception as exc:  # noqa: BLE001 - propagate to the reader below
+                proc.kill()
+                raise exc
+            finally:
+                if not stdin.is_closing():
+                    stdin.close()
+
+        feeder = asyncio.create_task(feed())
+        try:
+            while True:
+                out = await stdout.read(8192)
+                if not out:
+                    break
+                yield out
+            # Normal end of stream: stdout hit EOF, so ffmpeg is finishing; safe to join.
+            feed_result = (await asyncio.gather(feeder, return_exceptions=True))[0]
+            if proc.returncode is None:
+                await proc.wait()
+            stderr = await stderr_pipe.read()
+            if isinstance(feed_result, Exception):
+                raise feed_result
+            if proc.returncode != 0:
+                raise EngineError(
+                    f"ffmpeg stream failed: {stderr.decode('utf-8', 'replace')[:500]}"
+                )
+        finally:
+            # Client disconnect / cancel: never `await feeder` while stdout is unread —
+            # ffmpeg would block on a full stdout pipe and the engine slot would leak.
+            if not feeder.done():
+                feeder.cancel()
+            with contextlib.suppress(BaseException):
+                await asyncio.gather(feeder, return_exceptions=True)
+            if proc.returncode is None:
+                proc.kill()
+            with contextlib.suppress(Exception):
+                await proc.wait()
+            with contextlib.suppress(Exception):
+                await stderr_pipe.read()
+            await handle.aclose()
+
+    return pump()
 
 
 class SpeechService:
@@ -200,7 +217,12 @@ class SpeechService:
     def resolve(self, request: SpeechRequest) -> ResolvedVoice:
         if request.ref_audio:
             return self._resolve_adhoc(request)
-        voice = self.store.get(request.voice)
+        try:
+            voice = self.store.get(request.voice)
+        except VoiceNotFound as exc:
+            # /v1 and /api/speak answer 400 with the valid names (SPEC §6);
+            # /api/voices/{name} keeps its 404 because it uses the store directly.
+            raise BadRequest(str(exc), param="voice", code="voice_not_found") from exc
         return ResolvedVoice(
             name=voice.name,
             ref_audio=self.store.data_uri(voice.key),
@@ -227,15 +249,20 @@ class SpeechService:
     async def synthesize(self, request: SpeechRequest) -> SpeechResult:
         voice = self.resolve(request)
         result = await self.engine.synth(self._params(request, voice, stream=False))
-        samples, sample_rate = audio_utils.read_audio(result.audio)
-        target_rate = request.sample_rate or self.settings.sample_rate
-        encoded = audio_utils.transcode(
-            samples,
-            sample_rate,
-            request.response_format,
-            target_rate=target_rate,
-            speed=request.speed,
-        )
+        try:
+            samples, sample_rate = audio_utils.read_audio(result.audio)
+            target_rate = request.sample_rate or self.settings.sample_rate
+            encoded = audio_utils.transcode(
+                samples,
+                sample_rate,
+                request.response_format,
+                target_rate=target_rate,
+                speed=request.speed,
+            )
+        except EngineError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - undecodable audio or transcode failure
+            raise EngineError(f"audio conversion failed: {exc}") from exc
         duration = audio_utils.duration_s(samples, sample_rate) / max(request.speed, 0.01)
         return SpeechResult(
             audio=encoded,
@@ -259,12 +286,12 @@ class SpeechService:
         source = self._hold(handle)
         fmt = request.response_format
 
-        if fmt == "pcm" and target_rate == self.settings.sample_rate:
+        if fmt == "pcm" and target_rate == ENGINE_SAMPLE_RATE:
             chunks: AsyncIterator[bytes] = source
-        elif fmt == "wav" and target_rate == self.settings.sample_rate:
-            chunks = self._wav_native(source, target_rate)
+        elif fmt == "wav" and target_rate == ENGINE_SAMPLE_RATE:
+            chunks = self._wav_native(source, ENGINE_SAMPLE_RATE)
         else:
-            chunks = ffmpeg_stream(source, self.settings.sample_rate, target_rate, fmt)
+            chunks = await ffmpeg_stream(handle, ENGINE_SAMPLE_RATE, target_rate, fmt)
 
         return StreamingSpeech(
             voice=voice.name,
