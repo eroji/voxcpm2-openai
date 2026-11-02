@@ -1,6 +1,6 @@
 # Progress
 
-**Current wave:** 5 — API + Studio completion
+**Current wave:** 6 — wave-5 review fixes
 **Resume:** `scripts/verify.sh` then `/dispatch 1`
 
 ## Task table
@@ -14,10 +14,10 @@
 | 1 | M2-T1 importer | pass | `pytest tests/test_importer.py` | |
 | 1 | M3-T1 UI shell | pass | `pytest tests/test_ui_assets.py` | |
 | 1 | M5-T1 runbook + smoke | pass | `bash -n scripts/smoke.sh` | |
-| 5 | M1-T10 warm-up/voice/shutdown fixes (review) | wip | `pytest tests/test_warmup.py` | |
-| 5 | M2-T10 store rebuild test (review) | wip | `pytest tests/test_store.py` | |
-| 5 | M3-T8 clone gating + status CSS (review) | wip | `pytest tests/test_ui_assets.py` | |
-| 5 | M1-T2 `/v1` | todo | `pytest tests/test_v1.py tests/test_streaming.py` | |
+| 5 | M1-T10 warm-up/voice/shutdown fixes (review) | pass | `pytest tests/test_warmup.py` | |
+| 5 | M2-T10 store rebuild test (review) | pass | `pytest tests/test_store.py` | |
+| 5 | M3-T8 clone gating + status CSS (review) | pass | `pytest tests/test_ui_assets.py` | |
+| 5 | M1-T2 `/v1` | pass | `pytest tests/test_v1.py tests/test_streaming.py` | |
 | 4 | M1-T9 StreamingSpeech ownership (review) | pass | `pytest tests/test_speech.py` | BLOCKER fix |
 | 4 | M2-T9 voice keys + cache cap (review) | pass | `pytest tests/test_store.py` | |
 | 4 | M3-T7 screen contract/lifecycle fixes (review) | pass | `pytest tests/test_ui_assets.py` | |
@@ -28,10 +28,10 @@
 | 2 | M3-T0 UI shell fixes (review) | pass | `pytest tests/test_ui_assets.py` | |
 | 2 | M5-T3 runbook/smoke fixes (review) | pass | `bash -n scripts/smoke.sh` | |
 | 2 | M2-T2 clone/transcribe | pass | `pytest tests/test_studio_clone.py` | |
-| 5 | M2-T3 speak/takes | todo | `pytest tests/test_studio_takes.py` | |
+| 5 | M2-T3 speak/takes | pass | `pytest tests/test_studio_takes.py` | |
 | 2 | M4-T1 design backend | pass | `pytest tests/test_design.py` | |
-| 5 | M2-T4 voices CRUD | todo | `pytest tests/test_studio_voices.py` | |
-| 5 | M2-T5 engine API | todo | `pytest tests/test_studio_engine.py` | |
+| 5 | M2-T4 voices CRUD | pass | `pytest tests/test_studio_voices.py` | |
+| 5 | M2-T5 engine API | pass | `pytest tests/test_studio_engine.py` | |
 | 3 | M1-T7 speech slot/error fixes (review) | pass | `pytest tests/test_speech.py` | BLOCKER fix |
 | 3 | M1-T8 container pinning (review) | pass | `pytest tests/test_deploy.py` | |
 | 3 | M2-T7 store/importer key safety (review) | pass | `pytest tests/test_store.py tests/test_importer.py` | |
@@ -41,8 +41,12 @@
 | 3 | M3-T4 clone JS | pass | `pytest tests/test_ui_assets.py` | |
 | 3 | M3-T5 engine JS | pass | `pytest tests/test_ui_assets.py` | |
 | 3 | M4-T2 design JS | pass | `pytest tests/test_ui_assets.py` | |
-| 6 | M3-T6 UI e2e | todo | `pytest tests/e2e` | |
-| 6 | M5-T2 acceptance | todo | `pytest tests/test_acceptance.py` | |
+| 6 | M1-T11 restart/warm-up supervision (review) | wip | `pytest tests/test_queue_http.py` | BLOCKER fix |
+| 6 | M1-T12 models/headers/error shape (review) | wip | `pytest tests/test_v1.py` | |
+| 6 | M2-T11 take language/48 kHz/FLAC (review) | wip | `pytest tests/test_studio_takes.py tests/test_auth.py` | BLOCKER fix |
+| 6 | M3-T9 clone fail-closed + Format hint (review) | wip | `pytest tests/test_ui_assets.py` | |
+| 7 | M3-T6 UI e2e | todo | `pytest tests/e2e` | |
+| 7 | M5-T2 acceptance | todo | `pytest tests/test_acceptance.py` | |
 
 \* M0-T1 delivers runnable scripts + `NOTES.md`; findings are pending the external host (B-001).
 
@@ -99,6 +103,22 @@
   without the valid-name list (M1-T10); index-rebuild test never rebuilt (M2-T10).
 - Added Q-023 (Test-a-line vs `API_KEYS`): UI-only gating, human confirmation requested.
 
+## Wave-5 review outcome (2026-11-02)
+
+- BLOCKER → M1-T11: `/api/engine/restart` warmed the old process and `run_forever` never re-warmed
+  after a crash, so `/ready` could be 503 forever; `/ready` also ignored engine liveness. No
+  HTTP-level 429 test existed.
+- BLOCKER → M2-T11: streamed FLAC takes were never saved (libsndfile cannot decode pipe-FLAC) even
+  though `X-Take-Id` was returned.
+- MAJOR → M2-T11: take language used display name; internal takes were not always 48 kHz;
+  full-audio work on the event loop; auth untested.
+- MAJOR → M1-T12: models aliases missing, `model` optional, non-ASCII `X-Voice` could 500,
+  404/405 not OpenAI-shaped.
+- MAJOR → M3-T9: Test-a-line failed open with unknown engine status; `#clone-notes` overflow;
+  Studio Format inert (Q-024).
+- Accepted NITs: CSRF on Basic-auth POSTs (LAN-only, spec mandates Basic), event-loop list/wave
+  cost for large libraries, header `X-Take-Id` before persistence (Q-006).
+
 ## Blockers
 
 | ID | Blocker | Owner | Unblocks |
@@ -133,4 +153,4 @@
 
 ## Next action
 
-Dispatch wave 5 (seven parallel workers): M1-T2, M2-T3, M2-T4, M2-T5, M1-T10, M2-T10, M3-T8.
+Dispatch wave 6 (four parallel workers): M1-T11, M1-T12, M2-T11, M3-T9.
