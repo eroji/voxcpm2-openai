@@ -27,15 +27,40 @@ ENV HF_HOME=/var/cache/hf \
     ENGINE_PORT=8102 \
     DEPLOY_CONFIG=/opt/app/deploy/voxcpm2-3090.yaml
 
-# Runtime Python deps (match pyproject.toml; uv keeps the NCCL pin in /etc/uv-overrides.txt)
+# App-only runtime deps (match pyproject.toml; uv keeps the NCCL pin in /etc/uv-overrides.txt).
+# Do NOT reinstall fastapi/uvicorn/httpx/numpy/pydantic here: the base already pins them for
+# the vLLM engine stack and an upgrade would silently break the engine (wave-1 review).
 RUN uv pip install --system --break-system-packages --no-cache \
-    fastapi "uvicorn[standard]" httpx numpy soundfile safetensors pydantic pydantic-settings python-multipart
+    soundfile safetensors python-multipart pydantic-settings
+
+# Fail the build if any runtime import is missing or drifted
+RUN python3 -c "import fastapi, uvicorn, httpx, numpy, soundfile, safetensors, pydantic, pydantic_settings, multipart"
+
+# ffmpeg (mp3/opus transcoding, R-016) and curl (compose healthcheck, R-045) are needed at
+# runtime. Install ffmpeg with the distro package manager only if the base lacks it.
+RUN (command -v ffmpeg >/dev/null || (apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*)) \
+ && ffmpeg -version >/dev/null && curl --version >/dev/null
 
 # App (OpenAI API + Studio API + static UI), engine deploy config, and s6-overlay v3
 # service definitions: engine = vllm serve on 127.0.0.1:$ENGINE_PORT,
 # app = uvicorn on 0.0.0.0:8000 (starts after engine, polls /health + warms up itself).
 COPY app/ /opt/app/app/
 COPY deploy/voxcpm2-3090.yaml /opt/app/deploy/voxcpm2-3090.yaml
-RUN rm -rf /etc/s6-overlay/s6-rc.d/engine /etc/s6-overlay/s6-rc.d/app
+
+# Remove inherited qwen3-tts service dirs and their user/contents.d markers so the base
+# cannot start an old engine or double-bind :8000. s6-overlay base bundles are untouched.
+RUN rm -rf /etc/s6-overlay/s6-rc.d/engine /etc/s6-overlay/s6-rc.d/app /etc/s6-overlay/s6-rc.d/qwen3* \
+    /etc/s6-overlay/s6-rc.d/user/contents.d/engine \
+    /etc/s6-overlay/s6-rc.d/user/contents.d/app \
+    /etc/s6-overlay/s6-rc.d/user/contents.d/qwen3*
 COPY deploy/s6/ /etc/s6-overlay/s6-rc.d/
 RUN chmod +x /etc/s6-overlay/s6-rc.d/engine/run /etc/s6-overlay/s6-rc.d/app/run
+
+# Guard: after our copy, no other service run file may mention qwen3 or start a second
+# vllm serve (ours is exactly /etc/s6-overlay/s6-rc.d/engine/run).
+RUN stale=$(grep -RlE 'qwen3|vllm serve' /etc/s6-overlay/s6-rc.d --include=run 2>/dev/null \
+      | grep -v '^/etc/s6-overlay/s6-rc.d/engine/run$' || true); \
+    [ -z "$stale" ] || { echo "stale s6 services: $stale"; exit 1; }
+
+# Never let an inherited base command start a second app.
+CMD []
