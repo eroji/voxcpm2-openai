@@ -1,5 +1,6 @@
-"""Static checks for the s6 service definitions and Containerfile (M1-T3, M1-T6)."""
+"""Static checks for the s6 service definitions and Containerfile (M1-T3, M1-T6, M1-T8)."""
 
+import hashlib
 import os
 import re
 from pathlib import Path
@@ -8,9 +9,18 @@ ROOT = Path(__file__).resolve().parents[1]
 S6 = ROOT / "deploy" / "s6"
 CONTAINERFILE = ROOT / "deploy" / "Containerfile"
 
-# M1-T6: only app deps the base may lack. fastapi/uvicorn/httpx/numpy/pydantic must NOT be
-# reinstalled — the base pins them for the vLLM engine stack (unbounded upgrade, wave-1 review).
-APP_ONLY_DEPS = ["soundfile", "safetensors", "python-multipart", "pydantic-settings"]
+# M1-T6/T8: only app deps the base may lack, installed with --no-deps so pip/uv cannot pull a
+# newer transitive pydantic/numpy. fastapi/uvicorn/httpx/numpy/pydantic must NOT appear at all —
+# the base pins them for the vLLM engine stack (wave-1 + wave-2 review). python-dotenv is the
+# one runtime dep of pydantic-settings we must list explicitly; soundfile bundles libsndfile and
+# numpy/pydantic already come from the proven base. The import-check layer is the backstop.
+APP_ONLY_DEPS = [
+    "soundfile",
+    "safetensors",
+    "python-multipart",
+    "pydantic-settings",
+    "python-dotenv",
+]
 ENGINE_STACK = ["fastapi", "uvicorn", "httpx", "numpy", "pydantic"]
 IMPORT_CHECK = (
     "import fastapi, uvicorn, httpx, numpy, soundfile, safetensors, pydantic, "
@@ -85,7 +95,9 @@ def test_runtime_installs_limited_to_allowed_packages():
     assert installs, "no app-dep install layer"
     for ln in installs:
         assert "--system" in ln and "--break-system-packages" in ln and "--no-cache" in ln, ln
-        pkgs = ln.split("--no-cache", 1)[1].split()
+        # --no-deps: a transitive pydantic/numpy upgrade would defeat the engine-stack pin
+        assert "--no-deps" in ln, ln
+        pkgs = ln.split("--no-deps", 1)[1].split()
         names = [re.split(r"[<>=\[]", p)[0] for p in pkgs]
         assert names == APP_ONLY_DEPS, ln
         for pkg in ENGINE_STACK:  # no unbounded upgrade of the engine stack
@@ -125,7 +137,12 @@ def test_s6_guard_rejects_foreign_engine_services():
         ln for ln in folded.splitlines() if "grep" in ln and "qwen3" in ln and "vllm serve" in ln
     ]
     assert guards, "no s6-rc.d grep guard"
+    # a base service running `uvicorn ...:8000` would double-bind the app port (wave-2 review)
+    assert "uvicorn" in guards[0], guards[0]
     assert "--include=run" in guards[0], guards[0]
+    # our own two services are the only allowed matches (app/run legitimately runs uvicorn)
+    assert "engine|app" in guards[0], guards[0]
+    assert "exit 1" in guards[0], guards[0]
     assert folded.index("COPY deploy/s6/") < folded.index(guards[0])
 
 
@@ -133,6 +150,17 @@ def test_inherited_cmd_cleared():
     assert re.search(r"^CMD \[\]$", CONTAINERFILE.read_text(), re.M)
 
 
-def test_reference_deploy_config_untouched():
-    assert (ROOT / "deploy" / "voxcpm2-3090.yaml").exists()
-    assert (ROOT / "deploy" / "compose.yaml").exists()
+# Read-only reference files (AGENTS.md §4): pinned by SHA-256 so any edit fails the test,
+# not just a deletion. Hashes are of the committed originals (git status: clean).
+REFERENCE_SHA256 = {
+    "deploy/voxcpm2-3090.yaml": (
+        "3ddc3cabf84d86154b66365e18938d3f1f4d8d732d613396b2b97a387734f194"
+    ),
+    "deploy/compose.yaml": "6cf09350d832dfb80168bdb8d2d7acd4c69a54c068685004cebb2b60489a5750",
+}
+
+
+def test_reference_deploy_files_byte_identical():
+    for rel, want in REFERENCE_SHA256.items():
+        got = hashlib.sha256((ROOT / rel).read_bytes()).hexdigest()
+        assert got == want, f"{rel} was edited (sha256 {got} != pinned {want})"

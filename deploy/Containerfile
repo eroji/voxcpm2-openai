@@ -27,11 +27,13 @@ ENV HF_HOME=/var/cache/hf \
     ENGINE_PORT=8102 \
     DEPLOY_CONFIG=/opt/app/deploy/voxcpm2-3090.yaml
 
-# App-only runtime deps (match pyproject.toml; uv keeps the NCCL pin in /etc/uv-overrides.txt).
-# Do NOT reinstall fastapi/uvicorn/httpx/numpy/pydantic here: the base already pins them for
-# the vLLM engine stack and an upgrade would silently break the engine (wave-1 review).
-RUN uv pip install --system --break-system-packages --no-cache \
-    soundfile safetensors python-multipart pydantic-settings
+# App-only runtime deps (match pyproject.toml). Install with --no-deps and list their runtime
+# deps explicitly: a dependency resolver could still pull a newer pydantic/numpy transitively and
+# silently break the engine stack (wave-2 review). soundfile bundles libsndfile; numpy/pydantic
+# already come from the proven base. Do NOT add fastapi/uvicorn/httpx/numpy/pydantic here.
+# The import check below is the backstop if an explicit dep is missing.
+RUN uv pip install --system --break-system-packages --no-cache --no-deps \
+    soundfile safetensors python-multipart pydantic-settings python-dotenv
 
 # Fail the build if any runtime import is missing or drifted
 RUN python3 -c "import fastapi, uvicorn, httpx, numpy, soundfile, safetensors, pydantic, pydantic_settings, multipart"
@@ -56,10 +58,11 @@ RUN rm -rf /etc/s6-overlay/s6-rc.d/engine /etc/s6-overlay/s6-rc.d/app /etc/s6-ov
 COPY deploy/s6/ /etc/s6-overlay/s6-rc.d/
 RUN chmod +x /etc/s6-overlay/s6-rc.d/engine/run /etc/s6-overlay/s6-rc.d/app/run
 
-# Guard: after our copy, no other service run file may mention qwen3 or start a second
-# vllm serve (ours is exactly /etc/s6-overlay/s6-rc.d/engine/run).
-RUN stale=$(grep -RlE 'qwen3|vllm serve' /etc/s6-overlay/s6-rc.d --include=run 2>/dev/null \
-      | grep -v '^/etc/s6-overlay/s6-rc.d/engine/run$' || true); \
+# Guard: after our copy, no other service run file may mention qwen3, start a second vllm serve,
+# or run a second uvicorn (a base uvicorn service on :8000 would double-bind the app). Ours are
+# exactly /etc/s6-overlay/s6-rc.d/{engine,app}/run.
+RUN stale=$(grep -RlE 'qwen3|vllm serve|uvicorn' /etc/s6-overlay/s6-rc.d --include=run 2>/dev/null \
+      | grep -vE '^/etc/s6-overlay/s6-rc.d/(engine|app)/run$' || true); \
     [ -z "$stale" ] || { echo "stale s6 services: $stale"; exit 1; }
 
 # Never let an inherited base command start a second app.
