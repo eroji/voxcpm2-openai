@@ -23,8 +23,8 @@ function renderChips() {
   for (const v of state.voices) {
     const chip = document.createElement("button");
     chip.className = "vs-chip";
-    chip.dataset.name = v.name;
-    chip.setAttribute("aria-pressed", String(v.name === state.selectedVoice));
+    chip.dataset.key = v.key;
+    chip.setAttribute("aria-pressed", String(v.key === state.selectedVoice));
     const lang = document.createElement("span");
     lang.className = "lang";
     lang.textContent = String(v.language || "").toUpperCase();
@@ -143,40 +143,45 @@ async function errorFrom(res) {
   return `HTTP ${res.status}`;
 }
 
-/* s16le mono 48 kHz chunks → gapless AudioContext playback, starting on the first chunk. */
+/* s16le mono 48 kHz chunks → gapless AudioContext playback, starting on the first chunk.
+ * Resolves when the response stream ends — scheduled audio keeps playing after that. */
 async function playPcmStream(res) {
   const ctx = new AudioContext({ sampleRate: 48000 });
-  await ctx.resume();
-  let carry = null;
-  let when = ctx.currentTime;
   const reader = res.body.getReader();
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    let bytes = value;
-    if (carry && carry.length) {
-      bytes = new Uint8Array(carry.length + value.length);
-      bytes.set(carry, 0);
-      bytes.set(value, carry.length);
+  let when = ctx.currentTime;
+  try {
+    await ctx.resume();
+    let carry = null;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      let bytes = value;
+      if (carry && carry.length) {
+        bytes = new Uint8Array(carry.length + value.length);
+        bytes.set(carry, 0);
+        bytes.set(value, carry.length);
+      }
+      const usable = bytes.length - (bytes.length % 2); // carry an odd trailing byte
+      carry = bytes.slice(usable);
+      if (!usable) continue;
+      const samples = new Float32Array(usable / 2);
+      const view = new DataView(bytes.buffer, bytes.byteOffset, usable);
+      for (let i = 0; i < samples.length; i++) samples[i] = view.getInt16(i * 2, true) / 32768;
+      const buffer = ctx.createBuffer(1, samples.length, 48000);
+      buffer.copyToChannel(samples, 0);
+      const src = ctx.createBufferSource();
+      src.buffer = buffer;
+      src.connect(ctx.destination);
+      const start = Math.max(when, ctx.currentTime);
+      src.start(start);
+      when = start + buffer.duration;
     }
-    const usable = bytes.length - (bytes.length % 2); // carry an odd trailing byte
-    carry = bytes.slice(usable);
-    if (!usable) continue;
-    const samples = new Float32Array(usable / 2);
-    const view = new DataView(bytes.buffer, bytes.byteOffset, usable);
-    for (let i = 0; i < samples.length; i++) samples[i] = view.getInt16(i * 2, true) / 32768;
-    const buffer = ctx.createBuffer(1, samples.length, 48000);
-    buffer.copyToChannel(samples, 0);
-    const src = ctx.createBufferSource();
-    src.buffer = buffer;
-    src.connect(ctx.destination);
-    const start = Math.max(when, ctx.currentTime);
-    src.start(start);
-    when = start + buffer.duration;
+  } finally {
+    reader.cancel().catch(() => {}); // no-op once done, releases the body on error
+    // close the context after the scheduled tail, never while it still plays
+    const tailMs = Math.max(0, when - ctx.currentTime) * 1000 + 50;
+    setTimeout(() => ctx.close().catch(() => {}), tailMs);
   }
-  const remaining = when - ctx.currentTime;
-  if (remaining > 0) await new Promise(resolve => setTimeout(resolve, remaining * 1000 + 50));
-  await ctx.close();
 }
 
 async function playWhole(res) {
@@ -240,7 +245,7 @@ async function init() {
   } catch {
     /* private mode: fall back to the first voice */
   }
-  if (!state.voices.some(v => v.name === saved)) saved = state.voices[0] && state.voices[0].name;
+  if (!state.voices.some(v => v.key === saved)) saved = state.voices[0] && state.voices[0].key;
   state.selectedVoice = saved || null;
   renderChips();
 
@@ -248,7 +253,7 @@ async function init() {
     const chip = e.target.closest(".vs-chip");
     if (!chip) return;
     for (const c of $("voice-chips").children) c.setAttribute("aria-pressed", String(c === chip));
-    selectVoice(chip.dataset.name);
+    selectVoice(chip.dataset.key);
   });
 
   $("generate").addEventListener("click", generate);
@@ -268,13 +273,24 @@ async function init() {
   }
 
   const toggle = $("stream-toggle");
-  toggle.addEventListener("click", () =>
-    toggle.setAttribute("aria-pressed", String(toggle.getAttribute("aria-pressed") !== "true")),
-  );
+  toggle.addEventListener("click", () => {
+    toggle.setAttribute("aria-pressed", String(toggle.getAttribute("aria-pressed") !== "true"));
+    syncFormat();
+  });
+  syncFormat();
+}
+
+/* Streaming is always PCM: the format select only applies when the toggle is off. */
+function syncFormat() {
+  $("fmt").disabled = $("stream-toggle").getAttribute("aria-pressed") === "true";
 }
 
 async function show() {
   await loadVoices();
+  // a deleted/renamed voice must never be posted: revalidate against the live keys
+  if (!state.voices.some(v => v.key === state.selectedVoice)) {
+    state.selectedVoice = state.voices[0] ? state.voices[0].key : null;
+  }
   renderChips();
   await loadTakes();
 }

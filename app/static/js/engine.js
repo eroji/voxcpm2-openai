@@ -31,9 +31,9 @@ function renderStats() {
     stat("Model", e.model || "—"),
     stat("GPU", e.gpu || "Unknown"),
     stat("VRAM in use", gb(e.vram_used_mb), e.vram_total_mb == null ? "" : `of ${Math.round(e.vram_total_mb / 1024)} GB`),
-    stat("KV cache", e.kv_cache || "—"),
-    stat("Warm RTF", e.rtf == null ? "—" : Number(e.rtf).toFixed(2)),
-    stat("First audio", e.first_audio_ms == null ? "—" : `${Math.round(e.first_audio_ms)} ms`),
+    stat("KV cache", e.kv_cache || "—", `Max ${e.max_concurrency} concurrent requests`),
+    stat("Warm RTF", e.rtf == null ? "—" : Number(e.rtf).toFixed(2), "Non-streamed WAV"),
+    stat("First audio", e.first_audio_ms == null ? "—" : `${Math.round(e.first_audio_ms)} ms`, "Streamed PCM, warm"),
     stat("Voices", String(e.voices ?? state.voices.length), `${languages} languages`),
     stat("Runtime", e.runtime || "—"),
   );
@@ -42,7 +42,7 @@ function renderStats() {
 function renderEndpoint() {
   const pre = document.querySelector("#engine-endpoint pre");
   if (!pre) return;
-  const voice = (state.voices[0] && state.voices[0].name) || "ashley-en";
+  const voice = (state.voices[0] && state.voices[0].key) || "ashley-en";
   const body = { model: "voxcpm2", voice, input: "…", response_format: "pcm", stream: true };
   pre.textContent = `POST ${location.origin}/v1/audio/speech\n${JSON.stringify(body, null, 2)}`;
 }

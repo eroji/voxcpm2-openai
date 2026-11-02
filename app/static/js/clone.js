@@ -26,6 +26,7 @@ const SAMPLE = {
 
 const $ = id => document.getElementById(id);
 let file = null; // File picked for reference audio, or null
+let saving = false; // in-flight Save: blocks double-submit
 
 /* Read duration from an audio file's metadata. Rejects non-finite durations. */
 function probeDuration(f) {
@@ -56,17 +57,24 @@ function nameProblem() {
   if (!name) return "Choose a name for the voice.";
   if (!NAME_RE.test(name))
     return "Name must be 1–64 characters: lowercase letters, digits, _ or -, starting with a letter or digit.";
-  if (state.voices.some(v => v.name === name))
+  if (state.voices.some(v => v.key === name))
     return `A voice named “${name}” already exists.`;
   return null;
 }
 
 function updateSave() {
-  $("save-voice").disabled = !(file && !nameProblem() && $("consent").checked);
+  $("save-voice").disabled = saving || !(file && !nameProblem() && $("consent").checked);
+}
+
+function setStatus(message) {
+  const el = $("clone-status");
+  el.textContent = message;
+  el.hidden = !message;
 }
 
 function onFile(f) {
   clearError("clone");
+  setStatus("");
   file = null;
   if (!f) return;
   probeDuration(f)
@@ -76,13 +84,17 @@ function onFile(f) {
           "clone",
           `Clip is ${Number(seconds).toFixed(1)} s — reference audio must be ${MIN_S}–${MAX_S} seconds.`
         );
+        updateSave(); // file was rejected: keep the button state honest
         return;
       }
       file = f;
       metaText().textContent = `${f.name} · ${fmtDuration(seconds)}`;
       updateSave();
     })
-    .catch(err => showError("clone", err.message));
+    .catch(err => {
+      showError("clone", err.message);
+      updateSave();
+    });
 }
 
 async function onTranscribe() {
@@ -96,23 +108,29 @@ async function onTranscribe() {
     const data = await api.postForm("/api/transcribe", form);
     $("ref-text").value = data.text || "";
     clearError("clone");
+    setStatus("");
   } catch (err) {
     showError("clone", err.message); // e.g. 503 "transcription is not configured"
   }
 }
 
 async function onSave() {
+  if (saving) return;
   const problem = nameProblem();
   if (problem || !file || !$("consent").checked) {
     showError("clone", problem || "Choose a reference audio file first.");
     return;
   }
+  clearError("clone");
+  setStatus("");
   const form = new FormData();
   form.append("file", file);
   form.append("name", $("clone-name").value);
   form.append("language", $("clone-lang").value);
   form.append("ref_text", $("ref-text").value);
   form.append("consent", "true");
+  saving = true;
+  updateSave();
   try {
     await api.postForm("/api/voices/clone", form);
     file = null;
@@ -121,14 +139,13 @@ async function onSave() {
     $("clone-name").value = "";
     $("consent").checked = false;
     metaText().textContent = "3–30 seconds of clean, single-speaker speech";
-    updateSave();
     await loadVoices();
-    showError("clone", "Voice saved."); // role="alert" announces it; textContent only
-    setTimeout(() => {
-      location.hash = "voices";
-    }, 800);
+    setStatus("Voice saved."); // neutral status row; no forced navigation
   } catch (err) {
     showError("clone", err.message);
+  } finally {
+    saving = false;
+    updateSave();
   }
 }
 
@@ -139,6 +156,7 @@ async function onTest() {
     return;
   }
   clearError("clone");
+  setStatus("");
   try {
     const refAudio = await new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -211,7 +229,13 @@ registerScreen("clone", {
   },
   async show() {
     await loadVoices(); // fresh names for duplicate validation
-    api.get("/api/engine").catch(() => {}); // server stays authoritative; button stays enabled
+    // SPEC §8/§10: auto-transcribe needs STT; the test line calls /v1, which needs an API key (Q-023)
+    $("auto-transcribe").disabled = !state.engine?.stt;
+    const gated = !!state.engine?.api_keys_required;
+    $("test-line").disabled = gated;
+    $("test-line").title = gated
+      ? "Test a line calls /v1/audio/speech, which requires an API key on this server."
+      : "";
     updateSave();
   },
 });

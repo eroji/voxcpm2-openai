@@ -109,7 +109,7 @@ function onCandidatesClick(e) {
 
 function updateSaveState() {
   const name = $("design-name").value.trim().toLowerCase();
-  const taken = state.voices.some(v => String(v.name).toLowerCase() === name);
+  const taken = state.voices.some(v => v.key === name);
   $("save-designed").disabled = !(selectedCandidate && NAME_RE.test(name) && !taken);
 }
 
@@ -181,8 +181,9 @@ registerScreen("design", {
     $("candidates").addEventListener("click", onCandidatesClick);
     updateSaveState();
   },
-  show() {
+  async show() {
     clearError("design");
+    await loadVoices().catch(() => {}); // duplicate-name validation must work on a deep link
     updateSaveState();
   },
 });

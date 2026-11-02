@@ -171,6 +171,8 @@ let playingUrl = null;
 
 export function stopAudio() {
   if (audio) audio.pause();
+  // revoke blob: URLs we created (playWhole / test line) so they cannot leak
+  if (playingUrl && playingUrl.startsWith("blob:")) URL.revokeObjectURL(playingUrl);
   audio = null;
   playingUrl = null;
 }

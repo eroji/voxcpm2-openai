@@ -14,6 +14,7 @@ import {
 } from "./core.js";
 
 const LANGS = ["en", "ja", "ko", "zh"];
+const NAME_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/; // same rule the server validates (CONTRACTS §4)
 
 let query = "";
 let lang = "all";
@@ -31,8 +32,8 @@ function actionButton(label, act) {
   return b;
 }
 
-function findVoice(name) {
-  return state.voices.find(v => v.name === name);
+function findVoice(key) {
+  return state.voices.find(v => v.key === key);
 }
 
 function visibleVoices() {
@@ -45,7 +46,8 @@ function visibleVoices() {
 
 function voiceRow(v) {
   const tr = document.createElement("tr");
-  tr.dataset.name = v.name;
+  tr.dataset.key = v.key; // API path
+  tr.dataset.name = v.name; // display only
   const designed = String(v.source || "").toLowerCase() === "designed";
   const srcTd = el("td");
   srcTd.append(el("span", designed ? "src designed" : "src", designed ? "Designed" : "Uploaded"));
@@ -104,7 +106,7 @@ function render() {
 
 /* Inline editor: one cell with name / language / transcript inputs + Save/Cancel. */
 function openEditor(tr) {
-  const v = findVoice(tr.dataset.name);
+  const v = findVoice(tr.dataset.key);
   if (!v) return;
   tr.textContent = "";
   const td = el("td");
@@ -117,7 +119,7 @@ function openEditor(tr) {
   nameInput.type = "text";
   nameInput.value = v.name;
   nameInput.setAttribute("aria-label", "Name");
-  nameInput.dataset.field = "new_name";
+  nameInput.dataset.field = "name";
 
   const langSelect = el("select", "vs-select");
   langSelect.setAttribute("aria-label", "Language");
@@ -146,22 +148,30 @@ function openDelete(tr) {
   if (!cell) return;
   cell.textContent = "";
   cell.append(document.createTextNode(`Delete ${tr.dataset.name}? This can't be undone from the UI. `));
-  cell.append(actionButton("Delete", "confirm"), actionButton("Cancel", "cancel"));
+  const confirm = actionButton("Delete", "confirm");
+  cell.append(confirm, actionButton("Cancel", "cancel"));
+  confirm.focus();
 }
 
 async function saveEditor(tr) {
-  const v = findVoice(tr.dataset.name);
+  const v = findVoice(tr.dataset.key);
   if (!v) return;
   const body = {};
-  const newName = tr.querySelector('[data-field="new_name"]').value.trim();
+  const newName = tr.querySelector('[data-field="name"]').value.trim();
   const language = tr.querySelector('[data-field="language"]').value;
   const refText = tr.querySelector('[data-field="ref_text"]').value;
-  if (newName && newName !== v.name) body.new_name = newName;
+  if (newName && newName !== v.name) {
+    if (!NAME_RE.test(newName.toLowerCase())) {
+      showError("voices", "Names must match [a-z0-9][a-z0-9_-]{0,63}: 1–64 lowercase letters, digits, _ or -, starting with a letter or digit.");
+      return; // editor stays open with the reason inline
+    }
+    body.name = newName;
+  }
   if (language !== String(v.language || "").toLowerCase()) body.language = language;
   if (refText !== (v.ref_text || "")) body.ref_text = refText;
   try {
     if (Object.keys(body).length) {
-      await api.patch(`/api/voices/${encodeURIComponent(v.name)}`, body);
+      await api.patch(`/api/voices/${encodeURIComponent(v.key)}`, body);
     }
     clearError("voices");
     await loadVoices();
@@ -173,7 +183,7 @@ async function saveEditor(tr) {
 
 async function confirmDelete(tr) {
   try {
-    await api.del(`/api/voices/${encodeURIComponent(tr.dataset.name)}`);
+    await api.del(`/api/voices/${encodeURIComponent(tr.dataset.key)}`);
     clearError("voices");
     await loadVoices();
     render();
@@ -203,7 +213,7 @@ registerScreen("voices", {
       if (!button || !tr) return;
       const act = button.dataset.act;
       if (act === "audition") {
-        play(`/api/voices/${encodeURIComponent(tr.dataset.name)}/audio`);
+        play(`/api/voices/${encodeURIComponent(tr.dataset.key)}/audio`);
       } else if (act === "edit") {
         openEditor(tr);
       } else if (act === "delete") {

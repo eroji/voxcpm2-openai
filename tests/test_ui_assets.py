@@ -5,13 +5,23 @@ Text-based on purpose: the browser behaviour is covered by the Playwright suite
 """
 
 import re
+import shutil
+import subprocess
 from collections import Counter
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 HTML = (ROOT / "app" / "static" / "index.html").read_text(encoding="utf-8")
 CSS = (ROOT / "app" / "static" / "studio.css").read_text(encoding="utf-8")
-CORE = (ROOT / "app" / "static" / "js" / "core.js").read_text(encoding="utf-8")
+JS_DIR = ROOT / "app" / "static" / "js"
+CORE = (JS_DIR / "core.js").read_text(encoding="utf-8")
+
+
+def js(name):
+    return (JS_DIR / name).read_text(encoding="utf-8")
+
 
 TABS = ["speak", "voices", "clone", "design", "engine"]
 
@@ -181,6 +191,81 @@ def test_start_waits_for_domcontentloaded_without_settimeout():
     assert "setTimeout" not in CORE
     # late-registering screens must still get their initial show()
     assert "activeName" in CORE
+
+
+def test_every_js_file_parses():
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node not installed")
+    for path in sorted(JS_DIR.glob("*.js")):
+        proc = subprocess.run(
+            [node, "--check", str(path)], capture_output=True, text=True, timeout=60
+        )
+        assert proc.returncode == 0, f"{path.name}: {proc.stderr.strip()}"
+
+
+def test_screen_imports_exist_in_core():
+    exports = set(re.findall(r"export (?:async )?(?:function|const) (\w+)", CORE))
+    for path in sorted(JS_DIR.glob("*.js")):
+        if path.name == "core.js":
+            continue
+        source = path.read_text(encoding="utf-8")
+        for names in re.findall(r"import\s*\{([^}]*)\}\s*from\s*[\"']\./core\.js[\"']", source):
+            for name in (n.strip() for n in names.split(",")):
+                if name:
+                    assert name in exports, f"{path.name} imports {name}, not exported by core.js"
+
+
+# --- M3-T7 wave-3 review fixes -------------------------------------------------
+
+
+def test_voice_keys_not_display_names_in_api_calls():
+    speak, voices = js("speak.js"), js("voices.js")
+    assert "chip.dataset.key = v.key" in speak
+    assert "v.key === state.selectedVoice" in speak
+    assert "selectVoice(chip.dataset.key)" in speak
+    assert "state.voices.some(v => v.key === saved)" in speak
+    assert "state.voices.some(v => v.key === state.selectedVoice)" in speak
+    for fragment in [
+        "tr.dataset.key = v.key",
+        "findVoice(tr.dataset.key)",
+        "encodeURIComponent(v.key)",
+        "encodeURIComponent(tr.dataset.key)",
+    ]:
+        assert fragment in voices, fragment
+    assert "v.name === state.selectedVoice" not in speak
+    assert "v.name === saved" not in speak
+    assert "encodeURIComponent(v.name)" not in voices
+    assert "encodeURIComponent(tr.dataset.name)" not in voices
+    # display text still uses the name
+    assert 'el("td", "name", v.name)' in voices
+
+
+def test_rename_body_uses_name_and_validates():
+    voices = js("voices.js")
+    assert "new_name" not in voices
+    assert "body.name = newName" in voices
+    assert "^[a-z0-9][a-z0-9_-]{0,63}$" in voices
+    assert "confirm.focus()" in voices  # delete confirm gets focus (R-039)
+
+
+def test_clone_gates_on_engine_flags():
+    clone = js("clone.js")
+    assert "state.engine?.stt" in clone
+    assert "state.engine?.api_keys_required" in clone
+    assert 'api.get("/api/engine")' not in clone
+    assert "setTimeout" not in clone
+    assert 'id="clone-status"' in HTML
+    assert 'class="vs-status" id="clone-status" role="status"' in HTML
+
+
+def test_speak_lifecycle_releases_resources():
+    speak = js("speak.js")
+    assert "reader.cancel()" in speak
+    assert "ctx.close()" in speak
+    assert "await new Promise(resolve => setTimeout" not in speak  # no playback-tail await
+    assert '$("fmt").disabled' in speak
+    assert "URL.revokeObjectURL" in CORE  # object URLs revoked in stopAudio()
 
 
 def test_drop_zone_has_visible_focus():
