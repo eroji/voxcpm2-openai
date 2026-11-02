@@ -51,16 +51,19 @@ test:
 e2e:
   stage: e2e
   script:
-    - |
-      if [ -d tests/e2e ] && [ -n "$(ls -A tests/e2e)" ]; then
-        python -m pytest tests/e2e -q
-      else
-        echo "no e2e tests present yet"
-      fi
+    - python -m playwright install --with-deps chromium
+    - python -m pytest tests/e2e -q
   artifacts:
     when: always
     expire_in: 1 week
     paths: [test-results/]
+
+javascript:
+  stage: checks
+  image: node:22-alpine
+  script:
+    - for f in app/static/js/*.js; do node --check "$f"; done
+    - echo "all static modules parse"
 
 build:
   stage: build
