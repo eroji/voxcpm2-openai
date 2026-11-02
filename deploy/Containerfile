@@ -1,0 +1,36 @@
+# Reference Containerfile for voxcpm2-openai (engine + app in one container).
+# Mirrors the qwen3-tts-openai layout: s6-overlay supervises the vLLM-Omni engine
+# (internal port) and the FastAPI app (port 8000).
+#
+# Proven during testing:
+#   - vllm/vllm-openai:v0.30.0 + vllm-omni 0.30.0 serve VoxCPM2 (deploy/voxcpm2-3090.yaml)
+#   - VoxCPM2 support needs the upstream `voxcpm` package (2.0.3 tested)
+#   - install it with uv so /etc/uv-overrides.txt keeps nvidia-nccl-cu13 at 2.30.7;
+#     plain pip downgrades NCCL to 2.29.7
+#
+# The quickest path is to start FROM the existing image, which already has
+# vllm 0.30.0, vllm-omni 0.30.0, s6-overlay and the uv override file:
+FROM harbor.dotslash.io/dotslash/qwen3-tts-openai:1.4.3
+
+RUN uv pip install --system --break-system-packages --no-cache voxcpm==2.0.3
+
+# Sanity checks at build time (fail the build if the stack drifted)
+RUN python3 -c "import vllm; assert vllm.__version__.startswith('0.30'), vllm.__version__" 2>/dev/null \
+ && pip show nvidia-nccl-cu13 | grep -q '^Version: 2.30.7' \
+ && python3 -c "from voxcpm.core import VoxCPM" 2>/dev/null
+
+# trust_remote_code writes to the HF modules cache; keep it off the read-only /models mount
+ENV HF_HOME=/var/cache/hf \
+    HF_HUB_OFFLINE=1 \
+    DATA_DIR=/data \
+    MODEL_PATH=/models/openbmb/VoxCPM2 \
+    ENGINE_PORT=8102 \
+    DEPLOY_CONFIG=/opt/app/deploy/voxcpm2-3090.yaml
+
+# The implementing agent replaces /opt/app with the new app and s6 service definitions:
+#   /opt/app/app/...                  FastAPI app (OpenAI API + Studio API + static UI)
+#   /opt/app/deploy/voxcpm2-3090.yaml engine deploy config
+#   /etc/s6-overlay/s6-rc.d/engine    vllm serve $MODEL_PATH --omni --deploy-config $DEPLOY_CONFIG
+#                                     --served-model-name openbmb/VoxCPM2 --host 127.0.0.1 --port $ENGINE_PORT
+#   /etc/s6-overlay/s6-rc.d/app       uvicorn on 0.0.0.0:8000, depends on engine readiness
+COPY app/ /opt/app/

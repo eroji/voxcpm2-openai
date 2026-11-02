@@ -1,0 +1,28 @@
+services:
+  voxcpm2-openai:
+    container_name: voxcpm2-openai
+    image: harbor.dotslash.io/dotslash/voxcpm2-openai:0.1.0
+    restart: always
+    stop_grace_period: 25s
+    devices:
+      - nvidia.com/gpu=GPU-79ad6f3b-cc71-90a6-2430-286e1c6c9ec2   # speech card (GPU 1), shared with whisper-stt + TEI
+    shm_size: 8g
+    environment:
+      DATA_DIR: /data
+      MODEL_PATH: /models/openbmb/VoxCPM2
+      HF_HUB_OFFLINE: "1"
+      # STUDIO_AUTH: "admin:<password>"          # basic auth for the Studio UI and /api
+      # API_KEYS: "<key1>,<key2>"                # optional bearer tokens for /v1
+      STT_URL: http://vllm.dotslash.io:8890/v1   # whisper-stt, for auto-transcribe (verify URL)
+    volumes:
+      - ./data:/data                             # voices, takes, backups, settings
+      - /models:/models:ro                       # weights at /models/openbmb/VoxCPM2
+      - /opt/qwen3-tts/data/speakers:/import/qwen3-speakers:ro   # one-time voice import source
+    ports:
+      - "8881:8000"     # during A/B; move to 8880 at cutover after qwen3-tts-openai is stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/ready"]
+      start_period: 300s
+      interval: 30s
+    logging:
+      driver: journald
