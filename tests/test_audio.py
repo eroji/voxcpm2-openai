@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import shutil
+
 import numpy as np
 import pytest
+import soundfile as sf
 from app import audio
 
 
@@ -63,6 +66,27 @@ def test_transcode_speed_shortens_duration():
     slow = audio.transcode(tone(1.0), 48000, "wav", target_rate=48000, speed=2.0)
     fast_samples, _ = audio.read_audio(slow)
     assert len(fast_samples) / 48000 == pytest.approx(0.5, abs=0.01)
+
+
+def test_ffmpeg_run_is_killed_on_timeout():
+    if shutil.which("ffmpeg") is None:
+        pytest.skip("ffmpeg not installed")
+    raw = tone(60.0).astype("<f4").tobytes()  # long input: ffmpeg cannot finish in 1 ms
+    with pytest.raises(RuntimeError, match="ffmpeg timed out"):
+        audio._run_ffmpeg(
+            ["-f", "f32le", "-ar", "48000", "-ac", "1", "-i", "pipe:0", "-f", "f32le", "pipe:1"],
+            raw,
+            timeout=0.001,
+        )
+
+
+def test_info_duration_s_reads_header_without_decode():
+    decoded, rate = audio.read_audio(audio.wav_bytes(tone(6.0), 48000))
+    assert audio.info_duration_s(audio.wav_bytes(tone(6.0), 48000)) == pytest.approx(
+        audio.duration_s(decoded, rate), abs=0.01
+    )
+    with pytest.raises(sf.LibsndfileError):
+        audio.info_duration_s(b"not audio at all")
 
 
 def test_decode_data_uri_rejects_non_data():

@@ -40,6 +40,12 @@ def read_audio_file(path: str | Path) -> tuple[np.ndarray, int]:
     return read_audio(Path(path).read_bytes())
 
 
+def info_duration_s(data: bytes) -> float:
+    """Duration from the container header only — cheap enough to check before a full decode."""
+    info = sf.info(io.BytesIO(data))
+    return float(info.frames) / float(info.samplerate) if info.samplerate else 0.0
+
+
 def wav_bytes(samples: np.ndarray, sample_rate: int) -> bytes:
     buf = io.BytesIO()
     sf.write(
@@ -63,13 +69,17 @@ def duration_s(samples: np.ndarray, sample_rate: int) -> float:
     return float(len(samples) / sample_rate)
 
 
-def _run_ffmpeg(args: list[str], data: bytes) -> bytes:
-    proc = subprocess.run(
-        ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", *args],
-        input=data,
-        capture_output=True,
-        check=False,
-    )
+def _run_ffmpeg(args: list[str], data: bytes, timeout: float = 60.0) -> bytes:
+    try:
+        proc = subprocess.run(
+            ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", *args],
+            input=data,
+            capture_output=True,
+            check=False,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError("ffmpeg timed out") from exc
     if proc.returncode != 0:
         raise RuntimeError(proc.stderr.decode("utf-8", "replace").strip() or "ffmpeg failed")
     return proc.stdout
