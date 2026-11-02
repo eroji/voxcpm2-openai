@@ -27,10 +27,15 @@ ENV HF_HOME=/var/cache/hf \
     ENGINE_PORT=8102 \
     DEPLOY_CONFIG=/opt/app/deploy/voxcpm2-3090.yaml
 
-# The implementing agent replaces /opt/app with the new app and s6 service definitions:
-#   /opt/app/app/...                  FastAPI app (OpenAI API + Studio API + static UI)
-#   /opt/app/deploy/voxcpm2-3090.yaml engine deploy config
-#   /etc/s6-overlay/s6-rc.d/engine    vllm serve $MODEL_PATH --omni --deploy-config $DEPLOY_CONFIG
-#                                     --served-model-name openbmb/VoxCPM2 --host 127.0.0.1 --port $ENGINE_PORT
-#   /etc/s6-overlay/s6-rc.d/app       uvicorn on 0.0.0.0:8000, depends on engine readiness
-COPY app/ /opt/app/
+# Runtime Python deps (match pyproject.toml; uv keeps the NCCL pin in /etc/uv-overrides.txt)
+RUN uv pip install --system --break-system-packages --no-cache \
+    fastapi "uvicorn[standard]" httpx numpy soundfile safetensors pydantic pydantic-settings python-multipart
+
+# App (OpenAI API + Studio API + static UI), engine deploy config, and s6-overlay v3
+# service definitions: engine = vllm serve on 127.0.0.1:$ENGINE_PORT,
+# app = uvicorn on 0.0.0.0:8000 (starts after engine, polls /health + warms up itself).
+COPY app/ /opt/app/app/
+COPY deploy/voxcpm2-3090.yaml /opt/app/deploy/voxcpm2-3090.yaml
+RUN rm -rf /etc/s6-overlay/s6-rc.d/engine /etc/s6-overlay/s6-rc.d/app
+COPY deploy/s6/ /etc/s6-overlay/s6-rc.d/
+RUN chmod +x /etc/s6-overlay/s6-rc.d/engine/run /etc/s6-overlay/s6-rc.d/app/run
