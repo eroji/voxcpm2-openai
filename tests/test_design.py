@@ -88,7 +88,7 @@ def test_save_designs_voice(
         await engine.start()
         try:
             result = await SpeechService(store, engine, settings).synthesize(
-                SpeechRequest(input="Hello there.", voice="designed-one")
+                SpeechRequest(model="voxcpm2", input="Hello there.", voice="designed-one")
             )
         finally:
             await engine.aclose()

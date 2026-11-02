@@ -33,7 +33,7 @@ def _service(store: VoiceStore, settings: Settings, url: str) -> tuple[SpeechSer
 
 
 def _req(fmt: str = "wav", *, input: str = "hello there", **kw: Any) -> SpeechRequest:
-    return SpeechRequest(input=input, voice="ashley-en", response_format=fmt, **kw)
+    return SpeechRequest(model="voxcpm2", input=input, voice="ashley-en", response_format=fmt, **kw)
 
 
 @pytest.mark.parametrize("fmt", ["pcm", "wav", "mp3"])
@@ -80,7 +80,7 @@ async def test_unknown_voice_is_bad_request_with_names(
 ) -> None:
     service, engine = _service(library, settings, fake_engine.url)
     with pytest.raises(BadRequest) as exc:
-        service.resolve(SpeechRequest(input="hi", voice="Nope"))
+        service.resolve(SpeechRequest(model="voxcpm2", input="hi", voice="Nope"))
     assert exc.value.status_code == 400
     assert exc.value.param == "voice"
     assert "ashley-en" in exc.value.message
@@ -94,7 +94,7 @@ async def test_display_name_voice_lists_valid_names(
     so resolve must map *any* lookup failure to voice_not_found listing the keys."""
     service, engine = _service(library, settings, fake_engine.url)
     with pytest.raises(BadRequest) as exc:
-        service.resolve(SpeechRequest(input="hi", voice="Ashley EN"))
+        service.resolve(SpeechRequest(model="voxcpm2", input="hi", voice="Ashley EN"))
     assert exc.value.status_code == 400
     assert exc.value.param == "voice"
     assert exc.value.code == "voice_not_found"
@@ -233,7 +233,7 @@ async def test_oversized_ref_audio_rejected(
     service, engine = _service(library, settings, fake_engine.url)
     big = "data:audio/wav;base64," + "A" * 4096
     with pytest.raises(BadRequest) as exc:
-        service.resolve(SpeechRequest(input="hi", voice="label", ref_audio=big))
+        service.resolve(SpeechRequest(model="voxcpm2", input="hi", voice="label", ref_audio=big))
     assert exc.value.code == "ref_audio_too_large"
     await engine.aclose()
 
