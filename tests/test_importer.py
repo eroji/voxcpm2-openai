@@ -1,0 +1,124 @@
+"""Qwen3 speaker importer: language/source mapping, skip/overwrite, failure isolation."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import numpy as np
+import pytest
+from app.importer import import_qwen3_speakers
+from app.store import VoiceStore
+from safetensors.numpy import save_file
+
+VALID_NAMES = [
+    "alison-en",
+    "ashley-en",
+    "ashley-ja",
+    "ashley-kr",
+    "ashley-zh",
+    "bennett-en",
+    "jack",
+]
+
+
+def tone(seconds: float = 1.0, rate: int = 24000) -> np.ndarray:
+    t = np.linspace(0, seconds, int(rate * seconds), endpoint=False)
+    return (0.3 * np.sin(2 * np.pi * 220 * t)).astype(np.float32)
+
+
+def speaker_file(src: Path, name: str, **overrides: str | None) -> Path:
+    meta: dict[str, str] = {
+        "name": name,
+        "voice_name_lower": name.lower(),
+        "ref_text": "Thanks for waiting. Everything checks out.",
+        "sample_rate": "24000",
+        "created_at": "1791831655",
+        "consent": "uploaded-via-studio",
+        "embedding_source": "audio",
+        "mime_type": "audio/wav",
+        "original_filename": f"{name}.wav",
+        "file_size": "48044",
+    }
+    for key, value in overrides.items():
+        if value is None:
+            meta.pop(key, None)
+        else:
+            meta[key] = value
+    path = src / f"{name}.safetensors"
+    save_file({"audio": tone()}, str(path), metadata=meta)
+    return path
+
+
+@pytest.fixture
+def source_dir(tmp_path: Path) -> Path:
+    src = tmp_path / "import"
+    src.mkdir()
+    for name in VALID_NAMES:
+        speaker_file(src, name)
+    speaker_file(src, "alison-en", consent="own-generated-voice")  # designed
+    speaker_file(src, "bennett-en", consent=None)  # consent missing -> default
+    speaker_file(src, "Bad Name", voice_name_lower="Bad Name")  # invalid name
+    (src / "broken.safetensors").write_bytes(b"definitely not safetensors")
+    return src
+
+
+def test_import_maps_language_and_source(store: VoiceStore, source_dir: Path):
+    result = import_qwen3_speakers(store, source_dir)
+    assert sorted(result["imported"]) == VALID_NAMES
+    assert result["skipped"] == []
+    assert store.get("ashley-en").language == "en"
+    assert store.get("ashley-ja").language == "ja"
+    assert store.get("ashley-kr").language == "ko"
+    assert store.get("ashley-zh").language == "zh"
+    assert store.get("jack").language == ""
+    assert store.get("alison-en").source == "designed"
+    assert store.get("alison-en").consent == "own-generated-voice"
+    assert store.get("ashley-en").source == "uploaded"
+    assert store.get("bennett-en").source == "uploaded"
+    assert store.get("bennett-en").consent == "uploaded-via-studio"
+
+
+def test_import_preserves_audio_and_metadata(store: VoiceStore, source_dir: Path):
+    import_qwen3_speakers(store, source_dir)
+    samples, rate = store.read_audio("ashley-en")
+    assert rate == 24000
+    assert np.allclose(samples, tone())
+    voice = store.get("ashley-en")
+    assert voice.ref_text.startswith("Thanks for waiting")
+    assert voice.metadata["mime_type"] == "audio/wav"
+    assert voice.metadata["original_filename"] == "ashley-en.wav"
+    assert voice.metadata["file_size"] == "48044"
+
+
+def test_corrupt_and_invalid_names_go_to_failed(store: VoiceStore, source_dir: Path):
+    result = import_qwen3_speakers(store, source_dir)
+    failed = dict(result["failed"])
+    assert set(failed) == {"broken", "Bad Name"}
+    assert all(message for message in failed.values())
+    assert not store.exists("broken")
+    assert not store.exists("Bad Name")
+
+
+def test_second_run_skips_existing(store: VoiceStore, source_dir: Path):
+    first = import_qwen3_speakers(store, source_dir)
+    result = import_qwen3_speakers(store, source_dir)
+    assert result["imported"] == []
+    assert sorted(result["skipped"]) == sorted(first["imported"])
+
+
+def test_overwrite_replaces_existing(store: VoiceStore, source_dir: Path, make_voice):
+    make_voice("ashley-en", "en", seconds=0.5)
+    result = import_qwen3_speakers(store, source_dir, overwrite=True)
+    assert "ashley-en" in result["imported"]
+    assert result["skipped"] == []
+    samples, _ = store.read_audio("ashley-en")
+    assert np.allclose(samples, tone())
+    assert len(store.list()) == len(VALID_NAMES)
+
+
+def test_missing_or_empty_source_dir_is_not_an_error(store: VoiceStore, tmp_path: Path):
+    empty_result: dict = {"imported": [], "skipped": [], "failed": []}
+    assert import_qwen3_speakers(store, tmp_path / "nope") == empty_result
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    assert import_qwen3_speakers(store, empty) == empty_result
