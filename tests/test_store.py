@@ -222,7 +222,24 @@ def test_uppercase_hand_placed_file_is_invisible(store: VoiceStore, settings: Se
     for name in ("Ashley-en", "ashley-en", "ASHLEY-EN"):
         with pytest.raises(NotFound):
             store.get(name)
-    assert VoiceStore(settings).list() == []  # index rebuild skips it too
+
+    # Drop the index so _load_index() must call _rebuild_index(); otherwise the second
+    # store reuses voices.json and list()'s glob fallback hides a rebuild regression.
+    (settings.data_dir / "voices.json").unlink(missing_ok=True)
+    rebuilt = VoiceStore(settings)
+    assert rebuilt.list() == []
+    index = json.loads(rebuilt.index_path.read_text("utf-8"))
+    assert index["order"] == []
+    assert "ashley-en" not in index["voices"]  # the uppercase stem is skipped, not lowercased
+
+    # Mirror case: the same audio under a valid lowercase stem is rebuilt and listed.
+    lowercase = store.root / "ashley-en.safetensors"
+    lowercase.write_bytes((store.root / "Ashley-en.safetensors").read_bytes())
+    (settings.data_dir / "voices.json").unlink(missing_ok=True)
+    rebuilt = VoiceStore(settings)
+    assert [v.key for v in rebuilt.list()] == ["ashley-en"]
+    index = json.loads(rebuilt.index_path.read_text("utf-8"))
+    assert index["voices"]["ashley-en"]["language"] == "en"
 
 
 def test_wave_cache_is_bounded(tmp_path):
