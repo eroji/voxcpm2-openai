@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 from app import audio as audio_utils
 from app.config import Settings
-from app.errors import BadRequest, Conflicting
+from app.errors import BadRequest, Conflicting, NotFound
 from app.store import VoiceStore
 from safetensors.numpy import save_file
 
@@ -186,6 +186,54 @@ def test_create_accepts_explicit_key(store: VoiceStore):
             consent="uploaded-via-studio",
             key="../escape",
         )
+
+
+def test_display_name_voice_is_addressable_by_key(store: VoiceStore):
+    """SPEC §5: the lowercase key is the lookup path; the display name is display-only."""
+    voice = store.create(
+        "Ashley EN",
+        tone(),
+        24000,
+        ref_text="x",
+        language="en",
+        consent="uploaded-via-studio",
+        key="ashley-en",
+    )
+    summary = voice.summary()
+    assert summary["key"] == "ashley-en"
+    assert summary["name"] == "Ashley EN"
+    assert store.get("ashley-en").name == "Ashley EN"
+    assert store.exists("ashley-en")
+    samples, rate = store.read_audio("ashley-en")
+    assert samples.size and rate == 24000
+    assert store.data_uri("ashley-en").startswith("data:audio/wav;base64,")
+    assert [v.key for v in store.list()] == ["ashley-en"]
+    assert VoiceStore(store.settings).get("ashley-en").name == "Ashley EN"
+
+
+def test_uppercase_hand_placed_file_is_invisible(store: VoiceStore, settings: Settings):
+    """A file whose stem is not the lowercase key can never be fetched: skip it."""
+    save_file(
+        {"audio": tone()},
+        str(store.root / "Ashley-en.safetensors"),
+        metadata={"name": "Ashley-en", "sample_rate": "24000", "language": "en"},
+    )
+    assert store.list() == []
+    for name in ("Ashley-en", "ashley-en", "ASHLEY-EN"):
+        with pytest.raises(NotFound):
+            store.get(name)
+    assert VoiceStore(settings).list() == []  # index rebuild skips it too
+
+
+def test_wave_cache_is_bounded(tmp_path):
+    from app.store import TakeStore
+
+    settings = Settings(data_dir=tmp_path / "data", take_retention=100)
+    takes = TakeStore(settings)
+    for i in range(70):
+        meta = takes.create(tone(0.1), 24000, voice="v", text=f"take {i}")
+        takes.wave(meta["id"])
+    assert len(takes._wave_cache) <= 64
 
 
 def test_hand_placed_metadata_key_cannot_escape(store: VoiceStore):

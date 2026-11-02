@@ -29,7 +29,7 @@ from app.models import VOICE_NAME_PATTERN
 NAME_RE = re.compile(VOICE_NAME_PATTERN)
 TAKE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{6,80}$")
 INDEX_VERSION = 1
-_URI_CACHE_MAX = 64
+_CACHE_MAX = 64
 Envelope = list[float]
 DEFAULT_SETTINGS = {
     "cfg": 2.0,
@@ -95,7 +95,15 @@ def _now() -> int:
 def _read_voice_file(path: Path) -> Voice:
     # SPEC §5: the filename stem is the key. Metadata voice_name_lower is untrusted
     # (a hand-placed file must never redirect reads, deletes or backups).
+    # A stem that is not already the lowercase key (e.g. "Ashley-en") can never be
+    # resolved by get(), so scans must skip it rather than list an unreachable voice.
     key = validate_voice_name(path.stem)
+    if path.stem != key:
+        raise BadRequest(
+            f"Voice file '{path.name}' must be named with its lowercase key.",
+            param="name",
+            code="invalid_voice_name",
+        )
     with safe_open(str(path), framework="numpy") as handle:
         meta = {str(k): str(v) for k, v in (handle.metadata() or {}).items()}
         tensor = handle.get_tensor("audio")
@@ -198,7 +206,7 @@ class VoiceStore:
         key = validate_voice_name(name)
         path = self.root / f"{key}.safetensors"
         if not path.exists():
-            raise VoiceNotFound(name, [v.name for v in self.list()])
+            raise VoiceNotFound(name, [v.key for v in self.list()])
         with self._lock:
             return _read_voice_file(path)
 
@@ -242,7 +250,7 @@ class VoiceStore:
         uri = audio_utils.to_wav_data_uri(*self.read_audio(voice.key))
         with self._lock:
             self._uri_cache[voice.key] = (mtime, uri)
-            while len(self._uri_cache) > _URI_CACHE_MAX:  # evict oldest (insertion order)
+            while len(self._uri_cache) > _CACHE_MAX:  # evict oldest (insertion order)
                 self._uri_cache.pop(next(iter(self._uri_cache)))
         return uri
 
@@ -471,6 +479,8 @@ class TakeStore:
         amps = audio_utils.rms_envelope(samples, 72)
         with self._lock:
             self._wave_cache[take_id] = (mtime, amps)
+            while len(self._wave_cache) > _CACHE_MAX:  # evict oldest (insertion order)
+                self._wave_cache.pop(next(iter(self._wave_cache)))
         return amps
 
     def delete(self, take_id: str) -> None:
