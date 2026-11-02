@@ -6,20 +6,18 @@ import asyncio
 import contextlib
 import logging
 import struct
-from collections.abc import AsyncGenerator, AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 
 from app import audio as audio_utils
 from app.config import Settings
-from app.engine import EngineClient, StreamHandle, SynthParams
+from app.engine import ENGINE_SAMPLE_RATE, EngineClient, StreamHandle, SynthParams
 from app.errors import BadRequest, EngineError
 from app.models import SpeechRequest
 from app.store import VoiceNotFound, VoiceStore
 
 logger = logging.getLogger(__name__)
 _speed_stream_logged = False
-
-ENGINE_SAMPLE_RATE = 48000  # engine-native stream rate (SPEC §6); SAMPLE_RATE is output-only
 
 
 @dataclass(slots=True)
@@ -47,6 +45,44 @@ class StreamingSpeech:
     media_type: str
     sample_rate: int
     chunks: AsyncIterator[bytes]
+    aclose: Callable[[], Awaitable[None]]
+    """Releases the engine slot (and any ffmpeg process) without iterating.
+
+    Routers must ``try/finally: await streaming.aclose()`` so a client that
+    disconnects before the first chunk cannot leak a concurrency slot.
+    Idempotent: safe after exhaustion and safe to call twice.
+    """
+
+
+class _OwnedChunks:
+    """Iterator that runs the owner's cleanup on exhaustion *and* on ``aclose()``.
+
+    ``aclose()`` on a never-started async generator is a language no-op, so the
+    engine slot must be released through this wrapper instead: the routers call
+    ``streaming.aclose()`` and closing ``chunks`` both route to the same
+    idempotent cleanup, whether or not a single chunk was ever pulled.
+    """
+
+    def __init__(
+        self, source: AsyncGenerator[bytes, None], cleanup: Callable[[], Awaitable[None]]
+    ) -> None:
+        self._source = source
+        self._cleanup = cleanup
+
+    def __aiter__(self) -> AsyncIterator[bytes]:
+        return self
+
+    async def __anext__(self) -> bytes:
+        try:
+            return await self._source.__anext__()
+        except StopAsyncIteration:
+            await self._cleanup()  # no-op when the generator's finally already ran
+            raise
+
+    async def aclose(self) -> None:
+        with contextlib.suppress(Exception):
+            await self._source.aclose()
+        await self._cleanup()
 
 
 def wav_stream_header(sample_rate: int) -> bytes:
@@ -106,12 +142,14 @@ def _ffmpeg_args(fmt: str, sample_rate_in: int, sample_rate_out: int) -> list[st
 
 async def ffmpeg_stream(
     handle: StreamHandle, sample_rate_in: int, sample_rate_out: int, fmt: str
-) -> AsyncIterator[bytes]:
+) -> tuple[AsyncGenerator[bytes, None], Callable[[], Awaitable[None]]]:
     """Transcode the engine stream through ffmpeg.
 
     Spawns eagerly so a spawn/pipe failure releases the engine slot and raises
-    ``EngineError`` before the router sends headers; the returned generator
-    owns the handle and closes it on any exit.
+    ``EngineError`` before the router sends headers. Returns the chunk generator
+    and an idempotent ``cleanup`` that terminates the process, cancels the
+    feeder and releases the engine slot — the cleanup works even if the
+    generator is never iterated.
     """
     try:
         args = _ffmpeg_args(fmt, sample_rate_in, sample_rate_out)
@@ -124,23 +162,53 @@ async def ffmpeg_stream(
         stdin, stdout, stderr_pipe = proc.stdin, proc.stdout, proc.stderr
         if stdin is None or stdout is None or stderr_pipe is None:
             raise EngineError("ffmpeg pipes unavailable")
-    except Exception as exc:  # noqa: BLE001 - ffmpeg missing or pipes refused
+    except BaseException as exc:  # noqa: BLE001 - ffmpeg missing, pipes refused, or cancelled
+        # CancelledError lands here too (e.g. cancelled during the spawn await):
+        # release the slot through the owner, then re-raise it unchanged.
         await handle.aclose()
+        if isinstance(exc, asyncio.CancelledError):
+            raise
         raise EngineError(f"cannot start ffmpeg: {exc}") from exc
 
-    async def pump() -> AsyncIterator[bytes]:
-        async def feed() -> None:
-            try:
-                async for chunk in handle.chunks:
-                    stdin.write(chunk)
-                    await stdin.drain()
-            except Exception as exc:  # noqa: BLE001 - propagate to the reader below
-                proc.kill()
-                raise exc
-            finally:
-                if not stdin.is_closing():
-                    stdin.close()
+    feeder: asyncio.Task[None] | None = None
+    done = False
 
+    async def cleanup() -> None:
+        nonlocal done
+        if done:
+            return
+        done = True
+        # Client disconnect / cancel: never `await feeder` while stdout is unread —
+        # ffmpeg would block on a full stdout pipe and the engine slot would leak.
+        if feeder is not None and not feeder.done():
+            feeder.cancel()
+        if feeder is not None:
+            with contextlib.suppress(BaseException):
+                await asyncio.gather(feeder, return_exceptions=True)
+        if not stdin.is_closing():
+            stdin.close()
+        if proc.returncode is None:
+            proc.kill()
+        with contextlib.suppress(Exception):
+            await proc.wait()
+        with contextlib.suppress(Exception):
+            await stderr_pipe.read()
+        await handle.aclose()
+
+    async def feed() -> None:
+        try:
+            async for chunk in handle.chunks:
+                stdin.write(chunk)
+                await stdin.drain()
+        except Exception as exc:  # noqa: BLE001 - propagate to the reader below
+            proc.kill()
+            raise exc
+        finally:
+            if not stdin.is_closing():
+                stdin.close()
+
+    async def pump() -> AsyncGenerator[bytes, None]:
+        nonlocal feeder
         feeder = asyncio.create_task(feed())
         try:
             while True:
@@ -160,21 +228,9 @@ async def ffmpeg_stream(
                     f"ffmpeg stream failed: {stderr.decode('utf-8', 'replace')[:500]}"
                 )
         finally:
-            # Client disconnect / cancel: never `await feeder` while stdout is unread —
-            # ffmpeg would block on a full stdout pipe and the engine slot would leak.
-            if not feeder.done():
-                feeder.cancel()
-            with contextlib.suppress(BaseException):
-                await asyncio.gather(feeder, return_exceptions=True)
-            if proc.returncode is None:
-                proc.kill()
-            with contextlib.suppress(Exception):
-                await proc.wait()
-            with contextlib.suppress(Exception):
-                await stderr_pipe.read()
-            await handle.aclose()
+            await cleanup()
 
-    return pump()
+    return pump(), cleanup
 
 
 class SpeechService:
@@ -185,6 +241,13 @@ class SpeechService:
 
     def _resolve_adhoc(self, request: SpeechRequest) -> ResolvedVoice:
         ref_audio = (request.ref_audio or "").strip()
+        # SPEC §10 upload cap spirit: bound the base64 payload *before* decoding it.
+        if len(ref_audio) > self.settings.max_upload_bytes * 4 // 3 + 256:
+            raise BadRequest(
+                "ref_audio exceeds the maximum accepted size.",
+                param="ref_audio",
+                code="ref_audio_too_large",
+            )
         if audio_utils.is_data_uri(ref_audio):
             try:
                 audio_utils.decode_data_uri(ref_audio)
@@ -283,38 +346,33 @@ class SpeechService:
         voice = self.resolve(request)
         target_rate = request.sample_rate or self.settings.sample_rate
         handle = await self.engine.open_stream(self._params(request, voice, stream=True))
-        source = self._hold(handle)
         fmt = request.response_format
-
-        if fmt == "pcm" and target_rate == ENGINE_SAMPLE_RATE:
-            chunks: AsyncIterator[bytes] = source
-        elif fmt == "wav" and target_rate == ENGINE_SAMPLE_RATE:
-            chunks = self._wav_native(source, ENGINE_SAMPLE_RATE)
-        else:
-            chunks = await ffmpeg_stream(handle, ENGINE_SAMPLE_RATE, target_rate, fmt)
-
+        try:
+            if fmt == "pcm" and target_rate == ENGINE_SAMPLE_RATE:
+                source, cleanup = handle.chunks, handle.aclose
+            elif fmt == "wav" and target_rate == ENGINE_SAMPLE_RATE:
+                source, cleanup = self._wav_native(handle, ENGINE_SAMPLE_RATE), handle.aclose
+            else:
+                source, cleanup = await ffmpeg_stream(handle, ENGINE_SAMPLE_RATE, target_rate, fmt)
+        except BaseException:
+            # Admission succeeded but construction failed or was cancelled:
+            # the slot must not depend on the generator ever starting.
+            await handle.aclose()
+            raise
+        chunks = _OwnedChunks(source, cleanup)
         return StreamingSpeech(
             voice=voice.name,
             media_type=audio_utils.mime_for(fmt),
             sample_rate=target_rate,
             chunks=chunks,
+            aclose=chunks.aclose,
         )
 
     @staticmethod
-    async def _hold(handle: StreamHandle) -> AsyncGenerator[bytes, None]:
-        """Pass chunks through, guaranteeing the engine slot is released on any exit."""
+    async def _wav_native(handle: StreamHandle, sample_rate: int) -> AsyncGenerator[bytes, None]:
+        yield wav_stream_header(sample_rate)
         try:
             async for chunk in handle.chunks:
                 yield chunk
         finally:
             await handle.aclose()
-
-    async def _wav_native(
-        self, source: AsyncGenerator[bytes, None], sample_rate: int
-    ) -> AsyncIterator[bytes]:
-        yield wav_stream_header(sample_rate)
-        try:
-            async for chunk in source:
-                yield chunk
-        finally:
-            await source.aclose()

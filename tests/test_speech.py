@@ -158,6 +158,94 @@ async def test_aclose_cancellation_releases_slot(
     await engine.aclose()
 
 
+@pytest.mark.parametrize("fmt", ["pcm", "wav", "mp3"])
+async def test_never_iterated_stream_releases_slot(
+    fake_engine: Any, settings: Settings, library: VoiceStore, fmt: str
+) -> None:
+    """Wave-3 BLOCKER: closing ``chunks`` before the first pull used to leak the slot."""
+    service, engine = _service(library, settings, fake_engine.url)
+    await engine.start()
+    speech = await service.stream(_req(fmt, stream=True))
+    await speech.chunks.aclose()  # dropped without ever pulling a chunk
+    result = await asyncio.wait_for(service.synthesize(_req()), timeout=5.0)
+    assert result.audio  # the slot came back without the generator ever starting
+    await engine.aclose()
+
+
+@pytest.mark.parametrize("fmt", ["pcm", "wav", "mp3"])
+async def test_aclose_releases_slot_and_is_idempotent(
+    fake_engine: Any, settings: Settings, library: VoiceStore, fmt: str
+) -> None:
+    service, engine = _service(library, settings, fake_engine.url)
+    await engine.start()
+    speech = await service.stream(_req(fmt, stream=True))
+    await speech.aclose()
+    await speech.aclose()  # second call is a no-op
+    result = await asyncio.wait_for(service.synthesize(_req()), timeout=5.0)
+    assert result.audio
+    await engine.aclose()
+
+
+async def test_cancel_during_ffmpeg_spawn_releases_slot(
+    fake_engine: Any, settings: Settings, library: VoiceStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service, engine = _service(library, settings, fake_engine.url)
+    await engine.start()
+    real_spawn = asyncio.create_subprocess_exec
+    spawning = asyncio.Event()
+
+    async def slow_spawn(*args: Any, **kwargs: Any) -> Any:
+        spawning.set()
+        await asyncio.sleep(30)
+        return await real_spawn(*args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", slow_spawn)
+    task = asyncio.create_task(service.stream(_req("mp3", stream=True)))
+    await spawning.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", real_spawn)
+    result = await asyncio.wait_for(service.synthesize(_req()), timeout=5.0)
+    assert result.audio  # the cancelled spawn returned the slot
+    await engine.aclose()
+
+
+async def test_oversized_ref_audio_rejected(
+    fake_engine: Any, settings: Settings, library: VoiceStore
+) -> None:
+    settings = settings.model_copy(update={"max_upload_bytes": 100})
+    service, engine = _service(library, settings, fake_engine.url)
+    big = "data:audio/wav;base64," + "A" * 4096
+    with pytest.raises(BadRequest) as exc:
+        service.resolve(SpeechRequest(input="hi", voice="label", ref_audio=big))
+    assert exc.value.code == "ref_audio_too_large"
+    await engine.aclose()
+
+
+async def test_streamed_pcm_resamples_from_engine_native_rate(
+    fake_engine: Any, settings: Settings, library: VoiceStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """pcm at SAMPLE_RATE=24000: ffmpeg *input* stays 48 kHz, output is 24 kHz s16le."""
+    settings = settings.model_copy(update={"sample_rate": 24000})
+    service, engine = _service(library, settings, fake_engine.url)
+    await engine.start()
+    seen: list[list[str]] = []
+    real_spawn = asyncio.create_subprocess_exec
+
+    async def spy(*args: Any, **kwargs: Any) -> Any:
+        seen.append(list(args))
+        return await real_spawn(*args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spy)
+    speech = await service.stream(_req("pcm", stream=True))
+    assert speech.sample_rate == 24000  # routers send this as X-Sample-Rate
+    data = b"".join([chunk async for chunk in speech.chunks])
+    assert seen and int(seen[0][seen[0].index("-ar") + 1]) == 48000  # first -ar is the input
+    assert abs(len(data) / 2 / 24000 - 0.6) < 0.1  # resampled to 24 kHz, correct duration
+    await engine.aclose()
+
+
 @pytest.mark.parametrize("fmt", ["pcm", "wav"])
 async def test_stream_input_rate_is_engine_native_not_sample_rate(
     fake_engine: Any, settings: Settings, library: VoiceStore, fmt: str

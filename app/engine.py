@@ -23,7 +23,7 @@ import shutil
 import subprocess
 import time
 from collections import deque
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version
@@ -40,7 +40,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger("app.engine")
 
 _SPEECH_PATH = "/v1/audio/speech"
-_SAMPLE_RATE = 48000  # engine-native rate (SPEC §2)
+ENGINE_SAMPLE_RATE = 48_000  # engine-native rate (SPEC §2); single source of truth
 
 
 @dataclass(slots=True)
@@ -89,7 +89,7 @@ class StreamHandle:
     ``finally``; ``aclose`` is idempotent and safe after exhaustion.
     """
 
-    chunks: AsyncIterator[bytes]
+    chunks: AsyncGenerator[bytes, None]
     aclose: Callable[[], Awaitable[None]]
 
 
@@ -234,7 +234,7 @@ class EngineClient:
                 # even when resp.aclose() is interrupted.
                 self._release()
 
-        async def chunks() -> AsyncIterator[bytes]:
+        async def chunks() -> AsyncGenerator[bytes, None]:
             """Engine streams s16le mono 48 kHz (SPEC §6); pass it through unchanged."""
             first_ms: float | None = None
             total = 0
@@ -255,7 +255,7 @@ class EngineClient:
                 except httpx.HTTPError as exc:
                     raise EngineError(f"engine stream failed: {exc}") from exc
                 wall = time.perf_counter() - started
-                dur = total / 2 / _SAMPLE_RATE
+                dur = total / 2 / ENGINE_SAMPLE_RATE
                 self._record(wall / dur if dur > 0 else None, first_ms)
             finally:
                 await aclose()

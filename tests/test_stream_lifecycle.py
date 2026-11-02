@@ -85,10 +85,15 @@ def _truncating_server() -> tuple[str, socket.socket, threading.Thread]:
                 try:
                     request = conn.recv(65536)
                     if b"GET /health" in request:
-                        conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}")
-                    else:
                         conn.sendall(
-                            b"HTTP/1.1 200 OK\r\nContent-Length: 4096\r\n\r\n" + b"\x00" * 64
+                            b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}"
+                        )
+                    else:
+                        # Connection: close stops httpx reusing the health-check keep-alive
+                        # connection, so the truncation always lands mid-body, not at open_stream.
+                        conn.sendall(
+                            b"HTTP/1.1 200 OK\r\nContent-Length: 4096\r\nConnection: close\r\n\r\n"
+                            + b"\x00" * 64
                         )
                 except OSError:
                     pass
