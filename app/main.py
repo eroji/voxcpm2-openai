@@ -1,0 +1,153 @@
+"""FastAPI application factory, lifespan and shared HTTP wiring."""
+
+from __future__ import annotations
+
+import asyncio
+import base64
+import logging
+import secrets
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.staticfiles import StaticFiles
+
+from app.config import Settings
+from app.engine import EngineClient
+from app.errors import APIError
+from app.importer import import_qwen3_speakers
+from app.routers import (
+    studio_clone,
+    studio_design,
+    studio_engine,
+    studio_takes,
+    studio_voices,
+    system,
+    v1,
+)
+from app.speech import SpeechService
+from app.store import TakeStore, VoiceStore
+from app.warmup import WarmupService
+
+logger = logging.getLogger(__name__)
+
+
+def _basic_ok(header: str, user: str, password: str) -> bool:
+    if not header.lower().startswith("basic "):
+        return False
+    try:
+        raw = base64.b64decode(header.split(" ", 1)[1]).decode("utf-8")
+    except Exception:  # noqa: BLE001
+        return False
+    got_user, _, got_password = raw.partition(":")
+    return secrets.compare_digest(got_user, user) & secrets.compare_digest(got_password, password)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    settings: Settings = app.state.settings
+    settings.ensure_dirs()
+
+    store = VoiceStore(settings)
+    takes = TakeStore(settings)
+    engine: EngineClient = app.state.injected_engine or EngineClient.from_settings(settings)
+    app.state.store = store
+    app.state.takes = takes
+    app.state.engine = engine
+    app.state.speech = SpeechService(store, engine, settings)
+    app.state.warmup = WarmupService(store, engine, settings)
+
+    try:
+        await engine.start()
+    except Exception as exc:  # noqa: BLE001 - engine may be absent during local dev
+        logger.warning("engine start failed: %s", exc)
+
+    if settings.import_dir.exists() and not store.list():
+        try:
+            result = await asyncio.to_thread(
+                import_qwen3_speakers, store, settings.import_dir, overwrite=False
+            )
+            logger.info("Qwen3 import: %s", result)
+        except Exception as exc:  # noqa: BLE001 - import must never block startup
+            logger.warning("Qwen3 import failed: %s", exc)
+
+    task = asyncio.create_task(app.state.warmup.run_forever(), name="warmup")
+
+    def _warmup_done(done: asyncio.Task) -> None:
+        if done.cancelled():
+            return
+        exc = done.exception()
+        if exc:
+            logger.warning("warm-up task ended: %s", exc)
+
+    task.add_done_callback(_warmup_done)
+
+    try:
+        yield
+    finally:
+        task.cancel()
+        try:
+            await engine.aclose()
+        except Exception:  # noqa: BLE001
+            logger.debug("engine close failed", exc_info=True)
+
+
+def create_app(settings: Settings | None = None, *, engine: EngineClient | None = None) -> FastAPI:
+    settings = settings or Settings()
+    app = FastAPI(title=settings.app_name, version=settings.version, lifespan=lifespan)
+    app.state.settings = settings
+    app.state.injected_engine = engine
+    app.state.warmup = None
+
+    @app.middleware("http")
+    async def studio_basic_auth(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        creds = settings.studio_credentials
+        path = request.url.path
+        protected = path == "/" or path.startswith("/api/") or path.startswith("/static/")
+        if creds and protected:
+            if not _basic_ok(request.headers.get("authorization", ""), *creds):
+                return JSONResponse(
+                    APIError(401, "Authentication required", type="authentication_error").body(),
+                    status_code=401,
+                    headers={"WWW-Authenticate": 'Basic realm="Voice Studio"'},
+                )
+        return await call_next(request)
+
+    @app.exception_handler(APIError)
+    async def api_error_handler(request: Request, exc: APIError) -> JSONResponse:
+        return JSONResponse(exc.body(), status_code=exc.status_code, headers=exc.headers)
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_error_handler(
+        request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
+        details = "; ".join(
+            f"{'.'.join(str(part) for part in err.get('loc', []))}: {err.get('msg', '')}"
+            for err in exc.errors()
+        )
+        error = APIError(400, details or "Invalid request", param=None, code="invalid_request")
+        return JSONResponse(error.body(), status_code=400)
+
+    app.include_router(system.router)
+    app.include_router(v1.router)
+    app.include_router(studio_voices.router)
+    app.include_router(studio_clone.router)
+    app.include_router(studio_takes.router)
+    app.include_router(studio_engine.router)
+    app.include_router(studio_design.router)
+
+    if settings.static_dir.exists():
+        app.mount("/static", StaticFiles(directory=str(settings.static_dir)), name="static")
+
+        @app.get("/", include_in_schema=False)
+        async def index() -> FileResponse:
+            return FileResponse(settings.static_dir / "index.html")
+
+    return app
+
+
+app = create_app()

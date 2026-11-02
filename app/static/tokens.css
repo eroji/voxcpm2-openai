@@ -1,0 +1,71 @@
+/*
+ * Voice Studio design tokens (dark, Swiss minimalist).
+ * Source of truth for colors, type, spacing and control sizes.
+ * Rules: zero border radius everywhere, rules (lines) instead of cards,
+ * one accent color, no shadows, no gradients.
+ */
+@import url("https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;700&family=IBM+Plex+Mono:wght@400&display=swap");
+
+:root {
+  color-scheme: dark;
+
+  /* Color */
+  --vs-bg: #0E0E0E;            /* page ground */
+  --vs-fg: #EDEDED;            /* primary text, strong rules, outlines */
+  --vs-fg-2: #CFCFCF;          /* secondary body text (take text) */
+  --vs-muted: #9A9A9A;         /* labels, meta, timestamps (7:1 on bg) */
+  --vs-rule: #3A3A3A;          /* input underlines, idle chip borders */
+  --vs-rule-faint: #262626;    /* table row separators */
+  --vs-wave-idle: #8A8A8A;     /* older takes, unselected candidates */
+  --vs-code-bg: #1A1A1A;       /* code / endpoint panel */
+  --vs-accent: #FF3B30;        /* the only accent: active tab, primary button, newest take, selection */
+  --vs-on-accent: #0E0E0E;     /* text on accent (6:1) */
+  --vs-danger: #FF3B30;        /* errors reuse the accent; always pair with text */
+  --vs-ok: #EDEDED;            /* status text stays neutral; no green */
+
+  /* Type */
+  --vs-font: "Inter Tight", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --vs-mono: "IBM Plex Mono", ui-monospace, monospace;   /* code blocks only */
+
+  --vs-fs-display: 34px;   /* app title, weight 700, tracking -0.03em, line-height 0.95 */
+  --vs-fs-stat: 24px;      /* engine figures, weight 700, tracking -0.02em, tabular nums */
+  --vs-fs-h2: 20px;        /* section titles, weight 700, tracking -0.02em */
+  --vs-fs-value: 18px;     /* parameter readouts (CFG, steps), weight 700 */
+  --vs-fs-input-lg: 15px;  /* design description textarea */
+  --vs-fs-body: 13px;      /* default body, inputs, tabs */
+  --vs-fs-small: 12px;     /* buttons, take text, table cells */
+  --vs-fs-label: 11px;     /* row labels, meta, column headers */
+  --vs-fs-micro: 10px;     /* tab numbers */
+  --vs-lh: 1.45;
+
+  /* Space (px) */
+  --vs-s1: 4px;
+  --vs-s2: 6px;
+  --vs-s3: 8px;
+  --vs-s4: 10px;
+  --vs-s5: 12px;
+  --vs-s6: 16px;
+  --vs-s7: 20px;
+  --vs-s8: 24px;
+  --vs-s9: 32px;
+  --vs-s10: 40px;
+
+  /* Layout */
+  --vs-max: 1280px;            /* content max width */
+  --vs-gutter: 32px;           /* page side padding */
+  --vs-label-col: 112px;       /* left label column in form rows */
+  --vs-col-gap: 40px;          /* gap between main and side column */
+
+  /* Controls (heights) */
+  --vs-h-primary: 34px;        /* primary (accent) buttons */
+  --vs-h-input: 32px;          /* inputs, selects, secondary buttons */
+  --vs-h-chip: 28px;           /* voice chips, table action links */
+  --vs-h-link: 24px;           /* text-link buttons in takes */
+  --vs-play: 24px;             /* play button in takes (30px in candidates) */
+
+  /* Lines */
+  --vs-rule-section: 2px solid var(--vs-fg);   /* top of a section / above action row */
+  --vs-rule-row: 1px solid var(--vs-fg);       /* between form rows, above each take */
+  --vs-rule-input: 1px solid var(--vs-rule);   /* under text inputs */
+  --vs-radius: 0;
+}
