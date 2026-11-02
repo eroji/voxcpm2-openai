@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import logging
 import secrets
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -88,6 +89,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
         try:
             await engine.aclose()
         except Exception:  # noqa: BLE001
