@@ -324,12 +324,13 @@ class SpeechService:
         )
 
     async def synthesize(self, request: SpeechRequest) -> SpeechResult:
-        voice = self.resolve(request)
+        voice = await asyncio.to_thread(self.resolve, request)
         result = await self.engine.synth(self._params(request, voice, stream=False))
         try:
-            samples, sample_rate = audio_utils.read_audio(result.audio)
+            samples, sample_rate = await asyncio.to_thread(audio_utils.read_audio, result.audio)
             target_rate = request.sample_rate or self.settings.sample_rate
-            encoded = audio_utils.transcode(
+            encoded = await asyncio.to_thread(
+                audio_utils.transcode,
                 samples,
                 sample_rate,
                 request.response_format,
@@ -358,7 +359,7 @@ class SpeechService:
             logger.warning("speed is ignored for streamed responses (SPEC §6)")
             _speed_stream_logged = True
 
-        voice = self.resolve(request)
+        voice = await asyncio.to_thread(self.resolve, request)
         target_rate = request.sample_rate or self.settings.sample_rate
         handle = await self.engine.open_stream(self._params(request, voice, stream=True))
         fmt = request.response_format

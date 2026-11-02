@@ -13,9 +13,11 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import struct
+import time
 from typing import Any
 
 import pytest
+from app import audio as audio_utils
 from app.audio import read_audio
 from app.config import Settings
 from app.engine import EngineClient, SynthParams
@@ -277,4 +279,60 @@ async def test_stream_input_rate_is_engine_native_not_sample_rate(
         samples, rate = read_audio(data)
         seconds = len(samples) / rate
     assert abs(seconds - 0.6) < 0.1  # engine streamed 0.6 s at 48 kHz, not mislabelled 24 kHz
+    await engine.aclose()
+
+
+async def test_blocking_transcode_does_not_stall_event_loop(
+    fake_engine: Any, settings: Settings, library: VoiceStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """M1-T15: read_audio/transcode run in worker threads, so a slow encode must not
+    freeze the loop (which would starve /health, /ready and the request queue)."""
+    service, engine = _service(library, settings, fake_engine.url)
+    await engine.start()
+
+    real_read = audio_utils.read_audio
+    real_transcode = audio_utils.transcode
+
+    def slow_read(data: bytes) -> Any:
+        time.sleep(0.3)  # blocking call on the wrong thread would freeze the loop
+        return real_read(data)
+
+    def slow_transcode(samples: Any, rate: int, fmt: str, **kw: Any) -> bytes:
+        time.sleep(0.3)
+        return real_transcode(samples, rate, fmt, **kw)
+
+    monkeypatch.setattr(audio_utils, "read_audio", slow_read)
+    monkeypatch.setattr(audio_utils, "transcode", slow_transcode)
+
+    ticks = 0
+
+    async def ticker() -> None:
+        nonlocal ticks
+        while True:
+            await asyncio.sleep(0.02)
+            ticks += 1
+
+    task = asyncio.create_task(ticker())
+    try:
+        result = await asyncio.wait_for(service.synthesize(_req("mp3")), timeout=10.0)
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+    assert result.audio
+    assert ticks >= 3  # the loop kept running while the (threaded) encode slept
+
+
+async def test_synthesize_normal_path_unchanged(
+    fake_engine: Any, settings: Settings, library: VoiceStore
+) -> None:
+    """The to_thread refactor must not change duration/header values."""
+    service, engine = _service(library, settings, fake_engine.url)
+    await engine.start()
+    result = await service.synthesize(_req("wav"))
+    assert result.audio[:4] == b"RIFF"
+    assert result.sample_rate == settings.sample_rate
+    assert abs(result.duration_s - 0.6) < 0.1
+    assert result.voice == "ashley-en"
     await engine.aclose()
