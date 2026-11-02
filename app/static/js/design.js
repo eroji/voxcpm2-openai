@@ -179,6 +179,9 @@ registerScreen("design", {
     $("save-designed").addEventListener("click", save);
     $("design-name").addEventListener("input", updateSaveState);
     $("candidates").addEventListener("click", onCandidatesClick);
+    $("design-lang").addEventListener("change", () => {
+      $("design-sample").lang = $("design-lang").value; // sample text is Japanese until proven otherwise
+    });
     updateSaveState();
   },
   async show() {

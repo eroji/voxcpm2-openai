@@ -22,6 +22,15 @@ from app.main import create_app
 from app.store import VoiceStore
 from tests.fake_engine import FakeEngine
 
+try:
+    from playwright.sync_api import Error as PlaywrightError
+    from playwright.sync_api import sync_playwright
+except ImportError as exc:  # no silent skip: the e2e suite must run or fail loudly
+    raise RuntimeError(
+        "tests/e2e needs Playwright. Install with: "
+        ".venv/bin/pip install playwright && .venv/bin/playwright install chromium"
+    ) from exc
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RESULTS_DIR = REPO_ROOT / "test-results"
 SEED_VOICES = (("ashley-en", "en"), ("ashley-ja", "ja"), ("ashley-ko", "ko"))
@@ -97,11 +106,10 @@ def live_app(fake_engine: FakeEngine, tmp_path_factory: pytest.TempPathFactory) 
 
 @pytest.fixture
 def page() -> Iterator:
-    sync_api = pytest.importorskip("playwright.sync_api")
-    playwright = sync_api.sync_playwright().start()
+    playwright = sync_playwright().start()
     try:
         browser = playwright.chromium.launch(headless=True)
-    except sync_api.Error as exc:
+    except PlaywrightError as exc:
         playwright.stop()
         pytest.fail(
             f"Chromium is not installed. Run: .venv/bin/playwright install chromium ({exc})"

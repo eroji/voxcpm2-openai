@@ -96,12 +96,20 @@ function render() {
   const tbody = document.getElementById("voice-rows");
   tbody.textContent = "";
   const list = visibleVoices();
-  document.getElementById("voices-count").textContent = String(list.length);
+  // the header count is the library total (SPEC §8); filters only change the rows
+  document.getElementById("voices-count").textContent = String(state.voices.length);
   if (!state.voices.length) {
     tbody.append(emptyRow());
-    return;
+  } else if (!list.length) {
+    const td = el("td");
+    td.colSpan = 6;
+    td.append(el("div", "vs-empty", "No voices match the current search or filter."));
+    const tr = document.createElement("tr");
+    tr.append(td);
+    tbody.append(tr);
+  } else {
+    for (const v of list) tbody.append(voiceRow(v));
   }
-  for (const v of list) tbody.append(voiceRow(v));
 }
 
 /* Inline editor: one cell with name / language / transcript inputs + Save/Cancel. */

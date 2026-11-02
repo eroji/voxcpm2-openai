@@ -14,9 +14,7 @@ import httpx
 import numpy as np
 import pytest
 import soundfile as sf
-
-pytest.importorskip("playwright.sync_api")
-from playwright.sync_api import expect  # noqa: E402
+from playwright.sync_api import expect  # missing Playwright = collection error, never a skip
 
 RESULTS_DIR = Path(__file__).resolve().parents[2] / "test-results"
 SCREENS = ["speak", "voices", "clone", "design", "engine"]
@@ -59,6 +57,21 @@ def test_speak_generate(page, live_app, open_studio):
     expect(newest.locator("svg.vs-wave path")).to_have_attribute("d", re.compile("M0.+Z"))
 
 
+def test_speak_stream(page, live_app, open_studio):
+    """Stream on (default): the PCM path plays and still lands a take row (R-033)."""
+    open_studio(page)
+    expect(page.locator("#stream-toggle")).to_have_attribute("aria-pressed", "true")
+    # "slow" holds the first chunk 250 ms so the busy state is observable
+    page.fill("#speak-text", "This streamed line is deliberately slow to synthesise.")
+    page.click("#generate")
+    expect(page.locator("#generate")).to_be_disabled()
+    expect(page.locator("#generate")).to_be_enabled(timeout=30000)
+    expect(page.locator("#generate")).to_have_text("Generate")
+    expect(page.locator("#speak-error")).to_be_hidden()
+    newest = page.locator("#takes-list .vs-take").first
+    expect(newest.locator(".who b")).to_have_text("ashley-en")
+
+
 def test_voices_screen(page, live_app, open_studio):
     open_studio(page, "voices")
     rows = page.locator("#voice-rows tr[data-key]")
@@ -73,6 +86,14 @@ def test_voices_screen(page, live_app, open_studio):
     page.fill("#voice-search", "ashley-ko")
     expect(rows).to_have_count(1)
     expect(page.locator("#voice-rows tr")).to_have_attribute("data-key", "ashley-ko")
+    page.fill("#voice-search", "")
+    expect(rows).to_have_count(3)
+
+    # the header count is the library total; a filter that matches nothing says so in the rows
+    page.fill("#voice-search", "no-such-voice")
+    expect(rows).to_have_count(0)
+    expect(page.locator("#voices-count")).to_have_text("3")
+    expect(page.locator("#voice-rows .vs-empty")).to_contain_text("No voices match")
     page.fill("#voice-search", "")
     expect(rows).to_have_count(3)
 
@@ -114,6 +135,26 @@ def test_clone_gating(page, live_app, open_studio, tmp_path):
     expect(save).to_be_disabled()  # consent still missing
     page.check("#consent")
     expect(save).to_be_enabled()
+
+
+def test_clone_save(page, live_app, open_studio, tmp_path):
+    """Full clone round trip in the browser: file + name + consent → saved voice (R-035)."""
+    httpx.delete(f"{live_app}/api/voices/e2e-saved")  # idempotent across reruns
+    open_studio(page, "clone")
+    wav = tmp_path / "reference.wav"
+    t = np.linspace(0, 5.0, 48000 * 5, endpoint=False)
+    sf.write(wav, (0.2 * np.sin(2 * np.pi * 180 * t)).astype(np.float32), 48000, format="WAV")
+    page.set_input_files("#ref-file", str(wav))
+    page.fill("#clone-name", "e2e-saved")
+    page.check("#consent")
+    expect(page.locator("#save-voice")).to_be_enabled()
+    page.click("#save-voice")
+    expect(page.locator("#clone-status")).to_contain_text("Voice saved.", timeout=15000)
+    expect(page.locator("#clone-error")).to_be_hidden()
+
+    keys = [v["key"] for v in httpx.get(f"{live_app}/api/voices").json()["voices"]]
+    assert "e2e-saved" in keys
+    assert httpx.delete(f"{live_app}/api/voices/e2e-saved").status_code == 200
 
 
 def test_design_flow(page, live_app, open_studio):
@@ -161,9 +202,16 @@ def test_engine_screen(page, live_app, open_studio, fake_engine):
     expect(page.locator("#engine-error")).to_be_hidden()
 
     restart.click()
-    expect(page.locator("#engine-error")).to_be_visible(timeout=15000)
-    expect(page.locator("#engine-error")).to_contain_text("s6-svc")
+    # Dev hosts have no s6: the documented outcome is a 502 mentioning s6-svc. On a deploy
+    # host the restart succeeds and no error appears. Accept either; assert recovery either
+    # way — button state back and /api/engine still answering.
+    try:
+        expect(page.locator("#engine-error")).to_be_visible(timeout=15000)
+    except AssertionError:
+        pass  # restart succeeded: never assert s6-svc text here
     expect(restart).to_have_text("Restart engine")
+    expect(restart).to_be_enabled()
+    assert httpx.get(f"{live_app}/api/engine").status_code == 200
     # the app re-warms on its own; wait it out so the session state is back to Ready
     deadline = time.time() + 30
     while time.time() < deadline and not httpx.get(f"{live_app}/api/engine").json().get("ready"):
@@ -208,12 +256,13 @@ def test_screenshot_1280(page, live_app, open_studio, screen):
     page.screenshot(path=str(RESULTS_DIR / f"ui-{screen}-1280.png"), full_page=True)
 
 
-def test_screenshot_390(page, live_app, open_studio):
+@pytest.mark.parametrize("screen", SCREENS)
+def test_screenshot_390(page, live_app, open_studio, screen):
+    """Mobile parity: every screen at 390×844 (R-047)."""
     RESULTS_DIR.mkdir(exist_ok=True)
     context = page.context.browser.new_context(viewport={"width": 390, "height": 844})
     mobile = context.new_page()
-    for screen in ("speak", "voices"):
-        open_studio(mobile, screen)
-        _settle(mobile, screen)
-        mobile.screenshot(path=str(RESULTS_DIR / f"ui-{screen}-390.png"), full_page=True)
+    open_studio(mobile, screen)
+    _settle(mobile, screen)
+    mobile.screenshot(path=str(RESULTS_DIR / f"ui-{screen}-390.png"), full_page=True)
     context.close()

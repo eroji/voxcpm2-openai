@@ -340,3 +340,42 @@ def test_clone_notes_wrap_at_narrow_width():
     rule = re.search(r"#clone-notes \{([^}]*)\}", CSS)
     assert rule, "#clone-notes rule missing from studio.css"
     assert "white-space: normal" in rule.group(1)
+
+
+# --- M3-T10 release review fixes ------------------------------------------------
+
+
+def test_disabled_controls_have_an_affordance():
+    # R-039: disabled must look disabled everywhere, without new colours
+    rule = re.search(
+        r"button:disabled,\s*select:disabled,\s*input:disabled,\s*textarea:disabled"
+        r"\s*\{([^}]*)\}",
+        CSS,
+    )
+    assert rule, "disabled control rule missing from studio.css"
+    assert re.search(r"opacity:\s*\.45", rule.group(1))
+    assert "cursor: not-allowed" in rule.group(1)
+    assert ":focus-visible { outline: 2px solid var(--vs-accent)" in CSS  # focus ring kept
+
+
+def test_design_sample_declares_japanese_and_follows_the_language_select():
+    assert re.search(r'id="design-sample"[^>]*\blang="ja"', HTML)
+    design = js("design.js")
+    assert '$("design-sample").lang = $("design-lang").value' in design
+
+
+def test_stream_requests_pin_sample_rate_to_the_decoder():
+    speak = js("speak.js")
+    assert "if (stream) body.sample_rate = 48000;" in speak
+    assert "new AudioContext({ sampleRate: 48000 })" in speak  # 48 kHz handling unchanged
+
+
+def test_voices_count_is_the_library_total():
+    voices = js("voices.js")
+    assert 'getElementById("voices-count").textContent = String(state.voices.length)' in voices
+    assert "No voices match the current search or filter." in voices  # filtered state is named
+
+
+def test_e2e_suite_never_skips_silently():
+    for path in sorted((ROOT / "tests" / "e2e").glob("*.py")):
+        assert "importorskip" not in path.read_text(encoding="utf-8"), path

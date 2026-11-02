@@ -3,6 +3,7 @@
 body { margin: 0; background: var(--vs-bg); color: var(--vs-fg); font-family: var(--vs-font); font-size: var(--vs-fs-body); line-height: var(--vs-lh); }
 button, input, select, textarea { font: inherit; color: inherit; }
 button { cursor: pointer; border-radius: var(--vs-radius); }
+button:disabled, select:disabled, input:disabled, textarea:disabled { opacity: .45; cursor: not-allowed; }
 :focus-visible { outline: 2px solid var(--vs-accent); outline-offset: 2px; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 code, pre { font-family: var(--vs-mono); }

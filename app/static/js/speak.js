@@ -208,6 +208,7 @@ async function generate() {
     response_format: stream ? "pcm" : $("fmt").value,
     stream,
   };
+  if (stream) body.sample_rate = 48000; // playPcmStream decodes 48 kHz: pin the request to it
   try {
     const res = await fetch("/api/speak", {
       method: "POST",
