@@ -19,7 +19,7 @@ class APIModel(BaseModel):
 
 
 class SpeechRequest(APIModel):
-    model: str = "voxcpm2"
+    model: str  # required (SPEC §6); any value accepted
     input: str = Field(min_length=1, max_length=4000)
     voice: str = Field(min_length=1)
     response_format: ResponseFormat = "wav"

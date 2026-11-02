@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import numpy as np
 import pytest
 from app.config import Settings
 from app.main import create_app
@@ -96,13 +97,42 @@ def test_speed_halves_duration(client, library):
     )
 
 
+def test_missing_model_400(client, library):
+    body = {k: v for k, v in BODY.items() if k != "model"}
+    error = assert_openai_error(client.post("/v1/audio/speech", json=body), 400)
+    assert "model" in error["message"] or error["param"] == "model"
+
+
 def test_models_card(client):
     r = client.get("/v1/models")
     assert r.status_code == 200
-    assert r.json() == {
-        "object": "list",
-        "data": [{"id": "voxcpm2", "object": "model", "created": 0, "owned_by": "openbmb"}],
-    }
+    data = r.json()["data"]
+    assert [m["id"] for m in data] == ["voxcpm2", "tts-1", "openbmb/VoxCPM2"]
+    assert all(m["object"] == "model" for m in data)
+
+
+def test_non_ascii_display_name_header(client, store):
+    t = np.linspace(0, 1.0, 24000, endpoint=False)
+    store.create(
+        "アシュリー",
+        (0.3 * np.sin(2 * np.pi * 220 * t)).astype(np.float32),
+        24000,
+        ref_text="konnichiwa",
+        language="ja",
+        consent="uploaded-via-studio",
+        key="ashley-ja2",
+    )
+    r = client.post("/v1/audio/speech", json={**BODY, "voice": "ashley-ja2"})
+    assert r.status_code == 200
+    assert r.headers["X-Voice"] == "ashley-ja2"
+
+
+def test_unknown_api_path_404_error_shape(client):
+    assert_openai_error(client.get("/api/nope"), 404)
+
+
+def test_wrong_method_405_error_shape(client):
+    assert_openai_error(client.get("/v1/audio/speech"), 405)
 
 
 def test_voices_list(client, library):
@@ -111,6 +141,15 @@ def test_voices_list(client, library):
     voices = r.json()["voices"]
     assert {v["name"] for v in voices} == {"ashley-en", "ashley-ja"}
     assert all(set(v) == {"name", "language", "source"} for v in voices)
+
+
+def test_streaming_still_works(client, library):
+    with client.stream(
+        "POST", "/v1/audio/speech", json={**BODY, "stream": True, "response_format": "pcm"}
+    ) as r:
+        assert r.status_code == 200
+        assert r.headers["X-Voice"].lower() == "ashley-en"
+        assert sum(len(c) for c in r.iter_raw()) > 0
 
 
 def test_api_keys_gate(settings, library):

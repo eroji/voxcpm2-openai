@@ -11,14 +11,24 @@ from starlette.background import BackgroundTask
 from app.auth import require_v1
 from app.errors import BadRequest
 from app.models import ModelCard, ModelList, SpeechRequest
-from app.speech import StreamingSpeech
+from app.speech import SpeechResult, StreamingSpeech
 
 router = APIRouter(prefix="/v1", tags=["openai"], dependencies=[Depends(require_v1)])
 
 
+def _voice_header(seq: StreamingSpeech | SpeechResult) -> str:
+    """X-Voice must be header-safe (Starlette is latin-1): key first, label only if safe."""
+    value = seq.key or seq.voice
+    try:
+        value.encode("latin-1")
+    except UnicodeEncodeError:
+        return "ad-hoc"
+    return value
+
+
 @router.get("/models")
 async def models() -> ModelList:
-    return ModelList(data=[ModelCard(id="voxcpm2")])
+    return ModelList(data=[ModelCard(id=id_) for id_ in ("voxcpm2", "tts-1", "openbmb/VoxCPM2")])
 
 
 @router.get("/audio/voices")
@@ -56,7 +66,7 @@ async def audio_speech(request: Request, payload: SpeechRequest) -> Response:
             chunks(),
             media_type=streaming.media_type,
             headers={
-                "X-Voice": streaming.voice,
+                "X-Voice": _voice_header(streaming),
                 "X-Sample-Rate": str(streaming.sample_rate),
             },
             # Covers a client that disconnects before the first chunk is pulled;
@@ -66,7 +76,7 @@ async def audio_speech(request: Request, payload: SpeechRequest) -> Response:
 
     seq = await speech.synthesize(payload)
     headers = {
-        "X-Voice": seq.voice,
+        "X-Voice": _voice_header(seq),
         "X-Sample-Rate": str(seq.sample_rate),
         "X-Audio-Duration": f"{seq.duration_s:.3f}",
     }

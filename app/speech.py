@@ -26,6 +26,8 @@ class ResolvedVoice:
     ref_audio: str
     ref_text: str
     language: str
+    key: str | None = None
+    """Lowercase ASCII lookup key; ``None`` for ad-hoc ``ref_audio`` voices."""
 
 
 @dataclass(slots=True)
@@ -37,6 +39,7 @@ class SpeechResult:
     rtf: float | None
     first_audio_ms: float | None
     voice: str
+    key: str | None = None
 
 
 @dataclass(slots=True)
@@ -52,6 +55,9 @@ class StreamingSpeech:
     disconnects before the first chunk cannot leak a concurrency slot.
     Idempotent: safe after exhaustion and safe to call twice.
     """
+
+    key: str | None = None
+    """Lowercase ASCII lookup key; ``None`` for ad-hoc ``ref_audio`` voices."""
 
 
 class _OwnedChunks:
@@ -298,6 +304,7 @@ class SpeechService:
             ref_audio=self.store.data_uri(voice.key),
             ref_text=voice.ref_text,
             language=voice.language,
+            key=voice.key,
         )
 
     def _params(self, request: SpeechRequest, voice: ResolvedVoice, *, stream: bool) -> SynthParams:
@@ -342,6 +349,7 @@ class SpeechService:
             rtf=result.rtf,
             first_audio_ms=result.first_audio_ms,
             voice=voice.name,
+            key=voice.key,
         )
 
     async def stream(self, request: SpeechRequest) -> StreamingSpeech:
@@ -369,6 +377,7 @@ class SpeechService:
         chunks = _OwnedChunks(source, cleanup)
         return StreamingSpeech(
             voice=voice.name,
+            key=voice.key,
             media_type=audio_utils.mime_for(fmt),
             sample_rate=target_rate,
             chunks=chunks,

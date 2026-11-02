@@ -14,6 +14,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.config import Settings
 from app.engine import EngineClient
@@ -136,6 +137,19 @@ def create_app(settings: Settings | None = None, *, engine: EngineClient | None 
         )
         error = APIError(400, details or "Invalid request", param=None, code="invalid_request")
         return JSONResponse(error.body(), status_code=400)
+
+    _HTTP_ERROR_CODES = {404: "not_found", 405: "method_not_allowed"}
+
+    @app.exception_handler(StarletteHTTPException)
+    async def http_error_handler(
+        request: Request, exc: StarletteHTTPException
+    ) -> JSONResponse | Response:
+        # /v1 and /api must use the OpenAI error shape; /health//ready keep Starlette's plain body.
+        if request.url.path in ("/health", "/ready"):
+            return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+        code = _HTTP_ERROR_CODES.get(exc.status_code, "api_error")
+        error = APIError(exc.status_code, exc.detail or "Request failed", code=code)
+        return JSONResponse(error.body(), status_code=exc.status_code)
 
     app.include_router(system.router)
     app.include_router(v1.router)
