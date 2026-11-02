@@ -118,7 +118,7 @@
         <label class="lbl" for="ref-text">Transcript<span class="hint">Exact words spoken</span></label>
         <div class="ctl" style="display:flex;flex-direction:column;gap:10px;align-items:flex-start">
           <textarea class="vs-text" id="ref-text" rows="3" placeholder="Paste or auto-fill the transcript"></textarea>
-          <button class="btn-link" id="auto-transcribe">Auto-transcribe with whisper-stt</button>
+          <button class="btn-link" id="auto-transcribe" disabled>Auto-transcribe with whisper-stt</button>
         </div>
       </div>
       <div class="vs-row">
@@ -131,9 +131,10 @@
       </div>
       <p class="vs-error" id="clone-error" role="alert" hidden></p>
       <p class="vs-status" id="clone-status" role="status" hidden></p>
+      <p class="meta" id="clone-notes" hidden>Test a line needs /v1 access, which requires an API key on this server.</p>
       <div class="vs-actions">
         <label style="display:flex;gap:10px;align-items:center;font-size:12px"><input type="checkbox" id="consent">I have the speaker’s consent to clone this voice</label>
-        <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn-secondary" id="test-line">Test a line</button><button class="btn-primary" id="save-voice">Save voice</button></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn-secondary" id="test-line" disabled aria-describedby="clone-notes">Test a line</button><button class="btn-primary" id="save-voice">Save voice</button></div>
       </div>
     </section>
     <aside class="vs-col-side vs-steps" aria-labelledby="clone-tips">

@@ -6,6 +6,7 @@ import {
   api,
   state,
   loadVoices,
+  refreshEngine,
   play,
   showError,
   clearError,
@@ -72,13 +73,31 @@ function setStatus(message) {
   el.hidden = !message;
 }
 
+/* SPEC §8/§10: auto-transcribe needs STT; the test line calls /v1, which needs a
+ * bearer key the browser does not have (Q-023). Gated from state.engine, which
+ * show() makes sure is loaded before calling this. */
+function gate() {
+  $("auto-transcribe").disabled = !state.engine?.stt;
+  const gated = !!state.engine?.api_keys_required;
+  $("test-line").disabled = gated;
+  $("clone-notes").hidden = !gated; // visible hint; a title on a disabled button is not announced
+}
+
+let probeSeq = 0; // invalidates an in-flight duration probe when a newer file is picked
+
 function onFile(f) {
   clearError("clone");
   setStatus("");
   file = null;
-  if (!f) return;
+  const seq = ++probeSeq;
+  if (!f) {
+    metaText().textContent = "3–30 seconds of clean, single-speaker speech";
+    updateSave(); // picker cancelled: the old file is gone, keep the button state honest
+    return;
+  }
   probeDuration(f)
     .then(seconds => {
+      if (seq !== probeSeq) return; // a newer pick already replaced this one
       if (seconds < MIN_S || seconds > MAX_S) {
         showError(
           "clone",
@@ -92,6 +111,7 @@ function onFile(f) {
       updateSave();
     })
     .catch(err => {
+      if (seq !== probeSeq) return;
       showError("clone", err.message);
       updateSave();
     });
@@ -139,7 +159,11 @@ async function onSave() {
     $("clone-name").value = "";
     $("consent").checked = false;
     metaText().textContent = "3–30 seconds of clean, single-speaker speech";
-    await loadVoices();
+    try {
+      await loadVoices();
+    } catch {
+      /* the save succeeded; a list-refresh failure must not read as a failed save */
+    }
     setStatus("Voice saved."); // neutral status row; no forced navigation
   } catch (err) {
     showError("clone", err.message);
@@ -228,14 +252,12 @@ registerScreen("clone", {
     updateSave();
   },
   async show() {
-    await loadVoices(); // fresh names for duplicate validation
-    // SPEC §8/§10: auto-transcribe needs STT; the test line calls /v1, which needs an API key (Q-023)
-    $("auto-transcribe").disabled = !state.engine?.stt;
-    const gated = !!state.engine?.api_keys_required;
-    $("test-line").disabled = gated;
-    $("test-line").title = gated
-      ? "Test a line calls /v1/audio/speech, which requires an API key on this server."
-      : "";
-    updateSave();
+    try {
+      // fresh names for duplicate validation + engine flags for gating; never throws
+      await Promise.allSettled([refreshEngine(), loadVoices()]);
+    } finally {
+      gate(); // a voices failure must not skip the gating
+      updateSave();
+    }
   },
 });

@@ -35,6 +35,9 @@ code, pre { font-family: var(--vs-mono); }
 /* Inline errors: accent text, never colour alone (role="alert" carries the meaning) */
 .vs-error { margin: var(--vs-s4) 0 0; color: var(--vs-accent); font-size: 12px; }
 
+/* Neutral status row (e.g. "Voice saved.") — quieter than the error above it */
+.vs-status { margin: var(--vs-s4) 0 0; font-size: var(--vs-fs-small); color: var(--vs-muted); }
+
 /* Form rows: label column + control */
 .vs-row { display: flex; flex-wrap: wrap; gap: var(--vs-s3) var(--vs-s8); padding: var(--vs-s4) 0; border-top: var(--vs-rule-row); }
 .vs-row > .lbl { flex: 0 0 var(--vs-label-col); font-size: var(--vs-fs-label); font-weight: 500; }

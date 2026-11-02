@@ -272,3 +272,36 @@ def test_drop_zone_has_visible_focus():
     # the file input is visually hidden; the drop zone must show focus (R-035)
     assert ".vs-drop:focus-within" in CSS
     assert "[hidden] { display: none !important; }" in CSS  # hidden still wins
+
+
+# --- M3-T8 wave-4 review fixes -------------------------------------------------
+
+
+def test_clone_buttons_default_disabled_in_markup():
+    # cold deep link must not offer auto-transcribe/test-line before gating runs
+    assert re.search(r'<button[^>]*id="auto-transcribe"[^>]*\bdisabled\b', HTML)
+    assert re.search(r'<button[^>]*id="test-line"[^>]*\bdisabled\b', HTML)
+    # a title on a disabled button is not announced: use a visible hint (Q-023)
+    assert 'aria-describedby="clone-notes"' in HTML
+    assert 'id="clone-notes"' in HTML
+
+
+def test_clone_show_gates_after_engine_status():
+    clone = js("clone.js")
+    assert re.search(
+        r"import\s*\{[^}]*\brefreshEngine\b[^}]*\}\s*from\s*[\"']\./core\.js", clone
+    ), "clone.js must import refreshEngine from core"
+    assert "Promise.allSettled([refreshEngine(), loadVoices()])" in clone
+    show = re.search(r"async show\(\) \{(?P<body>.*?)\n  \},", clone, re.S)
+    assert show, "show() not found"
+    assert "finally" in show.group("body"), "gating must run in a finally"
+    assert "gate()" in show.group("body")
+    # an older duration probe must not overwrite a newer file
+    assert re.search(r"\+\+probeSeq", clone)
+
+
+def test_status_row_has_css_rule():
+    rule = re.search(r"\.vs-status \{([^}]*)\}", CSS)
+    assert rule, ".vs-status rule missing from studio.css"
+    for token in ["var(--vs-s4)", "var(--vs-fs-small)", "var(--vs-muted)"]:
+        assert token in rule.group(1), token
