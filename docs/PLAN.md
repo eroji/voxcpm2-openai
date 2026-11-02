@@ -139,6 +139,7 @@ Citations are `SPEC.md` section/line. IDs are append-only.
 | Q-020 | `ref_audio` URL fetch SSRF | Only `data:` URIs and `http(s)` URLs; URL fetch disabled unless `ALLOW_REMOTE_REF_AUDIO=1` (default off) | no |
 | Q-021 | Uploaded clone audio >48 kHz | Resample down to 48 kHz; below stays at original rate (spec: "resample to 48 kHz if above") | no |
 | Q-022 | Backup retention | Keep newest 20 zips, prune oldest | no |
+| Q-023 | "Test a line" needs `/v1`, which requires Bearer when `API_KEYS` is set; the browser has no key | Disable Test-a-line when `EngineStatus.api_keys_required` is true, with a visible hint; no new endpoint (keeps §10 intact). Revisit if a studio-scoped ad-hoc synth route is wanted | yes: confirm UI-only gating is acceptable |
 
 ## Task graph
 
@@ -161,6 +162,9 @@ Wave 0 is the lead scaffold (contracts + tooling). A task is ready only when eve
 | M1-T9 | M1 | 4 | StreamingSpeech ownership/cancel fixes (review) | `app/engine.py`, `app/speech.py`, `tests/test_speech.py`, `tests/test_stream_lifecycle.py` | M1-T7 | `.venv/bin/python -m pytest tests/test_speech.py tests/test_stream_lifecycle.py -q` |
 | M2-T9 | M2 | 4 | Voice key + case-safe scan + cache cap (review) | `app/store.py`, `tests/test_store.py` | M2-T7 | `.venv/bin/python -m pytest tests/test_store.py -q` |
 | M3-T7 | M3 | 4 | Screen contract/lifecycle fixes (review) | `app/static/index.html`, `app/static/js/**`, `tests/test_ui_assets.py` | M3-T2…T5, M4-T2 | `.venv/bin/python -m pytest tests/test_ui_assets.py -q` |
+| M1-T10 | M1 | 5 | Warm-up ordering + voice 400 + shutdown (review) | `app/speech.py`, `app/warmup.py`, `app/main.py`, `tests/test_speech.py`, `tests/test_warmup.py` | M1-T4, M1-T9 | `.venv/bin/python -m pytest tests/test_speech.py tests/test_warmup.py -q` |
+| M2-T10 | M2 | 5 | Store rebuild test correctness (review) | `tests/test_store.py` | M2-T9 | `.venv/bin/python -m pytest tests/test_store.py -q` |
+| M3-T8 | M3 | 5 | Clone gating + status styling (review) | `app/static/js/clone.js`, `app/static/index.html`, `app/static/studio.css`, `tests/test_ui_assets.py` | M3-T7 | `.venv/bin/python -m pytest tests/test_ui_assets.py -q` |
 | M1-T2 | M1 | 5 | `/v1` API (speech, models, voices) | `app/routers/v1.py`, `tests/test_v1.py`, `tests/test_streaming.py` | M1-T1 | `.venv/bin/python -m pytest tests/test_v1.py tests/test_streaming.py -q` |
 | M1-T4 | M1 | 4 | Startup/warm-up/readiness wiring | `app/warmup.py`, `app/main.py`, `tests/test_warmup.py` | M1-T1 | `.venv/bin/python -m pytest tests/test_warmup.py -q` |
 | M2-T2 | M2 | 2 | Clone + transcribe API | `app/routers/studio_clone.py`, `tests/test_studio_clone.py` | — | `.venv/bin/python -m pytest tests/test_studio_clone.py -q` |
@@ -177,8 +181,8 @@ Wave 0 is the lead scaffold (contracts + tooling). A task is ready only when eve
 | M3-T4 | M3 | 3 | Clone screen JS | `app/static/js/clone.js` | M3-T1 | `.venv/bin/python -m pytest tests/test_ui_assets.py -q` |
 | M3-T5 | M3 | 3 | Engine screen JS | `app/static/js/engine.js` | M3-T1 | `.venv/bin/python -m pytest tests/test_ui_assets.py -q` |
 | M4-T2 | M4 | 3 | Design screen JS | `app/static/js/design.js` | M3-T1, M4-T1 | `.venv/bin/python -m pytest tests/test_ui_assets.py -q` |
-| M3-T6 | M3 | 5 | UI e2e + parity harness | `tests/e2e/**` | M3-T2..T5, M4-T2 | `.venv/bin/python -m pytest tests/e2e -q` |
-| M5-T2 | M5 | 5 | Acceptance suite (spec §13) | `tests/test_acceptance.py` | M1-T2, M2-T5, M4-T1 | `.venv/bin/python -m pytest tests/test_acceptance.py -q` |
+| M3-T6 | M3 | 6 | UI e2e + parity harness | `tests/e2e/**` | M3-T2..T5, M4-T2 | `.venv/bin/python -m pytest tests/e2e -q` |
+| M5-T2 | M5 | 6 | Acceptance suite (spec §13) | `tests/test_acceptance.py` | M1-T2, M2-T5, M4-T1 | `.venv/bin/python -m pytest tests/test_acceptance.py -q` |
 
 ## Waves
 
@@ -188,8 +192,9 @@ Wave 0 is the lead scaffold (contracts + tooling). A task is ready only when eve
 - **Wave 2 (review fixes):** M1-T5, M1-T6, M2-T6, M3-T0, M5-T3, M2-T2, M4-T1 (7 parallel).
 - **Wave 3 (review fixes + UI):** M1-T7, M1-T8, M2-T7, M2-T8, M3-T2, M3-T3, M3-T4, M3-T5, M4-T2 (9 parallel).
 - **Wave 4 (review fixes):** M1-T4, M1-T9, M2-T9, M3-T7 (4 parallel).
-- **Wave 5:** M1-T2, M2-T3, M2-T4, M2-T5, M3-T6 (5 parallel).
-- **Wave 6:** M5-T2 + final review fixes, full `scripts/verify.sh`, milestone tags, delivery report.
+- **Wave 5:** M1-T2, M2-T3, M2-T4, M2-T5, M1-T10, M2-T10, M3-T8 (7 parallel).
+- **Wave 6:** M3-T6, M5-T2 (2 parallel).
+- **Wave 7:** final review fixes, full `scripts/verify.sh`, milestone tags, delivery report.
 
 ## Dependency DAG
 

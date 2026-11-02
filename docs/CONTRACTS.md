@@ -27,7 +27,8 @@ task needs a change, it reports `BLOCKED` and the lead amends this file in a new
 - `POST /v1/audio/speech` → audio bytes, `Content-Type` per format, headers `X-Voice`,
   `X-Sample-Rate`, `X-Audio-Duration` (non-stream), `X-RTF` (non-stream).
 - `GET /v1/models` → `{"object":"list","data":[{"id":"voxcpm2","object":"model","created":0,"owned_by":"openbmb"}]}`
-- `GET /v1/audio/voices` → `{"voices":[{"name","language","source"}]}`
+- `GET /v1/audio/voices` → `{"voices":[{"name","language","source"}]}` where `name` is the
+  lowercase **key** callers pass as `voice` (SPEC §6).
 
 `/api`:
 
@@ -86,7 +87,8 @@ Errors on both prefixes use `{"error":{"message","type","param","code"}}`.
   consent, embedding_source=audio, language, source, mime_type, original_filename, file_size`,
   and for designed voices `design_prompt`, `design_seed`. All values strings.
 - `VoiceStore`: `get`, `list`, `exists`, `read_audio`, `data_uri`, `create(name, samples,
-  sample_rate, *, ref_text, language, consent, source="uploaded", metadata=None, overwrite=False)`,
+  sample_rate, *, ref_text, language, consent, source="uploaded", metadata=None, overwrite=False,
+  key=None)` (key defaults to `validate_voice_name(name)`),
   `update(name, *, new_name=None, ref_text=None, language=None)`, `delete`, `backup(reason)`.
   Name pattern `^[a-z0-9][a-z0-9_-]{0,63}$` (validated on the lowercase key).
 - `TakeStore`: `new_id()`, `create(samples, sample_rate, *, voice, text, language="", kind="studio",

@@ -1,6 +1,6 @@
 # Progress
 
-**Current wave:** 4 — wave-3 review fixes
+**Current wave:** 5 — API + Studio completion
 **Resume:** `scripts/verify.sh` then `/dispatch 1`
 
 ## Task table
@@ -14,11 +14,14 @@
 | 1 | M2-T1 importer | pass | `pytest tests/test_importer.py` | |
 | 1 | M3-T1 UI shell | pass | `pytest tests/test_ui_assets.py` | |
 | 1 | M5-T1 runbook + smoke | pass | `bash -n scripts/smoke.sh` | |
+| 5 | M1-T10 warm-up/voice/shutdown fixes (review) | wip | `pytest tests/test_warmup.py` | |
+| 5 | M2-T10 store rebuild test (review) | wip | `pytest tests/test_store.py` | |
+| 5 | M3-T8 clone gating + status CSS (review) | wip | `pytest tests/test_ui_assets.py` | |
 | 5 | M1-T2 `/v1` | todo | `pytest tests/test_v1.py tests/test_streaming.py` | |
-| 4 | M1-T9 StreamingSpeech ownership (review) | wip | `pytest tests/test_speech.py` | BLOCKER fix |
-| 4 | M2-T9 voice keys + cache cap (review) | wip | `pytest tests/test_store.py` | |
-| 4 | M3-T7 screen contract/lifecycle fixes (review) | wip | `pytest tests/test_ui_assets.py` | |
-| 4 | M1-T4 warm-up wiring | wip | `pytest tests/test_warmup.py` | |
+| 4 | M1-T9 StreamingSpeech ownership (review) | pass | `pytest tests/test_speech.py` | BLOCKER fix |
+| 4 | M2-T9 voice keys + cache cap (review) | pass | `pytest tests/test_store.py` | |
+| 4 | M3-T7 screen contract/lifecycle fixes (review) | pass | `pytest tests/test_ui_assets.py` | |
+| 4 | M1-T4 warm-up wiring | pass | `pytest tests/test_warmup.py` | |
 | 2 | M1-T5 stream admission/lifecycle (review) | pass | `pytest tests/test_stream_lifecycle.py` | BLOCKER fix |
 | 2 | M1-T6 container hardening (review) | pass | `pytest tests/test_deploy.py` | |
 | 2 | M2-T6 lossless import metadata (review) | pass | `pytest tests/test_store.py tests/test_importer.py` | |
@@ -38,8 +41,8 @@
 | 3 | M3-T4 clone JS | pass | `pytest tests/test_ui_assets.py` | |
 | 3 | M3-T5 engine JS | pass | `pytest tests/test_ui_assets.py` | |
 | 3 | M4-T2 design JS | pass | `pytest tests/test_ui_assets.py` | |
-| 5 | M3-T6 UI e2e | todo | `pytest tests/e2e` | |
-| 5 | M5-T2 acceptance | todo | `pytest tests/test_acceptance.py` | |
+| 6 | M3-T6 UI e2e | todo | `pytest tests/e2e` | |
+| 6 | M5-T2 acceptance | todo | `pytest tests/test_acceptance.py` | |
 
 \* M0-T1 delivers runnable scripts + `NOTES.md`; findings are pending the external host (B-001).
 
@@ -87,6 +90,15 @@
 - Accepted NITs: engine stat sub-lines, voices filtered count label, `prompt()` for save-as-voice,
   success text styling on clone (fixed in M3-T7).
 
+## Wave-4 review outcome (2026-11-02)
+
+- No BLOCKERs. MAJORs fixed in wave 5: clone gating read a not-yet-loaded engine status and could
+  be skipped on a voices error (M3-T8); `.vs-status` had no CSS (M3-T8); ffmpeg-disconnect cleanup
+  path lacked a test (folded into M1-T10's test scope); warm-up stream-failure ordering and
+  `run_forever` branches were untested (M1-T10); display-name lookups returned `invalid_voice_name`
+  without the valid-name list (M1-T10); index-rebuild test never rebuilt (M2-T10).
+- Added Q-023 (Test-a-line vs `API_KEYS`): UI-only gating, human confirmation requested.
+
 ## Blockers
 
 | ID | Blocker | Owner | Unblocks |
@@ -121,4 +133,4 @@
 
 ## Next action
 
-Dispatch wave 4 (four parallel workers): M1-T4, M1-T9, M2-T9, M3-T7.
+Dispatch wave 5 (seven parallel workers): M1-T2, M2-T3, M2-T4, M2-T5, M1-T10, M2-T10, M3-T8.
