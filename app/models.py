@@ -118,6 +118,7 @@ class DesignSave(APIModel):
 class EngineStatus(APIModel):
     ready: bool
     model: str
+    reason: str | None = None
     runtime: str
     gpu: str | None = None
     vram_used_mb: int | None = None

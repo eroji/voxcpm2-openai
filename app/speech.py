@@ -195,7 +195,9 @@ class SpeechService:
             ref_audio=voice.ref_audio,
             ref_text=voice.ref_text,
             instructions=request.instructions,
-            speed=request.speed,
+            # Native speed control is unverified (S4); applying ffmpeg atempo locally avoids
+            # double-processing if the engine ever supports it.
+            speed=None,
             seed=request.seed,
             cfg=request.cfg,
             steps=request.steps,

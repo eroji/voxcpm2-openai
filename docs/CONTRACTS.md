@@ -57,8 +57,9 @@ audio_url, wave_url`. URL paths are relative (`/api/takes/<id>/audio`).
 
 `VoiceSummary`: `name, language, source, ref_duration_s, ref_text, created_at`.
 
-`EngineStatus`: `ready, model, runtime, gpu, vram_used_mb, vram_total_mb, kv_cache,
-max_concurrency, rtf, first_audio_ms, voices, queue_depth`.
+`EngineStatus`: `ready, model, reason (warm-up error when not ready), runtime, gpu,
+vram_used_mb, vram_total_mb, kv_cache, max_concurrency, rtf, first_audio_ms, voices,
+queue_depth`.
 
 Errors on both prefixes use `{"error":{"message","type","param","code"}}`.
 
@@ -91,21 +92,27 @@ Errors on both prefixes use `{"error":{"message","type","param","code"}}`.
 
 ```python
 EngineClient(base_url, *, model, concurrency, max_queue, metrics_window, timeout,
-             s6_service, service_dir)          # + from_settings(settings)
+             s6_service, service_dir, kv_cache)   # + from_settings(settings)
 await start(); await aclose()
-ready -> bool                                  # last /health
+ready -> bool                                     # last /health
 await health() -> bool
 await wait_ready(max_wait) -> bool
-await synth(SynthParams) -> SynthResult        # fmt="wav", WAV bytes
-engine.stream(SynthParams) -> AsyncIterator[bytes]  # fmt="pcm": s16le mono 48 kHz
-await restart()                                # s6-svc -r <service_dir>/<s6_service>
+await synth(SynthParams) -> SynthResult           # fmt="wav", WAV bytes
+await open_stream(SynthParams) -> StreamHandle    # admission first; handle.chunks, handle.aclose()
+await restart()                                   # s6-svc -r <service_dir>/<s6_service>
 stats() -> EngineStats
 ```
 
+`StreamHandle.chunks` yields s16le mono 48 kHz; `aclose()` releases the engine slot and
+closes the upstream response. `SpeechService.stream()` must await `open_stream` before returning so
+`QueueFull`/`EngineNotReady` reach the router. `Stats` must be read off the event loop
+(`asyncio.to_thread`) because it shells out to `nvidia-smi`.
+
 - POST JSON to `{base}/v1/audio/speech` with `model`, `input`, `ref_audio`, `ref_text`;
   optional `instructions, speed, seed, cfg, steps`; `response_format` `wav|pcm`; `stream`.
+- Engine output is assumed s16le mono 48 kHz for `stream=true` (SPEC §6; verify in S3).
 - `cfg`/`steps` rejected with 4xx → retry once without them, log once (Q-004).
-- Record RTF (= audio duration / wall time) and first-chunk ms in a rolling deque of
+- Record RTF (= wall time / audio duration; SPEC §2 reports ~0.14) and first-chunk ms in a rolling deque of
   `metrics_window`; expose averages. Increment queue depth while waiting; raise `QueueFull`
   when waiting ≥ `max_queue`.
 - VRAM/GPU from `nvidia-smi --query-gpu=name,memory.used,memory.total --format=csv,noheader,nounits

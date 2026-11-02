@@ -11,7 +11,7 @@ from typing import Any
 import numpy as np
 import soundfile as sf
 import uvicorn
-from app.audio import wav_bytes
+from app.audio import pcm_s16le, wav_bytes
 from fastapi import FastAPI, Request
 from fastapi.responses import Response, StreamingResponse
 
@@ -53,7 +53,7 @@ class FakeEngine:
 
                     async def gen():
                         for _ in range(10):
-                            yield _tone(0.06, note).astype("<f4").tobytes()
+                            yield pcm_s16le(_tone(0.06, note))
 
                     return StreamingResponse(gen(), media_type="audio/pcm")
                 return Response(wav_bytes(_tone(0.6, note), SAMPLE_RATE), media_type="audio/wav")
