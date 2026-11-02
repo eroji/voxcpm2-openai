@@ -45,7 +45,10 @@ export async function refreshEngine() {
   try {
     const status = await api.get("/api/engine");
     state.engine = status;
-    if (el) el.textContent = status.ready ? `Ready · ${status.gpu || status.model}` : "Warming up…";
+    if (!el) return;
+    if (status.ready) el.textContent = `Ready · ${status.gpu || status.model}`;
+    else if (status.reason) el.textContent = `Not ready · ${status.reason}`;
+    else el.textContent = "Warming up…";
   } catch (err) {
     state.engine = null;
     if (el) el.textContent = `Not ready · ${err.message}`;
@@ -54,10 +57,17 @@ export async function refreshEngine() {
 
 const screens = new Map();
 let started = false;
+let activeName = null;
 
 export function registerScreen(name, handlers) {
   screens.set(name, handlers);
-  if (started) runInit(name, handlers);
+  if (!started) return;
+  runInit(name, handlers);
+  // Registered after start() ran (module evaluated late): the initial route()
+  // could not show this screen, so show it now when it is the active tab.
+  if (name === activeName && handlers.show) {
+    Promise.resolve(handlers.show()).catch(err => showError(name, err.message));
+  }
 }
 
 function runInit(name, { init }) {
@@ -76,6 +86,7 @@ function route() {
     else tab.removeAttribute("aria-current");
   }
   const name = active.dataset.tab;
+  activeName = name;
   for (const screen of document.querySelectorAll(".vs-screen")) {
     screen.hidden = screen.id !== `screen-${name}`;
   }
@@ -108,7 +119,7 @@ function start() {
 if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", start);
 } else {
-  setTimeout(start, 0); // modules injected after load: let sibling modules register first
+  start(); // late-evaluated module; registerScreen() shows any sibling that registers after
 }
 
 export function selectVoice(name) {

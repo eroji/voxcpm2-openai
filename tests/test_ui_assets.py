@@ -150,3 +150,40 @@ def test_css_rules():
     assert "--vs-rule-section" in CSS  # reference rules kept
     # zero radius rule: only the token, never a literal
     assert set(re.findall(r"border-radius:\s*([^;}]+)", CSS)) <= {"0", "var(--vs-radius)"}
+
+
+# --- M3-T0 review fixes -------------------------------------------------------
+
+
+def test_clone_drop_copy_is_3_to_30_seconds():
+    # SPEC §7/§8/§10: 3–30 s, not the reference mock's 5–20 s.
+    assert "3–30 seconds of clean, single-speaker speech" in HTML
+    assert "5–20" not in HTML
+
+
+def test_design_language_default_follows_reference_order():
+    # SPEC §8 does not pin the default; ui/studio.html lists Japanese first.
+    select = re.search(r'id="design-lang">(.*?)</select>', HTML, re.S).group(1)
+    opts = re.findall(r'<option value="(\w+)"', select)
+    assert opts == ["ja", "en", "ko", "zh"]
+
+
+def test_engine_status_renders_reason():
+    # EngineStatus.reason must surface as text, never colour-only (R-005).
+    assert "status.reason" in CORE
+    assert "Not ready ·" in CORE
+    assert "Ready ·" in CORE
+    assert "Warming up…" in CORE
+
+
+def test_start_waits_for_domcontentloaded_without_settimeout():
+    assert 'document.addEventListener("DOMContentLoaded", start)' in CORE
+    assert "setTimeout" not in CORE
+    # late-registering screens must still get their initial show()
+    assert "activeName" in CORE
+
+
+def test_drop_zone_has_visible_focus():
+    # the file input is visually hidden; the drop zone must show focus (R-035)
+    assert ".vs-drop:focus-within" in CSS
+    assert "[hidden] { display: none !important; }" in CSS  # hidden still wins
