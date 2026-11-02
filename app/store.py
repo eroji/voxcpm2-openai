@@ -255,14 +255,19 @@ class VoiceStore:
         overwrite: bool = False,
     ) -> Voice:
         key = validate_voice_name(name)
+        samples = np.ascontiguousarray(samples, dtype=np.float32)
+        if samples.ndim != 1 or samples.size == 0:
+            raise BadRequest(
+                "Voice audio must be a non-empty 1-D float32 array.",
+                param="file",
+                code="invalid_audio",
+            )
         path = self.root / f"{key}.safetensors"
         with self._lock:
             if path.exists() and not overwrite:
                 raise Conflicting(f"Voice '{key}' already exists.")
             if path.exists():
                 self.backup(f"overwrite-{key}")
-            now = _now()
-            samples = np.ascontiguousarray(samples, dtype=np.float32)
             meta: dict[str, str] = dict(metadata or {})
             meta.update(
                 {
@@ -270,16 +275,17 @@ class VoiceStore:
                     "voice_name_lower": key,
                     "ref_text": ref_text or "",
                     "sample_rate": str(sample_rate),
-                    "created_at": str(now),
                     "consent": consent,
                     "embedding_source": "audio",
                     "language": language or "",
                     "source": source,
                     "mime_type": meta.get("mime_type", "audio/wav"),
                     "original_filename": meta.get("original_filename", f"{key}.wav"),
-                    "file_size": str(len(audio_utils.wav_bytes(samples, sample_rate))),
                 }
             )
+            # SPEC §5: import is lossless, so caller metadata wins and we only fill gaps.
+            meta.setdefault("created_at", str(_now()))
+            meta.setdefault("file_size", str(len(audio_utils.wav_bytes(samples, sample_rate))))
             meta = {str(k): str(v) for k, v in meta.items() if v is not None}
             tmp = path.with_suffix(".safetensors.tmp")
             save_file({"audio": samples}, str(tmp), metadata=meta)

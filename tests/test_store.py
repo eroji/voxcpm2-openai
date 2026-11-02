@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import time
 import zipfile
 
 import numpy as np
 import pytest
+from app import audio as audio_utils
 from app.config import Settings
 from app.errors import BadRequest, Conflicting
 from app.store import VoiceStore
@@ -28,6 +30,44 @@ def test_create_writes_qwen3_compatible_metadata(store: VoiceStore, make_voice):
     assert int(voice.metadata["sample_rate"]) == 24000
     assert voice.metadata["ref_text"].startswith("Thanks for waiting")
     assert voice.duration_s == pytest.approx(1.0, abs=0.01)
+
+
+def test_create_keeps_caller_metadata_and_defaults_the_rest(store: VoiceStore):
+    voice = store.create(
+        "Ashley-EN",
+        tone(),
+        24000,
+        ref_text="x",
+        language="en",
+        consent="uploaded-via-studio",
+        metadata={"created_at": "1700000000", "file_size": "12345", "mime_type": "audio/flac"},
+    )
+    assert voice.metadata["created_at"] == "1700000000"
+    assert voice.metadata["file_size"] == "12345"
+    assert voice.metadata["mime_type"] == "audio/flac"
+    assert voice.metadata["name"] == "Ashley-EN"
+    assert voice.metadata["voice_name_lower"] == "ashley-en"
+    assert voice.created_at == 1700000000
+
+    plain = store.create(
+        "plain-en", tone(), 24000, ref_text="x", language="en", consent="uploaded-via-studio"
+    )
+    assert plain.metadata["file_size"] == str(len(audio_utils.wav_bytes(tone(), 24000)))
+    assert abs(int(plain.metadata["created_at"]) - time.time()) < 60
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [np.zeros((24000, 2), dtype=np.float32), np.zeros(0, dtype=np.float32)],
+    ids=["stereo", "empty"],
+)
+def test_create_rejects_non_1d_or_empty_audio(store: VoiceStore, bad: np.ndarray):
+    with pytest.raises(BadRequest) as exc:
+        store.create(
+            "bad-en", bad, 24000, ref_text="x", language="en", consent="uploaded-via-studio"
+        )
+    assert exc.value.code == "invalid_audio"
+    assert not (store.root / "bad-en.safetensors").exists()
 
 
 def test_list_uses_creation_order_and_survives_reload(store: VoiceStore, make_voice, settings):

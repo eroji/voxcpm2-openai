@@ -44,7 +44,8 @@ def import_qwen3_speakers(
         except Exception as exc:  # noqa: BLE001 - corrupt file: record and continue
             result["failed"].append((path.stem, f"{type(exc).__name__}: {exc}"))
             continue
-        name = meta.get("voice_name_lower") or path.stem
+        key = meta.get("voice_name_lower") or path.stem
+        name = meta.get("name") or key
         if not overwrite and store.exists(name):
             result["skipped"].append(name)
             continue

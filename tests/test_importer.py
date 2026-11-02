@@ -26,17 +26,25 @@ def tone(seconds: float = 1.0, rate: int = 24000) -> np.ndarray:
     return (0.3 * np.sin(2 * np.pi * 220 * t)).astype(np.float32)
 
 
-def speaker_file(src: Path, name: str, **overrides: str | None) -> Path:
+def speaker_file(
+    src: Path,
+    file_name: str | None = None,
+    *,
+    name: str | None = None,
+    audio: np.ndarray | None = None,
+    **overrides: str | None,
+) -> Path:
+    display = name or file_name or "voice"
     meta: dict[str, str] = {
-        "name": name,
-        "voice_name_lower": name.lower(),
+        "name": display,
+        "voice_name_lower": display.lower(),
         "ref_text": "Thanks for waiting. Everything checks out.",
         "sample_rate": "24000",
         "created_at": "1791831655",
         "consent": "uploaded-via-studio",
         "embedding_source": "audio",
         "mime_type": "audio/wav",
-        "original_filename": f"{name}.wav",
+        "original_filename": f"{display}.wav",
         "file_size": "48044",
     }
     for key, value in overrides.items():
@@ -44,8 +52,8 @@ def speaker_file(src: Path, name: str, **overrides: str | None) -> Path:
             meta.pop(key, None)
         else:
             meta[key] = value
-    path = src / f"{name}.safetensors"
-    save_file({"audio": tone()}, str(path), metadata=meta)
+    path = src / f"{file_name or display}.safetensors"
+    save_file({"audio": tone() if audio is None else audio}, str(path), metadata=meta)
     return path
 
 
@@ -87,7 +95,23 @@ def test_import_preserves_audio_and_metadata(store: VoiceStore, source_dir: Path
     assert voice.ref_text.startswith("Thanks for waiting")
     assert voice.metadata["mime_type"] == "audio/wav"
     assert voice.metadata["original_filename"] == "ashley-en.wav"
-    assert voice.metadata["file_size"] == "48044"
+    assert voice.metadata["created_at"] == "1791831655"
+
+
+def test_import_is_lossless_for_values_code_cannot_derive(store: VoiceStore, tmp_path: Path):
+    """file_size/created_at/name come from the source file, never recomputed."""
+    src = tmp_path / "lossless"
+    src.mkdir()
+    speaker_file(src, "Ashley-EN", file_size="12345", created_at="1700000000")
+    assert import_qwen3_speakers(store, src)["imported"] == ["Ashley-EN"]
+    voice = store.get("ashley-en")
+    assert voice.key == "ashley-en"
+    assert voice.name == "Ashley-EN"
+    assert voice.metadata["name"] == "Ashley-EN"
+    assert voice.metadata["voice_name_lower"] == "ashley-en"
+    assert voice.metadata["file_size"] == "12345"
+    assert voice.metadata["created_at"] == "1700000000"
+    assert voice.created_at == 1700000000
 
 
 def test_corrupt_and_invalid_names_go_to_failed(store: VoiceStore, source_dir: Path):
@@ -97,6 +121,25 @@ def test_corrupt_and_invalid_names_go_to_failed(store: VoiceStore, source_dir: P
     assert all(message for message in failed.values())
     assert not store.exists("broken")
     assert not store.exists("Bad Name")
+
+
+def test_bad_tensors_and_paths_fail_without_aborting(
+    store: VoiceStore, source_dir: Path, tmp_path: Path
+):
+    speaker_file(source_dir, "stereo-en", audio=np.zeros((24000, 2), dtype=np.float32))
+    speaker_file(source_dir, "empty-en", audio=np.zeros(0, dtype=np.float32))
+    speaker_file(source_dir, "evil", name="../evil", voice_name_lower="../evil")
+    result = import_qwen3_speakers(store, source_dir)
+    failed = dict(result["failed"])
+    assert set(failed) == {"broken", "Bad Name", "stereo-en", "empty-en", "../evil"}
+    assert all(message for message in failed.values())
+    assert sorted(result["imported"]) == VALID_NAMES
+    assert not store.exists("stereo-en")
+    assert not store.exists("empty-en")
+    assert sorted(p.name for p in store.root.glob("*.safetensors")) == [
+        f"{name.lower()}.safetensors" for name in VALID_NAMES
+    ]
+    assert list(store.settings.data_dir.rglob("*evil*")) == []
 
 
 def test_second_run_skips_existing(store: VoiceStore, source_dir: Path):
