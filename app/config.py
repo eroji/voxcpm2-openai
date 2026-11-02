@@ -89,6 +89,15 @@ class Settings(BaseSettings):
             return None
         return user, password
 
+    def validate(self) -> None:  # type: ignore[override]  # shadows deprecated pydantic classmethod
+        """Fail closed on auth misconfiguration (SPEC §10): never boot with auth silently off."""
+        if self.studio_auth:
+            creds = self.studio_credentials
+            if not creds or not all(creds):
+                raise RuntimeError("STUDIO_AUTH must be 'user:password', both parts non-empty")
+        if self.api_keys and not self.api_key_set:
+            raise RuntimeError("API_KEYS is set but contains no non-blank tokens")
+
     def ensure_dirs(self) -> None:
         for path in (self.voices_dir, self.takes_dir, self.backups_dir):
             path.mkdir(parents=True, exist_ok=True)

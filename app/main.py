@@ -40,16 +40,21 @@ def _basic_ok(header: str, user: str, password: str) -> bool:
     if not header.lower().startswith("basic "):
         return False
     try:
-        raw = base64.b64decode(header.split(" ", 1)[1]).decode("utf-8")
+        raw = base64.b64decode(header.split(" ", 1)[1])
     except Exception:  # noqa: BLE001
         return False
-    got_user, _, got_password = raw.partition(":")
-    return secrets.compare_digest(got_user, user) & secrets.compare_digest(got_password, password)
+    got_user, _, got_password = raw.partition(b":")
+    # Byte comparison: compare_digest rejects non-ASCII str, which would turn a crafted
+    # header into a 500. bytes never raise.
+    return secrets.compare_digest(got_user, user.encode("utf-8")) and secrets.compare_digest(
+        got_password, password.encode("utf-8")
+    )
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings: Settings = app.state.settings
+    settings.validate()
     settings.ensure_dirs()
 
     store = VoiceStore(settings)
@@ -102,7 +107,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 def create_app(settings: Settings | None = None, *, engine: EngineClient | None = None) -> FastAPI:
     settings = settings or Settings()
-    app = FastAPI(title=settings.app_name, version=settings.version, lifespan=lifespan)
+    settings.validate()
+    # R-003: no interactive docs endpoints (they load CDN assets and bypass Basic auth).
+    app = FastAPI(
+        title=settings.app_name,
+        version=settings.version,
+        lifespan=lifespan,
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
+    )
     app.state.settings = settings
     app.state.injected_engine = engine
     app.state.warmup = None
@@ -149,7 +163,15 @@ def create_app(settings: Settings | None = None, *, engine: EngineClient | None 
             return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
         code = _HTTP_ERROR_CODES.get(exc.status_code, "api_error")
         error = APIError(exc.status_code, exc.detail or "Request failed", code=code)
-        return JSONResponse(error.body(), status_code=exc.status_code)
+        # exc.headers carries e.g. Allow on 405; dropping it breaks the HTTP contract.
+        return JSONResponse(error.body(), status_code=exc.status_code, headers=exc.headers)
+
+    @app.exception_handler(Exception)
+    async def unhandled_error_handler(request: Request, exc: Exception) -> JSONResponse:
+        # API paths must never leak Starlette's plain-text 500 (R-020).
+        logger.exception("unhandled error on %s %s", request.method, request.url.path)
+        error = APIError(500, "Internal server error", type="internal_error", code="internal_error")
+        return JSONResponse(error.body(), status_code=500)
 
     app.include_router(system.router)
     app.include_router(v1.router)

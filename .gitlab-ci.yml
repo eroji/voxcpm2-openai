@@ -61,6 +61,7 @@ e2e:
 javascript:
   stage: checks
   image: node:22-alpine
+  before_script: []  # alpine: no apt-get; node needs no install
   script:
     - for f in app/static/js/*.js; do node --check "$f"; done
     - echo "all static modules parse"
@@ -73,29 +74,32 @@ build:
     expire_in: 1 week
     paths: [dist/]
 
-# Container package: needs Harbor credentials (HARBOR_USER/HARBOR_PASSWORD) as masked CI
-# variables. Without them a static contract check still runs, so the pipeline never silently
-# skips packaging. Enable the real build by setting the variables.
+# Container packaging split so a missing credential is a skipped job, never a green package.
+# package:check always validates the static contract; the real build/push runs only with
+# HARBOR_USER/HARBOR_PASSWORD as masked CI variables (R-051: never echoed to logs).
+package:check:
+  stage: package
+  before_script: []  # static greps only; no pip install needed
+  script:
+    - grep -q 'COPY app/ /opt/app/' deploy/Containerfile
+    - grep -q 'voxcpm2-3090.yaml' deploy/Containerfile
+    - test -d deploy/s6/engine && test -d deploy/s6/app
+
 package:
   stage: package
   image: docker:27
   services: [docker:27-dind]
+  needs: [package:check]
+  rules:
+    - if: $HARBOR_USER
   variables:
     DOCKER_TLS_CERTDIR: "/certs"
   before_script:
     - apk add --no-cache bash
+    - echo "$HARBOR_PASSWORD" | docker login harbor.dotslash.io -u "$HARBOR_USER" --password-stdin
   script:
-    - |
-      if [ -n "${HARBOR_USER:-}" ] && [ -n "${HARBOR_PASSWORD:-}" ]; then
-        echo "$HARBOR_PASSWORD" | docker login harbor.dotslash.io -u "$HARBOR_USER" --password-stdin
-        docker build -f deploy/Containerfile -t "$DEPLOY_IMAGE" .
-        docker push "$DEPLOY_IMAGE"
-      else
-        echo "Harbor credentials not configured: validating Containerfile contract instead"
-        grep -q 'COPY app/ /opt/app/' deploy/Containerfile
-        grep -q 'voxcpm2-3090.yaml' deploy/Containerfile
-        test -d deploy/s6/engine && test -d deploy/s6/app
-      fi
+    - docker build -f deploy/Containerfile -t "$DEPLOY_IMAGE" .
+    - docker push "$DEPLOY_IMAGE"
 
 # ---------------------------------------------------------------- CD (opt-in)
 # Nothing below runs unless DEPLOY_TARGET is set. Production additionally requires a tag and
@@ -103,8 +107,9 @@ package:
 deploy:staging:
   stage: deploy
   image: alpine:3.20
+  before_script: []  # alpine: no apt-get; the script installs what it needs
   interruptible: false
-  needs: [package]
+  needs: [package:check, { job: package, optional: true }]
   rules:
     - if: '$DEPLOY_TARGET == "staging" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
       when: on_success
@@ -118,8 +123,9 @@ deploy:staging:
 deploy:production:
   stage: deploy
   image: alpine:3.20
+  before_script: []  # alpine: no apt-get; the script installs what it needs
   interruptible: false
-  needs: [package]
+  needs: [package:check, { job: package, optional: true }]
   rules:
     - if: '$DEPLOY_TARGET == "production" && $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/'
       when: manual
