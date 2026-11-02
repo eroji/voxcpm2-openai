@@ -87,6 +87,21 @@ async def test_unknown_voice_is_bad_request_with_names(
     await engine.aclose()
 
 
+async def test_display_name_voice_lists_valid_names(
+    fake_engine: Any, settings: Settings, library: VoiceStore
+) -> None:
+    """Wave-4 review: "Ashley EN" made store.get raise BadRequest (invalid_voice_name),
+    so resolve must map *any* lookup failure to voice_not_found listing the keys."""
+    service, engine = _service(library, settings, fake_engine.url)
+    with pytest.raises(BadRequest) as exc:
+        service.resolve(SpeechRequest(input="hi", voice="Ashley EN"))
+    assert exc.value.status_code == 400
+    assert exc.value.param == "voice"
+    assert exc.value.code == "voice_not_found"
+    assert "ashley-en" in exc.value.message
+    await engine.aclose()
+
+
 async def test_ffmpeg_spawn_failure_releases_slot(
     fake_engine: Any, settings: Settings, library: VoiceStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:

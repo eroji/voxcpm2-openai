@@ -34,7 +34,7 @@ class WarmupService:
             else:
                 samples, rate = audio.read_audio_file(self.settings.asset_dir / "warmup.wav")
                 ref_uri = audio.to_wav_data_uri(samples, rate)
-                ref_text = None
+                ref_text = "Warm-up."  # Q-014: the bundled clip's transcript
 
             await self.engine.synth(
                 SynthParams(text="Warm-up.", ref_audio=ref_uri, ref_text=ref_text, fmt="wav")

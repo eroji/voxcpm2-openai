@@ -89,7 +89,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
+        # A non-CancelledError from run_forever must not re-raise out of lifespan;
+        # the done-callback already logged it.
+        with contextlib.suppress(asyncio.CancelledError, Exception):
             await task
         try:
             await engine.aclose()

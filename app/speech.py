@@ -12,9 +12,9 @@ from dataclasses import dataclass
 from app import audio as audio_utils
 from app.config import Settings
 from app.engine import ENGINE_SAMPLE_RATE, EngineClient, StreamHandle, SynthParams
-from app.errors import BadRequest, EngineError
+from app.errors import APIError, BadRequest, EngineError
 from app.models import SpeechRequest
-from app.store import VoiceNotFound, VoiceStore
+from app.store import VoiceStore
 
 logger = logging.getLogger(__name__)
 _speed_stream_logged = False
@@ -282,10 +282,17 @@ class SpeechService:
             return self._resolve_adhoc(request)
         try:
             voice = self.store.get(request.voice)
-        except VoiceNotFound as exc:
-            # /v1 and /api/speak answer 400 with the valid names (SPEC §6);
-            # /api/voices/{name} keeps its 404 because it uses the store directly.
-            raise BadRequest(str(exc), param="voice", code="voice_not_found") from exc
+        except APIError as exc:
+            # Any lookup failure — a display name like "Ashley EN" fails the key
+            # pattern with BadRequest before the file check — is a 400 listing the
+            # valid keys (SPEC §6); /api/voices/{name} keeps its 404 because it
+            # uses the store directly.
+            names = ", ".join(v.key for v in self.store.list())
+            raise BadRequest(
+                f"Unknown voice '{request.voice}'. Valid voices: {names}",
+                param="voice",
+                code="voice_not_found",
+            ) from exc
         return ResolvedVoice(
             name=voice.name,
             ref_audio=self.store.data_uri(voice.key),
