@@ -1,6 +1,6 @@
 # Progress
 
-**Current wave:** 2 — wave-1 review fixes + clone/design backends
+**Current wave:** 3 — wave-2 review fixes + screen modules
 **Resume:** `scripts/verify.sh` then `/dispatch 1`
 
 ## Task table
@@ -14,23 +14,27 @@
 | 1 | M2-T1 importer | pass | `pytest tests/test_importer.py` | |
 | 1 | M3-T1 UI shell | pass | `pytest tests/test_ui_assets.py` | |
 | 1 | M5-T1 runbook + smoke | pass | `bash -n scripts/smoke.sh` | |
-| 3 | M1-T2 `/v1` | todo | `pytest tests/test_v1.py tests/test_streaming.py` | |
-| 3 | M1-T4 warm-up wiring | todo | `pytest tests/test_warmup.py` | |
-| 2 | M1-T5 stream admission/lifecycle (review) | wip | `pytest tests/test_stream_lifecycle.py` | BLOCKER fix |
-| 2 | M1-T6 container hardening (review) | wip | `pytest tests/test_deploy.py` | |
-| 2 | M2-T6 lossless import metadata (review) | wip | `pytest tests/test_store.py tests/test_importer.py` | |
-| 2 | M3-T0 UI shell fixes (review) | wip | `pytest tests/test_ui_assets.py` | |
-| 2 | M5-T3 runbook/smoke fixes (review) | wip | `bash -n scripts/smoke.sh` | |
-| 2 | M2-T2 clone/transcribe | wip | `pytest tests/test_studio_clone.py` | |
-| 3 | M2-T3 speak/takes | todo | `pytest tests/test_studio_takes.py` | |
-| 2 | M4-T1 design backend | wip | `pytest tests/test_design.py` | |
+| 4 | M1-T2 `/v1` | todo | `pytest tests/test_v1.py tests/test_streaming.py` | |
+| 4 | M1-T4 warm-up wiring | todo | `pytest tests/test_warmup.py` | |
+| 2 | M1-T5 stream admission/lifecycle (review) | pass | `pytest tests/test_stream_lifecycle.py` | BLOCKER fix |
+| 2 | M1-T6 container hardening (review) | pass | `pytest tests/test_deploy.py` | |
+| 2 | M2-T6 lossless import metadata (review) | pass | `pytest tests/test_store.py tests/test_importer.py` | |
+| 2 | M3-T0 UI shell fixes (review) | pass | `pytest tests/test_ui_assets.py` | |
+| 2 | M5-T3 runbook/smoke fixes (review) | pass | `bash -n scripts/smoke.sh` | |
+| 2 | M2-T2 clone/transcribe | pass | `pytest tests/test_studio_clone.py` | |
+| 4 | M2-T3 speak/takes | todo | `pytest tests/test_studio_takes.py` | |
+| 2 | M4-T1 design backend | pass | `pytest tests/test_design.py` | |
 | 4 | M2-T4 voices CRUD | todo | `pytest tests/test_studio_voices.py` | |
 | 4 | M2-T5 engine API | todo | `pytest tests/test_studio_engine.py` | |
-| 3 | M3-T2 speak JS | todo | `pytest tests/test_ui_assets.py` | |
-| 3 | M3-T3 voices JS | todo | `pytest tests/test_ui_assets.py` | |
-| 3 | M3-T4 clone JS | todo | `pytest tests/test_ui_assets.py` | |
-| 3 | M3-T5 engine JS | todo | `pytest tests/test_ui_assets.py` | |
-| 3 | M4-T2 design JS | todo | `pytest tests/test_ui_assets.py` | |
+| 3 | M1-T7 speech slot/error fixes (review) | wip | `pytest tests/test_speech.py` | BLOCKER fix |
+| 3 | M1-T8 container pinning (review) | wip | `pytest tests/test_deploy.py` | |
+| 3 | M2-T7 store/importer key safety (review) | wip | `pytest tests/test_store.py tests/test_importer.py` | |
+| 3 | M2-T8 clone/STT + timeout (review) | wip | `pytest tests/test_studio_clone.py tests/test_audio.py` | |
+| 3 | M3-T2 speak JS | wip | `pytest tests/test_ui_assets.py` | |
+| 3 | M3-T3 voices JS | wip | `pytest tests/test_ui_assets.py` | |
+| 3 | M3-T4 clone JS | wip | `pytest tests/test_ui_assets.py` | |
+| 3 | M3-T5 engine JS | wip | `pytest tests/test_ui_assets.py` | |
+| 3 | M4-T2 design JS | wip | `pytest tests/test_ui_assets.py` | |
 | 4 | M3-T6 UI e2e | todo | `pytest tests/e2e` | |
 | 5 | M5-T2 acceptance | todo | `pytest tests/test_acceptance.py` | |
 
@@ -47,6 +51,22 @@
 - MAJOR → M5-T3: runbook used docker/Podman wrongly, host GPU index 1, wrong compose data path,
   divergent spike commands, and a smoke loop that masked failures.
 - NITs were folded into those five briefs; no inline hotfixes.
+
+## Wave-2 review outcome (2026-11-02)
+
+- BLOCKER → M1-T7: `StreamHandle.aclose()` could skip `_release()` on `CancelledError`; ffmpeg spawn
+  failure leaked the engine slot; unknown voice returned 404 instead of the spec's 400-with-names.
+- MAJOR → M1-T7: first-audio timing excluded pre-header latency; cfg/steps disabled on unrelated
+  4xx; streaming used the output `SAMPLE_RATE` as the engine input rate; transcode errors were
+  plain 500s.
+- MAJOR → M1-T8: `pydantic-settings` could still upgrade the engine stack; stale-service guard did
+  not catch `uvicorn`; reference deploy files had no hash pin.
+- MAJOR → M2-T7: import keyed off display name, not `voice_name_lower`; backup filename allowed a
+  traversal-shaped metadata key; prune could 500; `file_size` re-encoded every voice.
+- MAJOR → M2-T8: malformed STT responses returned plain 500s; upload decode/store blocked the event
+  loop; ffmpeg had no timeout.
+- NITs folded into those briefs; accepted NITs (design seed collision, `DesignService.settings`
+  unused, smoke script needing the real `/v1` routes) are tracked but not blocking.
 
 ## Blockers
 
@@ -82,4 +102,4 @@
 
 ## Next action
 
-Dispatch wave 2 (seven parallel workers): M1-T5, M1-T6, M2-T6, M3-T0, M5-T3, M2-T2, M4-T1.
+Dispatch wave 3 (nine parallel workers): M1-T7, M1-T8, M2-T7, M2-T8, M3-T2, M3-T3, M3-T4, M3-T5, M4-T2.
