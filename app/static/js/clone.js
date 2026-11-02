@@ -78,8 +78,13 @@ function setStatus(message) {
  * show() makes sure is loaded before calling this. */
 function gate() {
   $("auto-transcribe").disabled = !state.engine?.stt;
-  const gated = !!state.engine?.api_keys_required;
+  // Q-023: unknown engine status counts as gated, so Test-a-line fails closed
+  // (disabled + hint) instead of enabled and then 401 under API_KEYS.
+  const gated = !state.engine || !!state.engine.api_keys_required;
   $("test-line").disabled = gated;
+  $("clone-notes").textContent = state.engine
+    ? "Test a line needs /v1 access, which requires an API key on this server."
+    : "Test a line is disabled until the engine status is available.";
   $("clone-notes").hidden = !gated; // visible hint; a title on a disabled button is not announced
 }
 

@@ -185,15 +185,10 @@ async function playPcmStream(res) {
 }
 
 async function playWhole(res) {
-  if ((res.headers.get("content-type") || "").includes("json")) {
-    const take = await res.json(); // contract §2: non-stream /api/speak → TakeInfo
-    takes.unshift(take);
-    renderTakes();
-    play(take.audio_url);
-  } else {
-    play(URL.createObjectURL(await res.blob()));
-    await loadTakes();
-  }
+  const take = await res.json(); // contract §2: non-stream /api/speak → TakeInfo (Q-024)
+  takes.unshift(take);
+  renderTakes();
+  play(take.audio_url);
 }
 
 async function generate() {
@@ -275,14 +270,7 @@ async function init() {
   const toggle = $("stream-toggle");
   toggle.addEventListener("click", () => {
     toggle.setAttribute("aria-pressed", String(toggle.getAttribute("aria-pressed") !== "true"));
-    syncFormat();
   });
-  syncFormat();
-}
-
-/* Streaming is always PCM: the format select only applies when the toggle is off. */
-function syncFormat() {
-  $("fmt").disabled = $("stream-toggle").getAttribute("aria-pressed") === "true";
 }
 
 async function show() {

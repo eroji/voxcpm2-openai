@@ -52,6 +52,7 @@ code, pre { font-family: var(--vs-mono); }
 .vs-select { border: 1px solid var(--vs-fg); background: var(--vs-bg); padding: var(--vs-s2) var(--vs-s3); min-height: var(--vs-h-input); }
 .vs-field { display: flex; flex-direction: column; gap: var(--vs-s1); }
 .vs-field > label { font-size: var(--vs-fs-label); color: var(--vs-muted); }
+.vs-field > label .hint { display: block; font-weight: 400; }
 .vs-value { font-size: var(--vs-fs-value); font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
 .vs-grid-params { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--vs-s7); }
 input[type="range"] { accent-color: var(--vs-fg); }
@@ -111,6 +112,7 @@ input[type="checkbox"] { width: 14px; height: 14px; margin: 0; accent-color: var
 .vs-empty { padding: var(--vs-s6) 0; border-top: var(--vs-rule-row); color: var(--vs-muted); font-size: var(--vs-fs-small); display: flex; flex-direction: column; gap: var(--vs-s5); align-items: flex-start; }
 
 /* Clone */
+#clone-notes { white-space: normal; } /* .meta is nowrap; the hint must wrap at 390 px */
 .vs-drop { display: flex; flex-direction: column; justify-content: center; gap: var(--vs-s1); min-height: 84px; border: 1px dashed var(--vs-fg); padding: var(--vs-s7); cursor: pointer; }
 .vs-drop b { font-size: 14px; letter-spacing: -0.01em; }
 .vs-drop.is-over { border-style: solid; border-color: var(--vs-accent); }

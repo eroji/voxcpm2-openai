@@ -252,7 +252,9 @@ def test_rename_body_uses_name_and_validates():
 def test_clone_gates_on_engine_flags():
     clone = js("clone.js")
     assert "state.engine?.stt" in clone
-    assert "state.engine?.api_keys_required" in clone
+    # Q-023 fail closed: unknown engine status gates Test-a-line, not just api_keys_required
+    assert "const gated = !state.engine || !!state.engine.api_keys_required;" in clone
+    assert "const gated = !!state.engine?.api_keys_required;" not in clone
     assert 'api.get("/api/engine")' not in clone
     assert "setTimeout" not in clone
     assert 'id="clone-status"' in HTML
@@ -264,7 +266,8 @@ def test_speak_lifecycle_releases_resources():
     assert "reader.cancel()" in speak
     assert "ctx.close()" in speak
     assert "await new Promise(resolve => setTimeout" not in speak  # no playback-tail await
-    assert '$("fmt").disabled' in speak
+    # Q-024: Format is disabled in the markup, not toggled by JS
+    assert re.search(r'<select[^>]*id="fmt"[^>]*\bdisabled\b', HTML)
     assert "URL.revokeObjectURL" in CORE  # object URLs revoked in stopAudio()
 
 
@@ -294,8 +297,11 @@ def test_clone_show_gates_after_engine_status():
     assert "Promise.allSettled([refreshEngine(), loadVoices()])" in clone
     show = re.search(r"async show\(\) \{(?P<body>.*?)\n  \},", clone, re.S)
     assert show, "show() not found"
-    assert "finally" in show.group("body"), "gating must run in a finally"
-    assert "gate()" in show.group("body")
+    body = show.group("body")
+    assert "finally" in body, "gating must run in a finally"
+    # the status must be awaited *before* gating, not merely both present
+    assert "Promise.allSettled" in body
+    assert body.index("Promise.allSettled") < body.index("gate()"), "gate() runs before the status"
     # an older duration probe must not overwrite a newer file
     assert re.search(r"\+\+probeSeq", clone)
 
@@ -305,3 +311,32 @@ def test_status_row_has_css_rule():
     assert rule, ".vs-status rule missing from studio.css"
     for token in ["var(--vs-s4)", "var(--vs-fs-small)", "var(--vs-muted)"]:
         assert token in rule.group(1), token
+
+
+# --- M3-T9 wave-5 review fixes -------------------------------------------------
+
+
+def test_clone_hint_text_set_when_test_line_disabled():
+    clone = js("clone.js")
+    # the hint text is set whenever the button is gated, and wired via aria-describedby
+    assert '$("clone-notes").textContent' in clone
+    assert '$("clone-notes").hidden = !gated;' in clone
+    assert 'aria-describedby="clone-notes"' in HTML
+    # the null-engine case gets its own wording (fail closed, not silent)
+    assert "engine status" in clone
+
+
+def test_format_disabled_with_hint_and_no_dead_branch():
+    # Q-024: Studio /api/speak always answers with TakeInfo JSON; non-WAV is a /v1 concern
+    assert "Studio takes are WAV; use /v1 for other formats." in HTML
+    assert re.search(r'<select[^>]*id="fmt"[^>]*\btitle=', HTML)
+    speak = js("speak.js")
+    assert "res.headers.get(" not in speak  # dead non-WAV response branch removed
+    assert "res.blob()" not in speak
+
+
+def test_clone_notes_wrap_at_narrow_width():
+    # .meta is white-space: nowrap; #clone-notes must override it or it overflows at 390 px
+    rule = re.search(r"#clone-notes \{([^}]*)\}", CSS)
+    assert rule, "#clone-notes rule missing from studio.css"
+    assert "white-space: normal" in rule.group(1)

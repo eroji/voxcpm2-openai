@@ -53,7 +53,7 @@
         <div class="ctl vs-grid-params">
           <div class="vs-field"><label for="cfg">Guidance (CFG)</label><output class="vs-value" for="cfg" id="cfg-out">2.0</output><input id="cfg" type="range" min="1" max="4" step="0.1" value="2"></div>
           <div class="vs-field"><label for="steps">Diffusion steps</label><output class="vs-value" for="steps" id="steps-out">10</output><input id="steps" type="range" min="4" max="30" step="1" value="10"></div>
-          <div class="vs-field"><label for="fmt">Format</label><select class="vs-select" id="fmt"><option value="wav">WAV · 48 kHz</option><option value="pcm">PCM stream</option><option value="mp3">MP3</option><option value="opus">Opus</option></select></div>
+          <div class="vs-field"><label for="fmt">Format<span class="hint">Studio takes are WAV; use /v1 for other formats.</span></label><select class="vs-select" id="fmt" disabled title="Studio takes are WAV; use /v1 for other formats."><option value="wav">WAV · 48 kHz</option><option value="pcm">PCM stream</option><option value="mp3">MP3</option><option value="opus">Opus</option></select></div>
         </div>
       </div>
       <p class="vs-error" id="speak-error" role="alert" hidden></p>
