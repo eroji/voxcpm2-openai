@@ -1,7 +1,7 @@
 # Progress
 
-**Current wave:** 8 — release review fixes
-**Resume:** `scripts/verify.sh` then `/dispatch 1`
+**Current wave:** 9 — delivery complete (local); CI pending push
+**Resume:** `scripts/verify.sh` then `/status`; next human action is `git push` to run GitLab CI
 
 ## Task table
 
@@ -46,12 +46,12 @@
 | 6 | M2-T11 take language/48 kHz/FLAC (review) | pass | `pytest tests/test_studio_takes.py tests/test_auth.py` | BLOCKER fix |
 | 6 | M3-T9 clone fail-closed + Format hint (review) | pass | `pytest tests/test_ui_assets.py` | |
 | 7 | M3-T6 UI e2e | pass | `pytest tests/e2e` | |
-| 8 | M1-T13 CI/auth/500 fixes (review) | wip | `pytest tests/test_config.py tests/test_auth.py` | BLOCKER fix |
-| 8 | M1-T14 models/instructions/headers (review) | wip | `pytest tests/test_v1.py tests/test_engine.py` | |
-| 8 | M1-T15 speech off-loop (review) | wip | `pytest tests/test_speech.py` | |
-| 8 | M2-T12 store/take invariants (review) | wip | `pytest tests/test_store.py tests/test_studio_takes.py` | |
-| 8 | M2-T13 deterministic burst + host RTF (review) | wip | `pytest tests/test_acceptance.py` | |
-| 8 | M3-T10 UI release e2e (review) | wip | `pytest tests/e2e` | |
+| 8 | M1-T13 CI/auth/500 fixes (review) | pass | `pytest tests/test_config.py tests/test_auth.py` | BLOCKER fix |
+| 8 | M1-T14 models/instructions/headers (review) | pass | `pytest tests/test_v1.py tests/test_engine.py` | |
+| 8 | M1-T15 speech off-loop (review) | pass | `pytest tests/test_speech.py` | |
+| 8 | M2-T12 store/take invariants (review) | pass | `pytest tests/test_store.py tests/test_studio_takes.py` | |
+| 8 | M2-T13 deterministic burst + host RTF (review) | pass | `pytest tests/test_acceptance.py` | |
+| 8 | M3-T10 UI release e2e (review) | pass | `pytest tests/e2e` | |
 | 7 | M5-T2 acceptance | pass | `pytest tests/test_acceptance.py` | |
 
 \* M0-T1 delivers runnable scripts + `NOTES.md`; findings are pending the external host (B-001).
@@ -143,6 +143,25 @@
   Format control disabled; non-WAV formats are `/v1`-only). Both are implemented as documented
   fallbacks, not blockers.
 
+## Final local verification (2026-11-02)
+
+```
+scripts/verify.sh
+  format check     54 files already formatted
+  lint             All checks passed
+  typecheck        Success: no issues found in 21 source files
+  unit+integration 271 passed, 5 skipped in 38.53s
+  coverage         95.20% (gate 65%)
+  e2e              24 passed (real Chromium 156)
+  python build     sdist + wheel built
+  package contract Containerfile + s6 checks passed
+==> OK
+```
+
+Skipped, by design: five SPEC §13 hardware/external checks (`test_hardware_rtf_and_vram`,
+LiteLLM/Open WebUI/Hermes/Wyoming, ear spot-check, container build, UI visual parity note). M0
+spikes remain host-run. CI has not run yet: the branch is local (47+ commits ahead of origin).
+
 ## Blockers
 
 | ID | Blocker | Owner | Unblocks |
@@ -177,4 +196,8 @@
 
 ## Next action
 
-Dispatch wave 8 (six parallel workers): M1-T13, M1-T14, M1-T15, M2-T12, M2-T13, M3-T10.
+1. `git push origin main` and watch the GitLab pipeline (`checks`, `javascript`, `test`, `e2e`,
+   `build`, `package:check`; `package` runs when `HARBOR_USER`/`HARBOR_PASSWORD` are set).
+2. Run M0 spikes on the `vllm` host (`scripts/spikes/README.md`) and append results to `NOTES.md`.
+3. Human decisions: Q-023, Q-024, Q-015 (runner docker/Harbor), Q-005 (`STT_URL`), Q-014 (real
+   warm-up clip).
