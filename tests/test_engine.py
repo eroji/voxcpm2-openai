@@ -14,7 +14,7 @@ import pytest
 import uvicorn
 from app.audio import duration_s, pcm_s16le_to_float, read_audio, wav_bytes
 from app.engine import EngineClient, SynthParams, SynthResult
-from app.errors import QueueFull
+from app.errors import EngineNotReady, QueueFull
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 
@@ -127,7 +127,9 @@ async def test_stats_without_nvidia_smi(fake_engine: Any, monkeypatch: pytest.Mo
     await engine.aclose()
 
 
-def _rejection_app(calls: list[dict[str, Any]]) -> FastAPI:
+def _rejection_app(
+    calls: list[dict[str, Any]], *, field: str = "steps", status: int = 422
+) -> FastAPI:
     app = FastAPI()
 
     @app.get("/health")
@@ -138,8 +140,10 @@ def _rejection_app(calls: list[dict[str, Any]]) -> FastAPI:
     async def speech(request: Request) -> Response:
         body = await request.json()
         calls.append(body)
-        if "steps" in body or "cfg" in body:
-            return JSONResponse({"error": {"message": "unknown field: steps"}}, status_code=422)
+        if field in body or (field == "steps" and "cfg" in body):
+            return JSONResponse(
+                {"error": {"message": f"unknown field: {field}"}}, status_code=status
+            )
         t = np.linspace(0, 0.6, int(SAMPLE_RATE * 0.6), endpoint=False)
         tone = (0.2 * np.sin(2 * np.pi * 220 * t)).astype(np.float32)
         return Response(wav_bytes(tone, SAMPLE_RATE), media_type="audio/wav")
@@ -166,6 +170,74 @@ async def test_cfg_steps_rejected(caplog: pytest.LogCaptureFixture) -> None:
         assert len(calls) == 3
         assert "steps" not in calls[2]
         assert len([r for r in caplog.records if "cfg/steps" in r.getMessage()]) == 1
+        await engine.aclose()
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+async def test_instructions_rejected(caplog: pytest.LogCaptureFixture) -> None:
+    """S1 fallback: engine rejecting `instructions` → accept, retry once, log once."""
+    calls: list[dict[str, Any]] = []
+    url, server, thread = _serve(_rejection_app(calls, field="instructions", status=400))
+    try:
+        engine = EngineClient(url)
+        await engine.start()
+        with caplog.at_level(logging.WARNING, logger="app.engine"):
+            result = await engine.synth(SynthParams(text="hi", instructions="warm female voice"))
+        assert isinstance(result, SynthResult)
+        assert len(calls) == 2  # one 400, then exactly one retry
+        assert "instructions" in calls[0] and "instructions" not in calls[1]
+        assert len([r for r in caplog.records if "instructions" in r.getMessage()]) == 1
+        # later calls drop instructions up front: no extra round trip, no second warning
+        await engine.synth(SynthParams(text="hi", instructions="warm"))
+        assert len(calls) == 3 and "instructions" not in calls[2]
+        assert len([r for r in caplog.records if "instructions" in r.getMessage()]) == 1
+        await engine.aclose()
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+def _status_app(status: int, *, retry_after: str | None = None) -> FastAPI:
+    app = FastAPI()
+
+    @app.get("/health")
+    async def health() -> dict[str, str]:
+        return {"status": "ok"}
+
+    @app.post("/v1/audio/speech")
+    async def speech() -> Response:
+        headers = {"Retry-After": retry_after} if retry_after else {}
+        return JSONResponse(
+            {"error": {"message": "engine is busy"}}, status_code=status, headers=headers
+        )
+
+    return app
+
+
+async def test_upstream_429_maps_to_queue_full() -> None:
+    url, server, thread = _serve(_status_app(429, retry_after="7"))
+    try:
+        engine = EngineClient(url)
+        await engine.start()
+        with pytest.raises(QueueFull) as excinfo:
+            await engine.synth(SynthParams(text="hi"))
+        assert excinfo.value.headers["Retry-After"] == "7"
+        await engine.aclose()
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+async def test_upstream_503_maps_to_engine_not_ready() -> None:
+    url, server, thread = _serve(_status_app(503))
+    try:
+        engine = EngineClient(url)
+        await engine.start()
+        with pytest.raises(EngineNotReady) as excinfo:
+            await engine.synth(SynthParams(text="hi"))
+        assert excinfo.value.headers["Retry-After"] == "5"
         await engine.aclose()
     finally:
         server.should_exit = True

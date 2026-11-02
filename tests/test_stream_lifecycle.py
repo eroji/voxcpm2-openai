@@ -173,8 +173,9 @@ async def test_429_does_not_disable_cfg_steps() -> None:
     try:
         engine = EngineClient(url)
         await engine.start()
-        with pytest.raises(EngineError):  # a 429 from the engine is a 502, not a schema error
+        with pytest.raises(QueueFull) as exc:  # upstream backpressure keeps its 429 semantics
             await engine.synth(SynthParams(text="hi", cfg=2.0, steps=4))
+        assert exc.value.headers["Retry-After"]
         await engine.synth(SynthParams(text="hi", cfg=2.0, steps=4))
         assert "cfg" in calls[1] and "steps" in calls[1]  # knobs were never disabled
         await engine.aclose()

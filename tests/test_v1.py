@@ -4,11 +4,20 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from app.audio import to_wav_data_uri
 from app.config import Settings
+from app.engine import EngineClient
 from app.main import create_app
 from fastapi.testclient import TestClient
 
+from tests.test_engine import _serve, _status_app
+
 BODY = {"model": "tts-1", "voice": "ashley-en", "input": "hello"}
+
+_TONE = (0.2 * np.sin(2 * np.pi * 220 * np.linspace(0, 0.2, 9600, endpoint=False))).astype(
+    np.float32
+)
+REF_URI = to_wav_data_uri(_TONE, 48000)
 
 
 def assert_openai_error(response, status: int) -> dict:
@@ -104,10 +113,13 @@ def test_missing_model_400(client, library):
 
 
 def test_models_card(client):
+    """SPEC §6: exactly one card; aliases are accepted on request, not listed."""
     r = client.get("/v1/models")
     assert r.status_code == 200
-    data = r.json()["data"]
-    assert [m["id"] for m in data] == ["voxcpm2", "tts-1", "openbmb/VoxCPM2"]
+    body = r.json()
+    assert body["object"] == "list"
+    data = body["data"]
+    assert [m["id"] for m in data] == ["voxcpm2"]
     assert all(m["object"] == "model" for m in data)
 
 
@@ -167,3 +179,44 @@ def test_api_keys_gate(settings, library):
         assert c.post("/v1/audio/speech", json=BODY, headers=auth).status_code == 200
         assert c.get("/v1/models").status_code == 401
         assert c.get("/v1/models", headers=auth).status_code == 200
+
+
+def test_upstream_429_becomes_429_with_retry_after(settings, library):
+    url, server, thread = _serve(_status_app(429, retry_after="7"))
+    try:
+        with TestClient(create_app(settings, engine=EngineClient(url))) as c:
+            r = c.post("/v1/audio/speech", json=BODY)
+            error = assert_openai_error(r, 429)
+            assert error["type"] == "rate_limit_error"
+            assert r.headers["Retry-After"] == "7"
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+def test_upstream_503_becomes_503_engine_not_ready(settings, library):
+    url, server, thread = _serve(_status_app(503))
+    try:
+        with TestClient(create_app(settings, engine=EngineClient(url))) as c:
+            r = c.post("/v1/audio/speech", json=BODY)
+            error = assert_openai_error(r, 503)
+            assert error["code"] == "engine_not_ready"
+            assert r.headers["Retry-After"] == "5"
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+def test_voice_header_injection_neutralized(client, library):
+    r = client.post(
+        "/v1/audio/speech", json={**BODY, "voice": "a\r\nX-Evil: 1", "ref_audio": REF_URI}
+    )
+    assert r.status_code == 200
+    assert r.headers["X-Voice"] == "ad-hoc"
+    assert "X-Evil" not in r.headers
+
+
+def test_long_voice_label_neutralized(client, library):
+    r = client.post("/v1/audio/speech", json={**BODY, "voice": "v" * 1000, "ref_audio": REF_URI})
+    assert r.status_code == 200
+    assert r.headers["X-Voice"] == "ad-hoc"

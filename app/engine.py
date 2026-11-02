@@ -21,6 +21,7 @@ import json
 import logging
 import shutil
 import subprocess
+import threading
 import time
 from collections import deque
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
@@ -125,6 +126,10 @@ class EngineClient:
         self._rtf: deque[float] = deque(maxlen=metrics_window)
         self._first: deque[float] = deque(maxlen=metrics_window)
         self._supports_cfg_steps = True
+        self._supports_instructions = True
+        # stats() runs in a worker thread (asyncio.to_thread) while the event
+        # loop appends metrics; the lock keeps deque snapshots consistent.
+        self._stats_lock = threading.Lock()
         self._gpu_cache: tuple[float, tuple[str | None, int | None, int | None]] = (
             0.0,
             (None, None, None),
@@ -295,6 +300,9 @@ class EngineClient:
 
     def stats(self) -> EngineStats:
         gpu, used, total = self._gpu_info()
+        with self._stats_lock:  # snapshot while the event loop may append
+            rtf = sum(self._rtf) / len(self._rtf) if self._rtf else None
+            first = sum(self._first) / len(self._first) if self._first else None
         return EngineStats(
             ready=self._ready,
             model=self.model,
@@ -304,8 +312,8 @@ class EngineClient:
             vram_total_mb=total,
             kv_cache=self.kv_cache,
             max_concurrency=self.concurrency,
-            rtf=sum(self._rtf) / len(self._rtf) if self._rtf else None,
-            first_audio_ms=sum(self._first) / len(self._first) if self._first else None,
+            rtf=rtf,
+            first_audio_ms=first,
             queue_depth=self._waiting,
         )
 
@@ -347,7 +355,9 @@ class EngineClient:
         if not self._ready:
             raise EngineNotReady()
 
-    def _payload(self, params: SynthParams, *, cfg_steps: bool) -> dict[str, object]:
+    def _payload(
+        self, params: SynthParams, *, cfg_steps: bool, instructions: bool = True
+    ) -> dict[str, object]:
         body: dict[str, object] = {
             "model": self.model,
             "input": params.text,
@@ -358,11 +368,9 @@ class EngineClient:
             body["ref_audio"] = params.ref_audio
         if params.ref_text is not None:
             body["ref_text"] = params.ref_text
-        for key, value in (
-            ("instructions", params.instructions),
-            ("speed", params.speed),
-            ("seed", params.seed),
-        ):
+        if instructions and params.instructions is not None:
+            body["instructions"] = params.instructions
+        for key, value in (("speed", params.speed), ("seed", params.seed)):
             if value is not None:
                 body[key] = value
         if cfg_steps:
@@ -373,9 +381,16 @@ class EngineClient:
         return body
 
     async def _post(self, params: SynthParams, *, stream: bool) -> httpx.Response:
-        """POST to the engine; on 4xx caused by cfg/steps retry once without them (Q-004)."""
+        """POST to the engine.
+
+        Upstream 429/503 map to ``QueueFull``/``EngineNotReady`` (with their
+        ``Retry-After`` semantics); a 4xx naming ``cfg``/``steps`` (Q-004) or
+        ``instructions`` (S1 fallback) retries once without that field.
+        """
         client = self._http()
-        body = self._payload(params, cfg_steps=self._supports_cfg_steps)
+        body = self._payload(
+            params, cfg_steps=self._supports_cfg_steps, instructions=self._supports_instructions
+        )
         while True:
             try:
                 if stream:
@@ -387,31 +402,57 @@ class EngineClient:
                 raise EngineError(f"engine request failed: {exc}") from exc
             if resp.status_code < 400:
                 return resp
+            status = resp.status_code
             message = await _error_message(resp)
-            lowered = message.lower()
-            rejected = (
-                resp.status_code in (400, 415, 422)  # only a schema rejection (Q-004)
-                and self._supports_cfg_steps
-                and ("cfg" in body or "steps" in body)
-                and ("cfg" in lowered or "steps" in lowered)  # never on an unrelated 4xx
-            )
             await resp.aclose()
-            if rejected:
-                self._supports_cfg_steps = False
-                logger.warning(
-                    "engine rejected cfg/steps (HTTP %s): %s — retrying without them",
-                    resp.status_code,
-                    message,
-                )
-                body = self._payload(params, cfg_steps=False)
-                continue
+            if status == 429:
+                raise QueueFull(_retry_after_seconds(resp))
+            if status == 503:
+                raise EngineNotReady(message)
+            lowered = message.lower()
+            if status in (400, 415, 422):  # only a schema rejection, never on an unrelated 4xx
+                if (
+                    self._supports_cfg_steps
+                    and ("cfg" in body or "steps" in body)
+                    and ("cfg" in lowered or "steps" in lowered)
+                ):
+                    self._supports_cfg_steps = False
+                    logger.warning(
+                        "engine rejected cfg/steps (HTTP %s): %s — retrying without them",
+                        status,
+                        message,
+                    )
+                    body = self._payload(
+                        params,
+                        cfg_steps=False,
+                        instructions=self._supports_instructions,
+                    )
+                    continue
+                if (
+                    self._supports_instructions
+                    and "instructions" in body
+                    and "instructions" in lowered
+                ):
+                    self._supports_instructions = False
+                    logger.warning(
+                        "engine rejected instructions (HTTP %s): %s — retrying without it",
+                        status,
+                        message,
+                    )
+                    body = self._payload(
+                        params,
+                        cfg_steps=self._supports_cfg_steps,
+                        instructions=False,
+                    )
+                    continue
             raise EngineError(message)
 
     def _record(self, rtf: float | None, first_ms: float | None) -> None:
-        if rtf is not None:
-            self._rtf.append(rtf)
-        if first_ms is not None:
-            self._first.append(first_ms)
+        with self._stats_lock:
+            if rtf is not None:
+                self._rtf.append(rtf)
+            if first_ms is not None:
+                self._first.append(first_ms)
 
     def _gpu_info(self) -> tuple[str | None, int | None, int | None]:
         now = time.monotonic()
@@ -449,6 +490,13 @@ def _runtime_label() -> str:
         except PackageNotFoundError:
             continue
     return " · ".join(parts) if parts else "vLLM-Omni"
+
+
+def _retry_after_seconds(resp: httpx.Response, default: int = 1) -> int:
+    try:
+        return max(1, int(resp.headers.get("retry-after", "")))
+    except ValueError:
+        return default
 
 
 async def _error_message(resp: httpx.Response) -> str:

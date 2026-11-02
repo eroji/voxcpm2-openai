@@ -10,25 +10,21 @@ from starlette.background import BackgroundTask
 
 from app.auth import require_v1
 from app.errors import BadRequest
-from app.models import ModelCard, ModelList, SpeechRequest
+from app.models import ModelCard, ModelList, SpeechRequest, safe_header_value
 from app.speech import SpeechResult, StreamingSpeech
 
 router = APIRouter(prefix="/v1", tags=["openai"], dependencies=[Depends(require_v1)])
 
 
 def _voice_header(seq: StreamingSpeech | SpeechResult) -> str:
-    """X-Voice must be header-safe (Starlette is latin-1): key first, label only if safe."""
-    value = seq.key or seq.voice
-    try:
-        value.encode("latin-1")
-    except UnicodeEncodeError:
-        return "ad-hoc"
-    return value
+    """X-Voice is user-controlled for ad-hoc clones: sanitize or 500/injection (M1-T14)."""
+    return safe_header_value(seq.key or seq.voice)
 
 
 @router.get("/models")
 async def models() -> ModelList:
-    return ModelList(data=[ModelCard(id=id_) for id_ in ("voxcpm2", "tts-1", "openbmb/VoxCPM2")])
+    # SPEC §6: exactly one card; tts-1 / openbmb/VoxCPM2 are accepted aliases, not listed.
+    return ModelList(data=[ModelCard(id="voxcpm2")])
 
 
 @router.get("/audio/voices")

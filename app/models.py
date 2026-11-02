@@ -12,6 +12,17 @@ Language = str  # en | ja | ko | zh; unknown codes pass through
 VOICE_NAME_PATTERN = r"^[a-z0-9][a-z0-9_-]{0,63}$"
 
 
+def safe_header_value(value: str) -> str:
+    """Header-safe label for X-Voice (user-controlled, Starlette must not see CRLF/C0).
+
+    Anything empty, longer than 64 chars, or containing non-printable/non-ASCII
+    characters is replaced with ``"ad-hoc"``.
+    """
+    if not value or len(value) > 64 or not value.isascii() or not value.isprintable():
+        return "ad-hoc"
+    return value
+
+
 class APIModel(BaseModel):
     """Ignore unknown fields: existing Qwen3 callers send extras (task_type, ...)."""
 
