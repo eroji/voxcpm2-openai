@@ -1,6 +1,6 @@
 # Progress
 
-**Current wave:** 6 — wave-5 review fixes
+**Current wave:** 8 — release review fixes
 **Resume:** `scripts/verify.sh` then `/dispatch 1`
 
 ## Task table
@@ -41,12 +41,18 @@
 | 3 | M3-T4 clone JS | pass | `pytest tests/test_ui_assets.py` | |
 | 3 | M3-T5 engine JS | pass | `pytest tests/test_ui_assets.py` | |
 | 3 | M4-T2 design JS | pass | `pytest tests/test_ui_assets.py` | |
-| 6 | M1-T11 restart/warm-up supervision (review) | wip | `pytest tests/test_queue_http.py` | BLOCKER fix |
-| 6 | M1-T12 models/headers/error shape (review) | wip | `pytest tests/test_v1.py` | |
-| 6 | M2-T11 take language/48 kHz/FLAC (review) | wip | `pytest tests/test_studio_takes.py tests/test_auth.py` | BLOCKER fix |
-| 6 | M3-T9 clone fail-closed + Format hint (review) | wip | `pytest tests/test_ui_assets.py` | |
-| 7 | M3-T6 UI e2e | todo | `pytest tests/e2e` | |
-| 7 | M5-T2 acceptance | todo | `pytest tests/test_acceptance.py` | |
+| 6 | M1-T11 restart/warm-up supervision (review) | pass | `pytest tests/test_queue_http.py` | BLOCKER fix |
+| 6 | M1-T12 models/headers/error shape (review) | pass | `pytest tests/test_v1.py` | |
+| 6 | M2-T11 take language/48 kHz/FLAC (review) | pass | `pytest tests/test_studio_takes.py tests/test_auth.py` | BLOCKER fix |
+| 6 | M3-T9 clone fail-closed + Format hint (review) | pass | `pytest tests/test_ui_assets.py` | |
+| 7 | M3-T6 UI e2e | pass | `pytest tests/e2e` | |
+| 8 | M1-T13 CI/auth/500 fixes (review) | wip | `pytest tests/test_config.py tests/test_auth.py` | BLOCKER fix |
+| 8 | M1-T14 models/instructions/headers (review) | wip | `pytest tests/test_v1.py tests/test_engine.py` | |
+| 8 | M1-T15 speech off-loop (review) | wip | `pytest tests/test_speech.py` | |
+| 8 | M2-T12 store/take invariants (review) | wip | `pytest tests/test_store.py tests/test_studio_takes.py` | |
+| 8 | M2-T13 deterministic burst + host RTF (review) | wip | `pytest tests/test_acceptance.py` | |
+| 8 | M3-T10 UI release e2e (review) | wip | `pytest tests/e2e` | |
+| 7 | M5-T2 acceptance | pass | `pytest tests/test_acceptance.py` | |
 
 \* M0-T1 delivers runnable scripts + `NOTES.md`; findings are pending the external host (B-001).
 
@@ -119,6 +125,24 @@
 - Accepted NITs: CSRF on Basic-auth POSTs (LAN-only, spec mandates Basic), event-loop list/wave
   cost for large libraries, header `X-Take-Id` before persistence (Q-006).
 
+## Release-review outcome (2026-11-02)
+
+- BLOCKER → M1-T13: CI Alpine/node jobs inherited the Debian `before_script`; `package` could be
+  green without an image; malformed `STUDIO_AUTH`/`API_KEYS` failed open; unhandled errors were
+  plain-text 500s; `/docs` was open and loaded a CDN.
+- BLOCKER → M1-T14: `/v1/models` listed three cards against SPEC §6; `instructions` had no
+  unsupported-field fallback; upstream 429/503 became 502; `X-Voice` allowed CR/LF.
+- MAJOR → M1-T15: non-stream decode/transcode ran on the event loop.
+- MAJOR → M2-T12: voice listing decoded every audio tensor on each poll; same-second backups
+  overwrote; design takes leaked into Speak; take rate not pinned to 48 kHz.
+- MAJOR → M2-T13: burst test timing hazard; RTF only proven on the fake engine; runbook queue probe
+  ignored auth.
+- MAJOR → M3-T10: disabled controls looked enabled; streaming/clone-save paths had no browser test;
+  only two 390 px screenshots.
+- Open decisions for the human: Q-023 (Test-a-line disabled when `API_KEYS` set) and Q-024 (Studio
+  Format control disabled; non-WAV formats are `/v1`-only). Both are implemented as documented
+  fallbacks, not blockers.
+
 ## Blockers
 
 | ID | Blocker | Owner | Unblocks |
@@ -153,4 +177,4 @@
 
 ## Next action
 
-Dispatch wave 6 (four parallel workers): M1-T11, M1-T12, M2-T11, M3-T9.
+Dispatch wave 8 (six parallel workers): M1-T13, M1-T14, M1-T15, M2-T12, M2-T13, M3-T10.

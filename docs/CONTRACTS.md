@@ -18,7 +18,7 @@ task needs a change, it reports `BLOCKED` and the lead amends this file in a new
 | `app/warmup.py` | `WarmupService(store, engine, settings)`; attributes `warm: bool`, `last_error: str|None`; `run()->bool`, `run_forever()`. |
 | `app/main.py` | `create_app(settings=None, *, engine=None)`; lifespan builds `app.state.{settings,store,takes,engine,speech,warmup}`. Pass `engine=` in tests. Static at `/static`, `/` serves `static/index.html`. Basic-auth middleware for `/`, `/api/*`, `/static/*` when `STUDIO_AUTH` set. Validation errors → 400 OpenAI shape. |
 | `app/auth.py` | `require_v1` dependency (Bearer when `API_KEYS` set). `/v1` router must include it. |
-| `app/routers/system.py` | `/health` 200 always; `/ready` 200 only when `app.state.warmup.warm`, else 503 + `Retry-After: 5`. |
+| `app/routers/system.py` | `/health` 200 always; `/ready` 200 only when `warmup.warm and engine.ready`, else 503 + `Retry-After: 5` with a reason. |
 
 ## 2. HTTP routes (exact paths)
 
@@ -26,7 +26,9 @@ task needs a change, it reports `BLOCKED` and the lead amends this file in a new
 
 - `POST /v1/audio/speech` → audio bytes, `Content-Type` per format, headers `X-Voice`,
   `X-Sample-Rate`, `X-Audio-Duration` (non-stream), `X-RTF` (non-stream).
-- `GET /v1/models` → `{"object":"list","data":[{"id":"voxcpm2","object":"model","created":0,"owned_by":"openbmb"}]}`
+- `GET /v1/models` → **one** entry `{"object":"list","data":[{"id":"voxcpm2","object":"model",
+  "created":0,"owned_by":"openbmb"}]}`. Aliases `tts-1`/`openbmb/VoxCPM2` are accepted as the
+  request `model`, not listed (SPEC §6).
 - `GET /v1/audio/voices` → `{"voices":[{"name","language","source"}]}` where `name` is the
   lowercase **key** callers pass as `voice` (SPEC §6).
 
@@ -42,7 +44,7 @@ task needs a change, it reports `BLOCKED` and the lead amends this file in a new
 | POST | `/api/voices/import` | `{"imported":[],"skipped":[],"failed":[]}` |
 | POST | `/api/transcribe` | `{"text": str}` (multipart `file`) |
 | POST | `/api/speak` | `TakeInfo`; `stream=true` → audio + `X-Take-Id` |
-| GET | `/api/takes` | `{"takes":[TakeInfo]}` |
+| GET | `/api/takes?kind=studio` | `{"takes":[TakeInfo]}`; default `studio`, `all` includes design candidates |
 | GET | `/api/takes/{id}/audio` | WAV bytes |
 | GET | `/api/takes/{id}/wave` | `{"amps":[72 floats 0..1]}` |
 | POST | `/api/takes/{id}/save-as-voice` | `VoiceSummary` (body `{name,language}`) |
@@ -127,7 +129,8 @@ event loop (`asyncio.to_thread`) because it shells out to `nvidia-smi`.
   when waiting ≥ `max_queue`.
 - VRAM/GPU from `nvidia-smi --query-gpu=name,memory.used,memory.total --format=csv,noheader,nounits
   -i 0`; failures → `None` (never raise from `stats()`).
-- `restart()` runs `s6-svc -r /run/service/<s6_service>`; raises `EngineError` on failure.
+- `restart()` marks the client unready, runs `s6-svc -r /run/service/<s6_service>`, waits up to
+  120 s for `/health`, and raises `EngineError` if it never returns.
 
 ## 6. Clone / transcribe
 

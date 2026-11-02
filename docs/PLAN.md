@@ -127,7 +127,7 @@ Citations are `SPEC.md` section/line. IDs are append-only.
 | Q-008 | Take retention scope "session" | Global newest-50 on disk; UI labels "This session" as in reference | no |
 | Q-009 | "Test a line" endpoint | Client calls `POST /v1/audio/speech` with `ref_audio` data URI + `ref_text` (no save); no new route | no |
 | Q-010 | Voice rename semantics | Rename file+metadata+index, backup first; takes keep old voice label | no |
-| Q-011 | Models payload shape beyond ids | OpenAI-shaped `{object:"list",data:[{id,object:"model",created,owned_by:"openbmb"}]}` with one entry; aliases accepted on input, not listed | no |
+| Q-011 | Models payload shape beyond ids | OpenAI-shaped `{object:"list",data:[{id,object:"model",created,owned_by:"openbmb"}]}` with **one** entry `voxcpm2`; aliases accepted on input, not listed | no |
 | Q-012 | `speed` + `pcm` + stream together | Allowed; engine ignores native speed for stream, app logs once; no ffmpeg for pcm stream | no |
 | Q-013 | Does `API_KEYS` guard `/v1/audio/voices`? | Yes: every `/v1/*` path except `/ready`,`/health` | no |
 | Q-014 | Warm-up audio when library empty | Bundled `app/assets/warmup.wav` (1.5 s tone, `ref_text="Warm-up."`), documented as non-speech placeholder | yes: supply real clip optional |
@@ -140,7 +140,7 @@ Citations are `SPEC.md` section/line. IDs are append-only.
 | Q-021 | Uploaded clone audio >48 kHz | Resample down to 48 kHz; below stays at original rate (spec: "resample to 48 kHz if above") | no |
 | Q-022 | Backup retention | Keep newest 20 zips, prune oldest | no |
 | Q-024 | Studio Format control vs `/api/speak` returning take metadata (SPEC §7) while takes are WAV (SPEC §5) | Format select stays visible but disabled in Studio with a hint; non-WAV formats remain a `/v1` feature. No second endpoint | yes: confirm UI-only treatment |
-| Q-025 | Are models aliases list entries or request-only? | List `voxcpm2`, `tts-1`, `openbmb/VoxCPM2` as cards (R-021); requests still accept any model string | no |
+| Q-025 | Are models aliases list entries or request-only? | **Superseded by SPEC §6:** one entry `voxcpm2`; aliases are request-only (matches Q-011) | no |
 | Q-023 | "Test a line" needs `/v1`, which requires Bearer when `API_KEYS` is set; the browser has no key | Disable Test-a-line when `EngineStatus.api_keys_required` is true, with a visible hint; no new endpoint (keeps §10 intact). Revisit if a studio-scoped ad-hoc synth route is wanted | yes: confirm UI-only gating is acceptable |
 
 ## Task graph
@@ -167,6 +167,12 @@ Wave 0 is the lead scaffold (contracts + tooling). A task is ready only when eve
 | M1-T10 | M1 | 5 | Warm-up ordering + voice 400 + shutdown (review) | `app/speech.py`, `app/warmup.py`, `app/main.py`, `tests/test_speech.py`, `tests/test_warmup.py` | M1-T4, M1-T9 | `.venv/bin/python -m pytest tests/test_speech.py tests/test_warmup.py -q` |
 | M2-T10 | M2 | 5 | Store rebuild test correctness (review) | `tests/test_store.py` | M2-T9 | `.venv/bin/python -m pytest tests/test_store.py -q` |
 | M3-T8 | M3 | 5 | Clone gating + status styling (review) | `app/static/js/clone.js`, `app/static/index.html`, `app/static/studio.css`, `tests/test_ui_assets.py` | M3-T7 | `.venv/bin/python -m pytest tests/test_ui_assets.py -q` |
+| M1-T13 | M1 | 8 | CI/verify parity, auth fail-fast, 500 shape (review) | `.gitlab-ci.yml`, `scripts/verify.sh`, `app/config.py`, `app/main.py`, `tests/test_config.py`, `tests/test_auth.py` | M1-T11, M1-T12, M2-T11 | `.venv/bin/python -m pytest tests/test_config.py tests/test_auth.py -q` |
+| M1-T14 | M1 | 8 | One models card, instructions fallback, upstream 429/503, header safety (review) | `app/models.py`, `app/engine.py`, `app/routers/v1.py`, `tests/test_v1.py`, `tests/test_engine.py` | M1-T12 | `.venv/bin/python -m pytest tests/test_v1.py tests/test_engine.py -q` |
+| M1-T15 | M1 | 8 | Speech off-loop decode/transcode (review) | `app/speech.py`, `tests/test_speech.py` | M1-T9, M1-T12 | `.venv/bin/python -m pytest tests/test_speech.py -q` |
+| M2-T12 | M2 | 8 | Store metadata-only list, unique backups, take invariants (review) | `app/store.py`, `app/routers/studio_takes.py`, `tests/test_store.py`, `tests/test_studio_takes.py` | M2-T9, M2-T11 | `.venv/bin/python -m pytest tests/test_store.py tests/test_studio_takes.py -q` |
+| M2-T13 | M2 | 8 | Deterministic burst + host RTF evidence (review) | `tests/fake_engine.py`, `tests/test_acceptance.py`, `scripts/smoke.sh`, `docs/RUNBOOK.md` | M5-T2 | `.venv/bin/python -m pytest tests/test_acceptance.py -q` |
+| M3-T10 | M3 | 8 | Disabled affordance, streaming/clone e2e, 390 parity (review) | `app/static/index.html`, `app/static/studio.css`, `app/static/js/speak.js`, `app/static/js/voices.js`, `app/static/js/design.js`, `tests/test_ui_assets.py`, `tests/e2e/**` | M3-T6, M3-T9 | `.venv/bin/python -m pytest tests/e2e -q` |
 | M1-T2 | M1 | 5 | `/v1` API (speech, models, voices) | `app/routers/v1.py`, `tests/test_v1.py`, `tests/test_streaming.py` | M1-T1 | `.venv/bin/python -m pytest tests/test_v1.py tests/test_streaming.py -q` |
 | M1-T4 | M1 | 4 | Startup/warm-up/readiness wiring | `app/warmup.py`, `app/main.py`, `tests/test_warmup.py` | M1-T1 | `.venv/bin/python -m pytest tests/test_warmup.py -q` |
 | M2-T2 | M2 | 2 | Clone + transcribe API | `app/routers/studio_clone.py`, `tests/test_studio_clone.py` | — | `.venv/bin/python -m pytest tests/test_studio_clone.py -q` |
@@ -201,7 +207,8 @@ Wave 0 is the lead scaffold (contracts + tooling). A task is ready only when eve
 - **Wave 5:** M1-T2, M2-T3, M2-T4, M2-T5, M1-T10, M2-T10, M3-T8 (7 parallel).
 - **Wave 6 (review fixes):** M1-T11, M1-T12, M2-T11, M3-T9 (4 parallel).
 - **Wave 7:** M3-T6, M5-T2 (2 parallel).
-- **Wave 8:** final review fixes, full `scripts/verify.sh`, milestone tags, delivery report.
+- **Wave 8 (release review fixes):** M1-T13, M1-T14, M1-T15, M2-T12, M2-T13, M3-T10 (6 parallel).
+- **Wave 9:** full `scripts/verify.sh`, milestone tags, delivery report.
 
 ## Dependency DAG
 
