@@ -12,9 +12,7 @@ KNOBS = {"cfg": 2.0, "steps": 10, "seed": 42}
 
 def main() -> None:
     a = c.parse_args(__doc__.splitlines()[0]).parse_args()
-    base_payload = {"model": a.model, "input": a.text, "voice": a.voice}
-    if a.audio:
-        base_payload["ref_audio"] = c.data_uri(a.audio)
+    base_payload = {"model": a.model, "input": a.text, "voice": a.voice, **c.ref_fields(a)}
 
     shapes = {
         "top_level": base_payload | KNOBS,

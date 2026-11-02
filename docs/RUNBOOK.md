@@ -44,29 +44,36 @@ host with the commands above.
 `deploy/compose.yaml` is the reference config; do not edit it in the repo. On the host:
 
 ```bash
-mkdir -p /opt/voxcpm2-openai/deploy /opt/voxcpm2-openai/data
+mkdir -p /opt/voxcpm2-openai/deploy/data
 # copy deploy/compose.yaml and deploy/voxcpm2-3090.yaml from the repo into /opt/voxcpm2-openai/deploy
-cd /opt/voxcpm2-openai
-podman-compose -f deploy/compose.yaml up -d
+cd /opt/voxcpm2-openai/deploy
+podman-compose -f compose.yaml up -d
 podman logs -f voxcpm2-openai        # engine load takes minutes; healthcheck start_period is 300s
 curl -fsS http://127.0.0.1:8881/ready && echo READY
 ```
+
+Compose resolves relative bind mounts against the **compose file's directory**, so `./data` is
+`/opt/voxcpm2-openai/deploy/data` on the host (not `/opt/voxcpm2-openai/data`). Every backup and
+restore path below must use that directory.
 
 Volumes and GPU (from `deploy/compose.yaml`):
 
 | Mount | Meaning |
 |---|---|
-| `./data:/data` | the only stateful path: voices, takes, backups, settings |
+| `./data:/data` = `/opt/voxcpm2-openai/deploy/data` | the only stateful path: voices, takes, backups, settings |
 | `/models:/models:ro` | weights at `/models/openbmb/VoxCPM2` |
 | `/opt/qwen3-tts/data/speakers:/import/qwen3-speakers:ro` | one-time lossless import of the eight Qwen3 voices |
-| `devices: nvidia.com/gpu=GPU-79ad6f3b-…` | CDI GPU 1 (RTX 3090), shared with `whisper-stt` + TEI |
+| `devices: nvidia.com/gpu=GPU-79ad6f3b-…` | CDI GPU 1 (RTX 3090, **host index 1**), shared with `whisper-stt` + TEI |
 | `shm_size: 8g` | engine shared memory |
 
 Back up the data dir before every cutover and periodically:
 
 ```bash
-tar czf /backup/voxcpm2-data-$(date +%F).tar.gz -C /opt/voxcpm2-openai data
+mkdir -p /backup
+tar czf /backup/voxcpm2-data-$(date +%F).tar.gz -C /opt/voxcpm2-openai/deploy data
 ```
+
+Restore with `tar xzf <tarball> -C /opt/voxcpm2-openai/deploy` (stop the container first).
 
 (The app also writes its own backups under `/data/backups` before voice edits/deletes.)
 
@@ -94,12 +101,14 @@ API_KEY=<litellm…key> STUDIO_AUTH=admin:<host-value> BASE_URL=http://127.0.0.1
 It checks `/health`, `/ready`, `/v1/models`, `/v1/audio/voices`, a 48 kHz WAV with
 `X-Sample-Rate: 48000`, streamed PCM bytes within 2 s, and `/api/engine` `ready:true`.
 
-All eight imported voices (SPEC §5, §13):
+All eight imported voices (SPEC §5, §13) — the loop must fail loudly if any voice fails:
 
 ```bash
+rc=0
 for v in ashley-en ashley-ja ashley-kr ashley-zh alison-en bennett-en jack-en mia-en; do
-  VOICE="$v" BASE_URL=http://127.0.0.1:8881 scripts/smoke.sh || break
+  VOICE="$v" BASE_URL=http://127.0.0.1:8881 scripts/smoke.sh || { rc=1; break; }
 done
+exit $rc
 ```
 
 Streamed first-chunk budget — warm first chunk ≤ 300 ms (measured ~154 ms, SPEC §2/§13):
@@ -119,10 +128,21 @@ for i in $(seq 20); do
 done; wait
 ```
 
-VRAM — engine ≤ 10 GB while `whisper-stt` and TEI keep running on the same card:
+VRAM — engine ≤ 10 GB while `whisper-stt` and TEI keep running on the same card. On the **host**
+the speech card is GPU **index 1** (SPEC §2); index 0 is a different card:
 
 ```bash
-nvidia-smi --query-gpu=name,memory.used,memory.total --format=csv,noheader,nounits -i 0
+nvidia-smi --query-gpu=name,memory.used,memory.total --format=csv,noheader,nounits -i 1
+# or address it by UUID, immune to index changes:
+nvidia-smi --query-gpu=name,memory.used,memory.total --format=csv,noheader,nounits \
+  -i GPU-79ad6f3b-cc71-90a6-2430-286e1c6c9ec2
+```
+
+**Inside the container** the CDI-visible card is device **0** — that is what `/api/engine` reports:
+
+```bash
+podman exec voxcpm2-openai nvidia-smi --query-gpu=name,memory.used,memory.total \
+  --format=csv,noheader,nounits -i 0
 ```
 
 Also verify by hand per SPEC §13: clone flow (upload → transcribe → save → usable by name on
@@ -138,7 +158,7 @@ podman stop qwen3-tts-openai
 
 # 2. move the new service to 8880: in /opt/voxcpm2-openai/deploy/compose.yaml change
 #    ports:  "8881:8000"  ->  "8880:8000"
-cd /opt/voxcpm2-openai && podman-compose -f deploy/compose.yaml up -d
+cd /opt/voxcpm2-openai/deploy && podman-compose -f compose.yaml up -d
 curl -fsS http://127.0.0.1:8880/ready && echo READY
 
 # 3. point the LiteLLM `tts` alias at http://vllm.dotslash.io:8880/v1 and reload LiteLLM
@@ -153,14 +173,14 @@ LiteLLM.
 ```bash
 # 1. point the LiteLLM `tts` alias back to the qwen3 target and reload LiteLLM
 # 2. stop the new service and restart the old one
-cd /opt/voxcpm2-openai && podman-compose -f deploy/compose.yaml down
+cd /opt/voxcpm2-openai/deploy && podman-compose -f compose.yaml down
 podman start qwen3-tts-openai
 curl -fsS http://127.0.0.1:8880/health && echo BACK
 ```
 
 Keep `/opt/qwen3-tts` untouched until the new service has run cleanly for a week; only then may
-it be archived. Voices created on voxcpm2-openai live in `/opt/voxcpm2-openai/data` and survive
-a rollback — restore them from the backup tarball if needed.
+it be archived. Voices created on voxcpm2-openai live in `/opt/voxcpm2-openai/deploy/data` and
+survive a rollback — restore them from the backup tarball (§2) if needed.
 
 ## 6. Turning on CD
 
@@ -178,41 +198,39 @@ deploy jobs are never created. To enable, set CI/CD variables (masked where mark
 - `production`: requires a `vX.Y.Z` tag **and** a manual approval on the `deploy:production` job;
   it finishes with a `curl -fsS http://127.0.0.1:8880/ready` smoke check over ssh.
 
-Caveat before enabling: the jobs pass `DEPLOY_IMAGE=$CI_COMMIT_SHORT_SHA` into `docker compose`,
-but the reference `deploy/compose.yaml` pins the image tag literally (`:0.1.0`). Either parameterise
-the image line on the host copy or update the tag before trusting CD to ship a specific build.
+Caveats before enabling:
+
+- The jobs pass `DEPLOY_IMAGE=$CI_COMMIT_SHORT_SHA` into `docker compose`, but the reference
+  `deploy/compose.yaml` pins the image tag literally (`:0.1.0`). Either parameterise
+  the image line on the host copy or update the tag before trusting CD to ship a specific build.
+- The deploy jobs run `docker compose` over ssh, but the `vllm` host uses **Podman**: this only
+  works if a `podman-docker` wrapper is installed there. Otherwise change the deploy commands to
+  `podman-compose -f deploy/compose.yaml pull/up -d` (a `.gitlab-ci.yml` change — new task).
 
 ## 7. M0 spikes
 
 Findings belong in `NOTES.md` at the repo root (append-only, one section per spike S1–S6), under
-its existing `## S<n>` headings. Each spike is a short script against the test container
-`voxcpm2-test` serving VoxCPM2 on `127.0.0.1:8881` with `deploy/voxcpm2-3090.yaml`. Commands
-(SPEC §12):
+its existing `## S<n>` headings. Each spike is a tested script against the test container
+`voxcpm2-test` serving VoxCPM2 on `127.0.0.1:8881` with `deploy/voxcpm2-3090.yaml` (SPEC §12).
+Run them from the repo root on the `vllm` host — the scripts are the single source of truth, do
+not hand-roll curls:
 
 ```bash
-E=http://127.0.0.1:8881/v1/audio/speech
-# S1 style control: does `instructions` change the audio? diff the two files.
-curl -s -o s1a.wav -H 'Content-Type: application/json' -d '{"model":"openbmb/VoxCPM2","input":"The quick brown fox.","response_format":"wav"}' $E
-curl -s -o s1b.wav -H 'Content-Type: application/json' -d '{"model":"openbmb/VoxCPM2","input":"The quick brown fox.","instructions":"calm, slow","response_format":"wav"}' $E
-cmp -s s1a.wav s1b.wav && echo "S1: instructions IGNORED" || echo "S1: instructions HONOURED"
-
-# S2 voice design: description with no ref_audio; vary seed, compare speakers.
-curl -s -o s2.wav -H 'Content-Type: application/json' -d '{"model":"openbmb/VoxCPM2","input":"Hello there.","description":"a warm middle-aged woman","seed":1,"response_format":"wav"}' $E
-
-# S3 streaming format: byte count -> seconds at s16le 48 kHz vs the WAV version.
-curl -sN -H 'Content-Type: application/json' -d '{"model":"openbmb/VoxCPM2","input":"The quick brown fox.","response_format":"pcm","stream":true}' $E | wc -c
-
-# S4 sampling knobs: cfg / steps / seed accepted, or 4xx?
-curl -s -o /dev/null -w '%{http_code}\n' -H 'Content-Type: application/json' -d '{"model":"openbmb/VoxCPM2","input":"Probe.","response_format":"wav","cfg":2.0,"steps":10,"seed":7}' $E
-
-# S5 warm-up: time the first request after container start, then a second one.
-podman restart voxcpm2-test && sleep 5
-time curl -s -o s5a.wav -H 'Content-Type: application/json' -d '{"model":"openbmb/VoxCPM2","input":"Warm up.","response_format":"wav"}' $E
-time curl -s -o s5b.wav -H 'Content-Type: application/json' -d '{"model":"openbmb/VoxCPM2","input":"Warm again.","response_format":"wav"}' $E
-
-# S6 Qwen3 shim field compatibility: old caller shapes must still work (SPEC §6).
-curl -s -o s6.wav -H 'Content-Type: application/json' -d '{"model":"tts-1","voice":"ashley-en","input":"Shim probe.","response_format":"wav","task_type":"bible_tts"}' $E
+B=http://127.0.0.1:8881
+A=app/assets/warmup.wav   # 1.5 s tone, pairs with --ref-text "Warm-up." (Q-014);
+                          # a real 5-10 s cloned voice + its transcript is a better probe
+python scripts/spikes/s1_style.py  --base $B --audio $A   # style: baseline×2 noise floor, then instructions / syntax
+python scripts/spikes/s2_design.py --base $B              # description-only on purpose: sends no ref_audio
+python scripts/spikes/s3_stream.py --base $B --audio $A   # stream bytes → s16le@48k vs WAV duration
+python scripts/spikes/s4_knobs.py  --base $B --audio $A   # cfg/steps/seed payload shape accepted?
+python scripts/spikes/s5_warmup.py --base $B --audio $A   # run IMMEDIATELY after: podman restart voxcpm2-test
+python scripts/spikes/s6_shim.py                          # prints the `podman exec qwen3-tts-openai …`
+                                                          # capture command; re-run with --shim-json fixtures
 ```
+
+`--audio`/`--ref-text` defaults match the flags above, so the flags are optional; pass a real
+voice clip for meaningful S1/S3/S4 results (see `scripts/spikes/README.md`). Inside the production
+container use `--base http://127.0.0.1:8102`.
 
 Record each result (honoured / ignored / 4xx, byte counts, timings) under a `## S<n>` heading in
 `NOTES.md`, and adjust the design per SPEC §12 if a spike fails.

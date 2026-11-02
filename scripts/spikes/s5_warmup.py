@@ -21,9 +21,7 @@ def main() -> None:
     p.add_argument("--requests", type=int, default=3, help="how many requests to time")
     a = p.parse_args()
     print("run this IMMEDIATELY after restarting the engine (s6-svc -r or container restart).")
-    payload = {"model": a.model, "input": a.text, "voice": a.voice}
-    if a.audio:
-        payload["ref_audio"] = c.data_uri(a.audio)
+    payload = {"model": a.model, "input": a.text, "voice": a.voice, **c.ref_fields(a)}
 
     timings = []
     for i in range(a.requests):

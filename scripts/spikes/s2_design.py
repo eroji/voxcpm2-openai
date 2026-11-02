@@ -34,6 +34,8 @@ def main() -> None:
 
     runs = []
     for seed in (a.seed, a.seed + 1):
+        # Deliberately NO ref_audio/ref_text here (unlike the other spikes): S2 asks whether a
+        # description-only request synthesizes at all — adding a reference would defeat the test.
         payload = {"model": a.model, "input": a.text, "instructions": a.description, "seed": seed}
         r, accepted = try_payload(a, payload)
         runs.append(

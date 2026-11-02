@@ -12,7 +12,7 @@ from pathlib import Path
 
 import _client as c
 
-CAT_CMD = "docker exec qwen3-tts-openai cat /opt/app/app/openai_api.py"
+CAT_CMD = "podman exec qwen3-tts-openai cat /opt/app/app/openai_api.py"
 CHECKLIST = [
     "every request body field the shim reads (request.json()/Body(...) — note defaults)",
     "how `preset` / `clone` / `design` task types map to engines and voice naming",
@@ -46,6 +46,7 @@ def main() -> None:
     a = p.parse_args()
 
     print(f"read the shim source on the vllm host with:\n  {CAT_CMD} > shim_openai_api.py")
+    print("(the vllm host runs Podman; use `docker exec …` only on a Docker host)")
     print("capture, from that file and its callers' traffic:")
     for item in CHECKLIST:
         print(f"  - {item}")

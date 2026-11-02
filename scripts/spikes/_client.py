@@ -21,6 +21,7 @@ from pathlib import Path
 import httpx
 
 OUT = Path(__file__).resolve().parent / "out"
+WARMUP_WAV = Path(__file__).resolve().parents[2] / "app" / "assets" / "warmup.wav"
 
 
 def parse_args(description: str) -> argparse.ArgumentParser:
@@ -30,8 +31,19 @@ def parse_args(description: str) -> argparse.ArgumentParser:
         default="http://127.0.0.1:8881",
         help="engine base URL (test container on the vllm host; :8102 inside prod container)",
     )
-    p.add_argument("--voice", default="alison-en", help="voice name to synthesize with")
-    p.add_argument("--audio", default=None, help="reference audio file for ad-hoc cloning")
+    p.add_argument("--voice", default="alison-en", help="voice label sent in the `voice` field")
+    p.add_argument(
+        "--audio",
+        default=str(WARMUP_WAV),
+        help="reference audio sent as ref_audio (default: the bundled 1.5 s warm-up tone; "
+        "a real 5-10 s cloned voice is a far better probe — the tone only proves plumbing)",
+    )
+    p.add_argument(
+        "--ref-text",
+        default="Warm-up.",
+        help="transcript of --audio, sent as ref_text (Q-014: the warm-up tone pairs with "
+        '"Warm-up."; with a real voice clip pass its actual words)',
+    )
     p.add_argument(
         "--text",
         default="The quick brown fox jumps over the lazy dog.",
@@ -40,6 +52,16 @@ def parse_args(description: str) -> argparse.ArgumentParser:
     p.add_argument("--model", default="voxcpm2", help="value sent in the `model` field")
     p.add_argument("--timeout", type=float, default=180.0, help="per-request timeout in seconds")
     return p
+
+
+def ref_fields(a: argparse.Namespace) -> dict:
+    """ref_audio + ref_text for every synthesis request. The raw VoxCPM2 engine has no voice
+    library, so a request without a reference synthesizes nothing worth comparing; S2 is the
+    deliberate exception (it tests description-only)."""
+    path = Path(a.audio)
+    if not path.is_file():
+        sys.exit(f"--audio {path} not found; pass a real reference clip or omit the flag")
+    return {"ref_audio": data_uri(path), "ref_text": a.ref_text}
 
 
 def data_uri(path: str) -> str:

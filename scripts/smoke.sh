@@ -26,22 +26,23 @@ check() { # check <label> <function>
   fi
 }
 
-# curl wrappers; auth values are passed as args only, never printed.
+# curl wrappers. Credentials reach curl through stdin (`--config -`), never argv, so they are
+# invisible to `ps` and never printed. All requests carry a -m cap; later -m flags override it.
 v1() {
   if [ -n "${API_KEY:-}" ]; then
-    curl "$@" -H "Authorization: Bearer $API_KEY"
+    printf 'header = "Authorization: Bearer %s"\n' "$API_KEY" | curl --config - -m 60 "$@"
   else
-    curl "$@"
+    curl -m 60 "$@"
   fi
 }
 api() {
   if [ -n "${STUDIO_AUTH:-}" ]; then
-    curl "$@" -u "$STUDIO_AUTH"
+    printf 'user = "%s"\n' "$STUDIO_AUTH" | curl --config - -m 60 "$@"
   else
-    curl "$@"
+    curl -m 60 "$@"
   fi
 }
-status_of() { curl -s -o /dev/null -w '%{http_code}' "$BASE_URL$1"; }
+status_of() { curl -s -m 10 -o /dev/null -w '%{http_code}' "$BASE_URL$1"; }
 
 c_health() { [ "$(status_of /health)" = 200 ]; }
 

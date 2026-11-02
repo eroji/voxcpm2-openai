@@ -10,9 +10,7 @@ import _client as c
 
 def main() -> None:
     a = c.parse_args(__doc__.splitlines()[0]).parse_args()
-    payload = {"model": a.model, "input": a.text, "voice": a.voice}
-    if a.audio:
-        payload["ref_audio"] = c.data_uri(a.audio)
+    payload = {"model": a.model, "input": a.text, "voice": a.voice, **c.ref_fields(a)}
 
     wav = c.speech(a.base, a.timeout, response_format="wav", **payload)
     wav.raise_for_status()
