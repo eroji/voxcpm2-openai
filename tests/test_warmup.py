@@ -59,13 +59,132 @@ async def test_empty_library_uses_asset(
 
 async def test_run_failure_sets_last_error(store: VoiceStore, settings: Settings) -> None:
     engine = EngineClient(_closed_port_url())
-    warmup = WarmupService(store, engine, settings)
+    # run() waits for engine readiness first; keep that wait short, not 300 s.
+    warmup = WarmupService(store, engine, settings.model_copy(update={"warmup_timeout_s": 0.5}))
     try:
         assert await warmup.run() is False
     finally:
         await engine.aclose()
     assert warmup.warm is False
     assert warmup.last_error
+
+
+async def test_run_refuses_when_engine_not_ready(
+    store: VoiceStore, settings: Settings, fake_engine: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R-006: run() must not synthesize against an engine that never becomes ready."""
+    engine = EngineClient(fake_engine.url)
+
+    async def never_ready(max_wait: float) -> bool:
+        return False
+
+    monkeypatch.setattr(engine, "wait_ready", never_ready)
+    warmup = WarmupService(store, engine, settings)
+    try:
+        assert await warmup.run() is False
+    finally:
+        await engine.aclose()
+    assert warmup.last_error == "engine is not ready"
+    assert fake_engine.state["calls"] == 0
+
+
+async def test_restart_waits_for_a_healthy_engine(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R-007: s6-svc -r returns at once, so restart() must mark down and wait."""
+    engine = EngineClient("http://127.0.0.1:1")
+
+    class _Proc:
+        returncode = 0
+
+        async def communicate(self) -> tuple[bytes, bytes]:
+            return b"", b""
+
+        def kill(self) -> None:
+            pass
+
+        async def wait(self) -> int:
+            return 0
+
+    async def fake_exec(*args: Any, **kwargs: Any) -> _Proc:
+        return _Proc()
+
+    checks: list[tuple[float, bool]] = []
+
+    async def fake_wait_ready(max_wait: float) -> bool:
+        checks.append((max_wait, engine.ready))
+        return True
+
+    engine._ready = True
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+    monkeypatch.setattr(engine, "wait_ready", fake_wait_ready)
+    await engine.restart()
+    assert checks == [(120, False)]  # marked down, then waited for /health
+    await engine.aclose()
+
+
+async def test_restart_raises_when_engine_stays_down(monkeypatch: pytest.MonkeyPatch) -> None:
+    engine = EngineClient("http://127.0.0.1:1")
+
+    class _Proc:
+        returncode = 0
+
+        async def communicate(self) -> tuple[bytes, bytes]:
+            return b"", b""
+
+    async def fake_exec(*args: Any, **kwargs: Any) -> _Proc:
+        return _Proc()
+
+    async def never_ready(max_wait: float) -> bool:
+        return False
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+    monkeypatch.setattr(engine, "wait_ready", never_ready)
+    with pytest.raises(EngineError, match="did not become healthy after restart"):
+        await engine.restart()
+    assert engine.ready is False
+    await engine.aclose()
+
+
+async def _until(predicate: Any, limit_s: float = 8.0) -> None:
+    deadline = time.monotonic() + limit_s
+    while not predicate():
+        assert time.monotonic() < deadline, "condition never became true"
+        await asyncio.sleep(0.05)
+
+
+async def test_run_forever_clears_warm_and_rewarms_after_recovery(
+    fake_engine: Any, library: VoiceStore, settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R-008: after an engine crash run_forever must clear warm, then re-warm by itself."""
+    engine = EngineClient(fake_engine.url)
+    healthy = {"up": True}
+
+    async def fake_health() -> bool:
+        engine._ready = healthy["up"]
+        return engine._ready
+
+    monkeypatch.setattr(engine, "health", fake_health)
+    warmup = WarmupService(library, engine, settings)
+    assert await warmup.run() is True
+    assert warmup.warm is True
+
+    healthy["up"] = False  # engine crash
+    await engine.health()  # the engine's health-poll task does this in production
+    task = asyncio.create_task(warmup.run_forever())
+    try:
+        await asyncio.wait_for(_until(lambda: warmup.warm is False, 5.0), 6.0)
+        assert warmup.last_error == "engine is not ready"
+        calls_before = fake_engine.state["calls"]
+        healthy["up"] = True  # s6 brings the engine back
+        await engine.health()
+        await asyncio.wait_for(_until(lambda: warmup.warm is True, 8.0), 9.0)
+        assert fake_engine.state["calls"] > calls_before  # re-warmed without a manual run()
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+    await engine.aclose()
 
 
 def test_ready_reaches_200(settings: Settings, fake_engine: Any) -> None:
@@ -92,6 +211,7 @@ def test_ready_503_before_warm(settings: Settings, fake_engine: Any, monkeypatch
         resp = client.get("/ready")
         assert resp.status_code == 503
         assert resp.headers["Retry-After"] == "5"
+        assert resp.json()["error"] == "warm-up failed"
         assert client.get("/health").status_code == 200
 
 
@@ -124,10 +244,11 @@ async def test_run_forever_not_ready_retries_until_cancelled(
 ) -> None:
     engine = EngineClient(fake_engine.url)
 
-    async def never_ready(max_wait: float) -> bool:
+    async def down_health() -> bool:
+        engine._ready = False
         return False
 
-    monkeypatch.setattr(engine, "wait_ready", never_ready)
+    monkeypatch.setattr(engine, "health", down_health)
     warmup = WarmupService(store, engine, settings)
     task = asyncio.create_task(warmup.run_forever())
     await asyncio.sleep(0.1)

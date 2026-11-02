@@ -263,6 +263,13 @@ class EngineClient:
         return StreamHandle(chunks=chunks(), aclose=aclose)
 
     async def restart(self) -> None:
+        """Restart the s6 service and *wait* for it to be healthy again.
+
+        ``s6-svc -r`` returns immediately, so callers (the restart route) must
+        never warm the old process: mark down, restart, then poll /health for
+        up to 120 s (SPEC §4/§7).
+        """
+        self._ready = False
         try:
             proc = await asyncio.create_subprocess_exec(
                 "s6-svc",
@@ -282,6 +289,9 @@ class EngineClient:
         if proc.returncode != 0:
             detail = stderr.decode("utf-8", "replace").strip()[:300] if stderr else ""
             raise EngineError(f"s6-svc -r failed: {detail or proc.returncode}")
+        await asyncio.sleep(0.5)  # give s6 a moment to bring the service back up
+        if not await self.wait_ready(120):
+            raise EngineError("engine did not become healthy after restart")
 
     def stats(self) -> EngineStats:
         gpu, used, total = self._gpu_info()

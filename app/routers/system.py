@@ -16,10 +16,18 @@ async def health() -> dict[str, str]:
 @router.get("/ready")
 async def ready(request: Request) -> JSONResponse:
     warmup = getattr(request.app.state, "warmup", None)
-    if warmup is not None and warmup.warm:
+    engine = getattr(request.app.state, "engine", None)
+    warm = bool(warmup is not None and warmup.warm)
+    alive = bool(getattr(engine, "ready", False))
+    if warm and alive:
         return JSONResponse({"status": "ready"}, status_code=200)
+    reason = None
+    if warm and not alive:
+        reason = "engine is not ready"
+    elif warmup is not None:
+        reason = warmup.last_error or "engine is not ready"
     return JSONResponse(
-        {"status": "warming", "error": getattr(warmup, "last_error", None)},
+        {"status": "warming", "error": reason},
         status_code=503,
         headers={"Retry-After": "5"},
     )

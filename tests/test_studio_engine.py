@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from pathlib import Path
 from typing import Any
@@ -90,6 +91,67 @@ def test_restart_ok(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None
     assert resp.status_code == 200
     assert resp.json() == {"restarted": True, "warm": True}
     assert calls == ["restart"]
+
+
+def test_restart_waits_for_health_then_rewarms(
+    client: TestClient, library: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R-007/R-031: restart must not warm the old process, and /ready is 200 again after."""
+    engine = client.app.state.engine
+    warmup = client.app.state.warmup
+    _wait_warm(client)
+    real_health = engine.health
+    down_until = {"t": 0.0}
+
+    async def health() -> bool:
+        if time.monotonic() < down_until["t"]:
+            engine._ready = False
+            return False
+        return await real_health()
+
+    async def stub_restart() -> None:
+        engine._ready = False
+        assert warmup.warm is False  # the router must clear warm before restarting
+        down_until["t"] = time.monotonic() + 0.3
+        await asyncio.sleep(0.3)  # s6-svc -r returns immediately; health still down
+        await health()
+
+    async def wait_ready(max_wait: float) -> bool:
+        deadline = time.monotonic() + max_wait
+        while True:
+            if await health():
+                return True
+            if time.monotonic() >= deadline:
+                return False
+            await asyncio.sleep(0.05)
+
+    monkeypatch.setattr(engine, "health", health)
+    monkeypatch.setattr(engine, "restart", stub_restart)
+    monkeypatch.setattr(engine, "wait_ready", wait_ready)
+    resp = client.post("/api/engine/restart")
+    assert resp.status_code == 200
+    assert resp.json() == {"restarted": True, "warm": True}
+    assert client.get("/ready").status_code == 200
+
+
+def test_ready_503_when_warm_but_engine_dead(
+    client: TestClient, library: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R-031: warm must never outrank engine liveness."""
+    engine = client.app.state.engine
+    _wait_warm(client)
+
+    async def dead_health() -> bool:
+        engine._ready = False
+        return False
+
+    monkeypatch.setattr(engine, "health", dead_health)
+    engine._ready = False
+    client.app.state.warmup.warm = True
+    resp = client.get("/ready")
+    assert resp.status_code == 503
+    assert resp.headers["Retry-After"] == "5"
+    assert resp.json()["error"] == "engine is not ready"
 
 
 def test_restart_failure_returns_502(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:

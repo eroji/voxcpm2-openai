@@ -26,6 +26,10 @@ class WarmupService:
         self.last_error: str | None = None
 
     async def run(self) -> bool:
+        if not await self.engine.wait_ready(self.settings.warmup_timeout_s):
+            self.warm = False
+            self.last_error = "engine is not ready"
+            return False
         try:
             voices = self.store.list()
             if voices:
@@ -63,11 +67,19 @@ class WarmupService:
         return True
 
     async def run_forever(self) -> None:
+        """Supervise warm-up for the life of the process: never exits after success.
+
+        A crash-restarted engine flips ``engine.ready`` to False; this loop clears
+        ``warm`` and re-warms once the engine is healthy again (SPEC §4/§7).
+        """
         while True:
-            if not await self.engine.wait_ready(self.settings.warmup_timeout_s):
+            if not self.engine.ready:
+                self.warm = False
                 self.last_error = "engine is not ready"
                 await asyncio.sleep(2)
                 continue
-            if await self.run():
-                break
-            await asyncio.sleep(2)
+            if self.warm:
+                await asyncio.sleep(2)
+                continue
+            ok = await self.run()
+            await asyncio.sleep(10 if ok else 2)
