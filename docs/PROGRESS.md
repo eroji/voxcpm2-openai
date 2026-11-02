@@ -1,6 +1,6 @@
 # Progress
 
-**Current wave:** 3 — wave-2 review fixes + screen modules
+**Current wave:** 4 — wave-3 review fixes
 **Resume:** `scripts/verify.sh` then `/dispatch 1`
 
 ## Task table
@@ -14,28 +14,31 @@
 | 1 | M2-T1 importer | pass | `pytest tests/test_importer.py` | |
 | 1 | M3-T1 UI shell | pass | `pytest tests/test_ui_assets.py` | |
 | 1 | M5-T1 runbook + smoke | pass | `bash -n scripts/smoke.sh` | |
-| 4 | M1-T2 `/v1` | todo | `pytest tests/test_v1.py tests/test_streaming.py` | |
-| 4 | M1-T4 warm-up wiring | todo | `pytest tests/test_warmup.py` | |
+| 5 | M1-T2 `/v1` | todo | `pytest tests/test_v1.py tests/test_streaming.py` | |
+| 4 | M1-T9 StreamingSpeech ownership (review) | wip | `pytest tests/test_speech.py` | BLOCKER fix |
+| 4 | M2-T9 voice keys + cache cap (review) | wip | `pytest tests/test_store.py` | |
+| 4 | M3-T7 screen contract/lifecycle fixes (review) | wip | `pytest tests/test_ui_assets.py` | |
+| 4 | M1-T4 warm-up wiring | wip | `pytest tests/test_warmup.py` | |
 | 2 | M1-T5 stream admission/lifecycle (review) | pass | `pytest tests/test_stream_lifecycle.py` | BLOCKER fix |
 | 2 | M1-T6 container hardening (review) | pass | `pytest tests/test_deploy.py` | |
 | 2 | M2-T6 lossless import metadata (review) | pass | `pytest tests/test_store.py tests/test_importer.py` | |
 | 2 | M3-T0 UI shell fixes (review) | pass | `pytest tests/test_ui_assets.py` | |
 | 2 | M5-T3 runbook/smoke fixes (review) | pass | `bash -n scripts/smoke.sh` | |
 | 2 | M2-T2 clone/transcribe | pass | `pytest tests/test_studio_clone.py` | |
-| 4 | M2-T3 speak/takes | todo | `pytest tests/test_studio_takes.py` | |
+| 5 | M2-T3 speak/takes | todo | `pytest tests/test_studio_takes.py` | |
 | 2 | M4-T1 design backend | pass | `pytest tests/test_design.py` | |
-| 4 | M2-T4 voices CRUD | todo | `pytest tests/test_studio_voices.py` | |
-| 4 | M2-T5 engine API | todo | `pytest tests/test_studio_engine.py` | |
-| 3 | M1-T7 speech slot/error fixes (review) | wip | `pytest tests/test_speech.py` | BLOCKER fix |
-| 3 | M1-T8 container pinning (review) | wip | `pytest tests/test_deploy.py` | |
-| 3 | M2-T7 store/importer key safety (review) | wip | `pytest tests/test_store.py tests/test_importer.py` | |
-| 3 | M2-T8 clone/STT + timeout (review) | wip | `pytest tests/test_studio_clone.py tests/test_audio.py` | |
-| 3 | M3-T2 speak JS | wip | `pytest tests/test_ui_assets.py` | |
-| 3 | M3-T3 voices JS | wip | `pytest tests/test_ui_assets.py` | |
-| 3 | M3-T4 clone JS | wip | `pytest tests/test_ui_assets.py` | |
-| 3 | M3-T5 engine JS | wip | `pytest tests/test_ui_assets.py` | |
-| 3 | M4-T2 design JS | wip | `pytest tests/test_ui_assets.py` | |
-| 4 | M3-T6 UI e2e | todo | `pytest tests/e2e` | |
+| 5 | M2-T4 voices CRUD | todo | `pytest tests/test_studio_voices.py` | |
+| 5 | M2-T5 engine API | todo | `pytest tests/test_studio_engine.py` | |
+| 3 | M1-T7 speech slot/error fixes (review) | pass | `pytest tests/test_speech.py` | BLOCKER fix |
+| 3 | M1-T8 container pinning (review) | pass | `pytest tests/test_deploy.py` | |
+| 3 | M2-T7 store/importer key safety (review) | pass | `pytest tests/test_store.py tests/test_importer.py` | |
+| 3 | M2-T8 clone/STT + timeout (review) | pass | `pytest tests/test_studio_clone.py tests/test_audio.py` | |
+| 3 | M3-T2 speak JS | pass | `pytest tests/test_ui_assets.py` | |
+| 3 | M3-T3 voices JS | pass | `pytest tests/test_ui_assets.py` | |
+| 3 | M3-T4 clone JS | pass | `pytest tests/test_ui_assets.py` | |
+| 3 | M3-T5 engine JS | pass | `pytest tests/test_ui_assets.py` | |
+| 3 | M4-T2 design JS | pass | `pytest tests/test_ui_assets.py` | |
+| 5 | M3-T6 UI e2e | todo | `pytest tests/e2e` | |
 | 5 | M5-T2 acceptance | todo | `pytest tests/test_acceptance.py` | |
 
 \* M0-T1 delivers runnable scripts + `NOTES.md`; findings are pending the external host (B-001).
@@ -67,6 +70,22 @@
   loop; ffmpeg had no timeout.
 - NITs folded into those briefs; accepted NITs (design seed collision, `DesignService.settings`
   unused, smoke script needing the real `/v1` routes) are tracked but not blocking.
+
+## Wave-3 review outcome (2026-11-02)
+
+- BLOCKER → M1-T9: `StreamingSpeech` leaked the slot when never iterated (pcm/wav/mp3) and
+  `CancelledError` during ffmpeg spawn leaked it too.
+- BLOCKER → M3-T7: inline rename sent `new_name` instead of `VoicePatch.name`; STT/API-key state was
+  unknowable by the UI (`stt`, `api_keys_required` added to `EngineStatus`).
+- MAJOR → M2-T9: display name/key mismatch made imported voices unreachable; uppercase filenames
+  listed but not fetchable; unbounded wave cache.
+- MAJOR → M3-T7: Generate stayed disabled through playback, stale selected voice after deletion,
+  no double-submit guard, stale Save gate, Test-a-line 401 risk with `API_KEYS`, AudioContext/blob
+  leaks, design deep-link name validation.
+- MAJOR → M1-T9: flaky truncating-server test (`test_transport_error_mid_body`); ref_audio data URI
+  unbounded; duplicated 48 kHz constant.
+- Accepted NITs: engine stat sub-lines, voices filtered count label, `prompt()` for save-as-voice,
+  success text styling on clone (fixed in M3-T7).
 
 ## Blockers
 
@@ -102,4 +121,4 @@
 
 ## Next action
 
-Dispatch wave 3 (nine parallel workers): M1-T7, M1-T8, M2-T7, M2-T8, M3-T2, M3-T3, M3-T4, M3-T5, M4-T2.
+Dispatch wave 4 (four parallel workers): M1-T4, M1-T9, M2-T9, M3-T7.

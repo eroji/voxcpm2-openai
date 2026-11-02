@@ -52,21 +52,27 @@ task needs a change, it reports `BLOCKED` and the lead amends this file in a new
 | POST | `/api/engine/warmup` | `{"warm": true}` |
 | POST | `/api/engine/restart` | `{"restarted": true, "warm": true}` |
 
+`VoiceSummary` includes `key` (the lowercase lookup key) **and** `name` (display). UI clients must
+use `key` in `/api/voices/{key}` URLs and as the `voice` field; `name` is for display only
+(SPEC §5 `voice_name_lower` vs `name`).
+
 `TakeInfo` JSON: `id, voice, text, language, kind, duration_s, rtf, first_audio_ms, created_at,
 audio_url, wave_url`. URL paths are relative (`/api/takes/<id>/audio`).
 
-`VoiceSummary`: `name, language, source, ref_duration_s, ref_text, created_at`.
+`VoiceSummary`: `key, name, language, source, ref_duration_s, ref_text, created_at`.
 
 `EngineStatus`: `ready, model, reason (warm-up error when not ready), runtime, gpu,
 vram_used_mb, vram_total_mb, kv_cache, max_concurrency, rtf, first_audio_ms, voices,
-queue_depth`.
+queue_depth, stt (STT_URL configured), api_keys_required (API_KEYS set)`. The last two let the UI
+disable auto-transcribe / Test-a-line exactly as SPEC §8/§10 require.
 
 Errors on both prefixes use `{"error":{"message","type","param","code"}}`.
 
 ## 3. `/v1/audio/speech` semantics
 
 - `model` accepted as any string. Unknown extra fields ignored (`task_type` included).
-- `input` 1..4000 chars → else 400. `voice` case-insensitive; unknown → 400 listing names.
+- `input` 1..4000 chars (enforced by `SpeechRequest` and again by the routers using
+  `settings.max_input_chars`) → else 400. `voice` case-insensitive; unknown → 400 listing names.
 - `ref_audio` present (data URI, or http(s) only when `ALLOW_REMOTE_REF_AUDIO=1`) → ad-hoc clone;
   `voice` is then only a label and need not exist.
 - `response_format` default `wav`; `pcm` = s16le mono at `sample_rate` (default 48000).
@@ -105,8 +111,10 @@ stats() -> EngineStats
 
 `StreamHandle.chunks` yields s16le mono 48 kHz; `aclose()` releases the engine slot and
 closes the upstream response. `SpeechService.stream()` must await `open_stream` before returning so
-`QueueFull`/`EngineNotReady` reach the router. `Stats` must be read off the event loop
-(`asyncio.to_thread`) because it shells out to `nvidia-smi`.
+`QueueFull`/`EngineNotReady` reach the router. `StreamingSpeech` also exposes
+`await aclose()`; routers **must** `try/finally: await streaming.aclose()` around the response so a
+client that disconnects before the first chunk cannot leak the slot. `Stats` must be read off the
+event loop (`asyncio.to_thread`) because it shells out to `nvidia-smi`.
 
 - POST JSON to `{base}/v1/audio/speech` with `model`, `input`, `ref_audio`, `ref_text`;
   optional `instructions, speed, seed, cfg, steps`; `response_format` `wav|pcm`; `stream`.

@@ -20,7 +20,7 @@ class APIModel(BaseModel):
 
 class SpeechRequest(APIModel):
     model: str = "voxcpm2"
-    input: str = Field(min_length=1)
+    input: str = Field(min_length=1, max_length=4000)
     voice: str = Field(min_length=1)
     response_format: ResponseFormat = "wav"
     stream: bool = False
@@ -52,6 +52,7 @@ class VoiceList(APIModel):
 
 
 class VoiceSummary(APIModel):
+    key: str
     name: str
     language: str
     source: str
@@ -129,6 +130,8 @@ class EngineStatus(APIModel):
     first_audio_ms: float | None = None
     voices: int = 0
     queue_depth: int = 0
+    stt: bool = False
+    api_keys_required: bool = False
 
 
 class TranscribeResult(APIModel):

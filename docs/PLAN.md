@@ -158,13 +158,16 @@ Wave 0 is the lead scaffold (contracts + tooling). A task is ready only when eve
 | M2-T1 | M2 | 1 | Qwen3 voice importer | `app/importer.py`, `tests/test_importer.py` | — | `.venv/bin/python -m pytest tests/test_importer.py -q` |
 | M3-T1 | M3 | 1 | UI shell: index.html + CSS + core.js | `app/static/index.html`, `app/static/studio.css`, `app/static/js/core.js` | — | `.venv/bin/python -m pytest tests/test_ui_assets.py -q` |
 | M5-T1 | M5 | 1 | Runbook + smoke script | `docs/RUNBOOK.md`, `scripts/smoke.sh` | — | `bash -n scripts/smoke.sh` |
-| M1-T2 | M1 | 4 | `/v1` API (speech, models, voices) | `app/routers/v1.py`, `tests/test_v1.py`, `tests/test_streaming.py` | M1-T1 | `.venv/bin/python -m pytest tests/test_v1.py tests/test_streaming.py -q` |
+| M1-T9 | M1 | 4 | StreamingSpeech ownership/cancel fixes (review) | `app/engine.py`, `app/speech.py`, `tests/test_speech.py`, `tests/test_stream_lifecycle.py` | M1-T7 | `.venv/bin/python -m pytest tests/test_speech.py tests/test_stream_lifecycle.py -q` |
+| M2-T9 | M2 | 4 | Voice key + case-safe scan + cache cap (review) | `app/store.py`, `tests/test_store.py` | M2-T7 | `.venv/bin/python -m pytest tests/test_store.py -q` |
+| M3-T7 | M3 | 4 | Screen contract/lifecycle fixes (review) | `app/static/index.html`, `app/static/js/**`, `tests/test_ui_assets.py` | M3-T2…T5, M4-T2 | `.venv/bin/python -m pytest tests/test_ui_assets.py -q` |
+| M1-T2 | M1 | 5 | `/v1` API (speech, models, voices) | `app/routers/v1.py`, `tests/test_v1.py`, `tests/test_streaming.py` | M1-T1 | `.venv/bin/python -m pytest tests/test_v1.py tests/test_streaming.py -q` |
 | M1-T4 | M1 | 4 | Startup/warm-up/readiness wiring | `app/warmup.py`, `app/main.py`, `tests/test_warmup.py` | M1-T1 | `.venv/bin/python -m pytest tests/test_warmup.py -q` |
 | M2-T2 | M2 | 2 | Clone + transcribe API | `app/routers/studio_clone.py`, `tests/test_studio_clone.py` | — | `.venv/bin/python -m pytest tests/test_studio_clone.py -q` |
-| M2-T3 | M2 | 4 | Speak + takes API | `app/routers/studio_takes.py`, `tests/test_studio_takes.py` | — | `.venv/bin/python -m pytest tests/test_studio_takes.py -q` |
+| M2-T3 | M2 | 5 | Speak + takes API | `app/routers/studio_takes.py`, `tests/test_studio_takes.py` | — | `.venv/bin/python -m pytest tests/test_studio_takes.py -q` |
 | M4-T1 | M4 | 2 | Design candidates/save backend | `app/design.py`, `app/routers/studio_design.py`, `tests/test_design.py` | M1-T1 | `.venv/bin/python -m pytest tests/test_design.py -q` |
-| M2-T4 | M2 | 4 | Voices CRUD + import route | `app/routers/studio_voices.py`, `tests/test_studio_voices.py` | M2-T1, M1-T4 | `.venv/bin/python -m pytest tests/test_studio_voices.py -q` |
-| M2-T5 | M2 | 4 | Engine status/warmup/restart API | `app/routers/studio_engine.py`, `tests/test_studio_engine.py` | M1-T4 | `.venv/bin/python -m pytest tests/test_studio_engine.py -q` |
+| M2-T4 | M2 | 5 | Voices CRUD + import route | `app/routers/studio_voices.py`, `tests/test_studio_voices.py` | M2-T1, M1-T4 | `.venv/bin/python -m pytest tests/test_studio_voices.py -q` |
+| M2-T5 | M2 | 5 | Engine status/warmup/restart API | `app/routers/studio_engine.py`, `tests/test_studio_engine.py` | M1-T4 | `.venv/bin/python -m pytest tests/test_studio_engine.py -q` |
 | M1-T7 | M1 | 3 | Engine/speech slot-leak + error-shape fixes (review) | `app/engine.py`, `app/speech.py`, `tests/test_engine.py`, `tests/test_stream_lifecycle.py`, `tests/test_speech.py` | M1-T5 | `.venv/bin/python -m pytest tests/test_engine.py tests/test_stream_lifecycle.py tests/test_speech.py -q` |
 | M1-T8 | M1 | 3 | Container pinning + stale-service guard (review) | `deploy/Containerfile`, `tests/test_deploy.py` | M1-T6 | `.venv/bin/python -m pytest tests/test_deploy.py -q` |
 | M2-T7 | M2 | 3 | Store/importer key + backup safety (review) | `app/store.py`, `app/importer.py`, `tests/test_store.py`, `tests/test_importer.py` | M2-T6 | `.venv/bin/python -m pytest tests/test_store.py tests/test_importer.py -q` |
@@ -174,7 +177,7 @@ Wave 0 is the lead scaffold (contracts + tooling). A task is ready only when eve
 | M3-T4 | M3 | 3 | Clone screen JS | `app/static/js/clone.js` | M3-T1 | `.venv/bin/python -m pytest tests/test_ui_assets.py -q` |
 | M3-T5 | M3 | 3 | Engine screen JS | `app/static/js/engine.js` | M3-T1 | `.venv/bin/python -m pytest tests/test_ui_assets.py -q` |
 | M4-T2 | M4 | 3 | Design screen JS | `app/static/js/design.js` | M3-T1, M4-T1 | `.venv/bin/python -m pytest tests/test_ui_assets.py -q` |
-| M3-T6 | M3 | 4 | UI e2e + parity harness | `tests/e2e/**` | M3-T2..T5, M4-T2 | `.venv/bin/python -m pytest tests/e2e -q` |
+| M3-T6 | M3 | 5 | UI e2e + parity harness | `tests/e2e/**` | M3-T2..T5, M4-T2 | `.venv/bin/python -m pytest tests/e2e -q` |
 | M5-T2 | M5 | 5 | Acceptance suite (spec §13) | `tests/test_acceptance.py` | M1-T2, M2-T5, M4-T1 | `.venv/bin/python -m pytest tests/test_acceptance.py -q` |
 
 ## Waves
@@ -184,8 +187,9 @@ Wave 0 is the lead scaffold (contracts + tooling). A task is ready only when eve
 - **Wave 1:** M0-T1, M1-T1, M1-T3, M2-T1, M3-T1, M5-T1 (6 parallel).
 - **Wave 2 (review fixes):** M1-T5, M1-T6, M2-T6, M3-T0, M5-T3, M2-T2, M4-T1 (7 parallel).
 - **Wave 3 (review fixes + UI):** M1-T7, M1-T8, M2-T7, M2-T8, M3-T2, M3-T3, M3-T4, M3-T5, M4-T2 (9 parallel).
-- **Wave 4:** M1-T2, M1-T4, M2-T3, M2-T4, M2-T5, M3-T6 (6 parallel).
-- **Wave 5:** M5-T2 + final review fixes, full `scripts/verify.sh`, milestone tags, delivery report.
+- **Wave 4 (review fixes):** M1-T4, M1-T9, M2-T9, M3-T7 (4 parallel).
+- **Wave 5:** M1-T2, M2-T3, M2-T4, M2-T5, M3-T6 (5 parallel).
+- **Wave 6:** M5-T2 + final review fixes, full `scripts/verify.sh`, milestone tags, delivery report.
 
 ## Dependency DAG
 
@@ -199,26 +203,30 @@ graph LR
   S0 --> M0T1[M0-T1 spikes]
   M1T1 --> M1T5[M1-T5 stream lifecycle]
   M1T5 --> M1T7[M1-T7 speech fixes]
-  M1T7 --> M1T2[M1-T2 /v1]
+  M1T7 --> M1T9[M1-T9 ownership]
+  M1T9 --> M1T2[M1-T2 /v1]
   M1T1 --> M1T4[M1-T4 runtime]
   M1T1 --> M4T1[M4-T1 design API]
   M1T3[M1-T3 s6] --> M1T6[M1-T6 container hardening]
   M1T6 --> M1T8[M1-T8 container pinning]
   M2T1 --> M2T6[M2-T6 lossless import]
   M2T6 --> M2T7[M2-T7 store/importer fixes]
+  M2T7 --> M2T9[M2-T9 voice keys]
   M2T2b[M2-T2 clone] --> M2T8[M2-T8 clone hardening]
   M3T1 --> M3T0[M3-T0 shell fixes]
   M5T1 --> M5T3[M5-T3 runbook fixes]
   M1T4 --> M2T4[M2-T4 voices API]
   M1T7 --> M1T4[M1-T4 runtime]
+  M1T7 --> M2T3[M2-T3 takes]
   M2T1 --> M2T4
   M1T4 --> M2T5[M2-T5 engine API]
   M3T1 --> M3T2[M3-T2 speak JS]
+  M3T7[M3-T7 screen fixes] --> M3T6[M3-T6 e2e]
   M3T1 --> M3T3[M3-T3 voices JS]
   M3T1 --> M3T4[M3-T4 clone JS]
   M3T1 --> M3T5[M3-T5 engine JS]
   M3T1 --> M4T2[M4-T2 design JS]
-  M1T7 --> M2T3[M2-T3 takes API]
+
   M4T1 --> M4T2
   M3T2 --> M3T6[M3-T6 e2e]
   M3T3 --> M3T6
