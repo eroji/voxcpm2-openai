@@ -19,8 +19,9 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from starlette.background import BackgroundTask
 
 from app import audio
+from app.engine import ENGINE_SAMPLE_RATE
 from app.errors import APIError, BadRequest
-from app.models import SaveAsVoice, SpeechRequest, TakeInfo, VoiceSummary
+from app.models import SaveAsVoice, SpeechRequest, TakeInfo, VoiceSummary, safe_header_value
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["takes"])
@@ -53,7 +54,13 @@ async def speak(request: Request, payload: SpeechRequest) -> Response | TakeInfo
     # engine's native rate without speed stretch — the stored take is always a
     # 48 kHz, unstretched WAV whatever the caller asked for.
     result = await request.app.state.speech.synthesize(
-        payload.model_copy(update={"response_format": "wav", "sample_rate": None, "speed": 1.0})
+        payload.model_copy(
+            update={
+                "response_format": "wav",
+                "sample_rate": ENGINE_SAMPLE_RATE,
+                "speed": 1.0,
+            }
+        )
     )
     samples, rate = audio.read_audio(result.audio)
     language = await asyncio.to_thread(
@@ -92,9 +99,9 @@ async def _speak_stream(request: Request, payload: SpeechRequest) -> Response:
         except Exception:  # noqa: BLE001 - headers are already sent; log, keep the audio
             logger.warning("streamed take %s could not be decoded and was not saved", take_id)
             return
-        if rate != state.settings.sample_rate:  # SPEC §5: takes are always 48 kHz
-            samples = audio.resample(samples, rate, state.settings.sample_rate)
-            rate = state.settings.sample_rate
+        if rate != ENGINE_SAMPLE_RATE:  # SPEC §5: takes are always 48 kHz
+            samples = audio.resample(samples, rate, ENGINE_SAMPLE_RATE)
+            rate = ENGINE_SAMPLE_RATE
         duration = audio.duration_s(samples, rate)
         wall = time.perf_counter() - started
         state.takes.create(
@@ -127,7 +134,7 @@ async def _speak_stream(request: Request, payload: SpeechRequest) -> Response:
         await asyncio.to_thread(save, b"".join(parts))
 
     # Headers must stay ASCII: use the request key, never a display name (SPEC §5).
-    voice_header = payload.voice if payload.voice.isascii() else "ad-hoc"
+    voice_header = safe_header_value(payload.voice)
     return StreamingResponse(
         body(),
         media_type=streaming.media_type,
@@ -142,10 +149,13 @@ async def _speak_stream(request: Request, payload: SpeechRequest) -> Response:
 
 
 @router.get("/takes")
-async def list_takes(request: Request) -> dict[str, list[TakeInfo]]:
+async def list_takes(request: Request, kind: str = "studio") -> dict[str, list[TakeInfo]]:
+    """Speak Takes list. ``kind=studio`` (default) hides design candidates; ``all`` shows both."""
     takes: Any = request.app.state.takes
     items: list[TakeInfo] = []
     for take in await asyncio.to_thread(takes.list):
+        if kind != "all" and take.get("kind", "studio") != kind:
+            continue
         try:
             takes.audio_path(str(take.get("id", "")))  # skip entries whose WAV is gone
         except APIError:
@@ -170,6 +180,7 @@ async def save_as_voice(request: Request, take_id: str, payload: SaveAsVoice) ->
     takes: Any = request.app.state.takes
     take = await asyncio.to_thread(takes.get, take_id)
     samples, rate = await asyncio.to_thread(audio.read_audio_file, takes.audio_path(take_id))
+    designed = take.get("kind") == "design"
     voice = await asyncio.to_thread(
         request.app.state.store.create,
         payload.name,
@@ -178,7 +189,15 @@ async def save_as_voice(request: Request, take_id: str, payload: SaveAsVoice) ->
         ref_text=str(take.get("text", "")),
         language=payload.language,
         consent="own-generated-voice",
-        source="uploaded",
+        source="designed" if designed else "uploaded",
+        metadata=(
+            {
+                "design_prompt": str(take.get("design_prompt", "")),
+                "design_seed": str(take.get("design_seed", "")),
+            }
+            if designed
+            else None
+        ),
     )
     return VoiceSummary(**voice.summary())
 

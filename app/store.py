@@ -6,6 +6,7 @@ The on-disk format is byte-compatible with the existing Qwen3 speaker files.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 import secrets
@@ -30,6 +31,7 @@ NAME_RE = re.compile(VOICE_NAME_PATTERN)
 TAKE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{6,80}$")
 INDEX_VERSION = 1
 _CACHE_MAX = 64
+_ORPHAN_GRACE_S = 3600.0
 Envelope = list[float]
 DEFAULT_SETTINGS = {
     "cfg": 2.0,
@@ -92,11 +94,13 @@ def _now() -> int:
     return int(time.time())
 
 
-def _read_voice_file(path: Path) -> Voice:
+def _read_voice_meta(path: Path, duration_s: float | None = None) -> Voice:
     # SPEC §5: the filename stem is the key. Metadata voice_name_lower is untrusted
     # (a hand-placed file must never redirect reads, deletes or backups).
     # A stem that is not already the lowercase key (e.g. "Ashley-en") can never be
     # resolved by get(), so scans must skip it rather than list an unreachable voice.
+    # Metadata-only read unless ``duration_s`` is missing: list() must not decode
+    # every tensor (the engine screen polls it every 5 s).
     key = validate_voice_name(path.stem)
     if path.stem != key:
         raise BadRequest(
@@ -106,9 +110,10 @@ def _read_voice_file(path: Path) -> Voice:
         )
     with safe_open(str(path), framework="numpy") as handle:
         meta = {str(k): str(v) for k, v in (handle.metadata() or {}).items()}
-        tensor = handle.get_tensor("audio")
-    sample_rate = int(meta.get("sample_rate") or 0)
-    samples = np.asarray(tensor, dtype=np.float32)
+        sample_rate = int(meta.get("sample_rate") or 0)
+        if duration_s is None:
+            frames = int(handle.get_tensor("audio").shape[0])
+            duration_s = frames / sample_rate if sample_rate else 0.0
     return Voice(
         key=key,
         name=meta.get("name") or key,
@@ -118,10 +123,14 @@ def _read_voice_file(path: Path) -> Voice:
         consent=meta.get("consent", ""),
         sample_rate=sample_rate,
         created_at=int(meta.get("created_at") or 0),
-        duration_s=(len(samples) / sample_rate) if sample_rate else 0.0,
+        duration_s=float(duration_s),
         path=path,
         metadata=meta,
     )
+
+
+def _read_voice_file(path: Path) -> Voice:
+    return _read_voice_meta(path)
 
 
 class VoiceStore:
@@ -171,7 +180,10 @@ class VoiceStore:
 
     def _write_index(self, index: dict[str, Any] | None = None) -> None:
         index = index if index is not None else self._index
-        tmp = self.index_path.with_suffix(".json.tmp")
+        # Unique tmp name: several VoiceStore instances can share this data dir
+        # (app + tests) with independent locks; a fixed name lets one instance's
+        # replace() consume another's pending tmp file (ENOENT race).
+        tmp = self.index_path.with_name(f"{self.index_path.name}.{secrets.token_hex(4)}.tmp")
         tmp.write_text(json.dumps(index, ensure_ascii=False, indent=2), "utf-8")
         tmp.replace(self.index_path)
 
@@ -215,23 +227,31 @@ class VoiceStore:
             order = list(self._index["order"])
             voices: list[Voice] = []
             seen: set[str] = set()
+
+            def read(path: Path) -> Voice | None:
+                entry = self._index["voices"].get(path.stem) or {}
+                try:
+                    voice = _read_voice_meta(path, entry.get("duration_s"))
+                except Exception:  # noqa: BLE001
+                    return None
+                if entry.get("duration_s") is None:
+                    self._touch_index(voice)  # persist the once-computed duration
+                return voice
+
             for key in order:
                 path = self.root / f"{key}.safetensors"
                 if not path.exists():
                     continue
-                try:
-                    voice = _read_voice_file(path)
-                except Exception:  # noqa: BLE001
-                    continue
-                voices.append(voice)
-                seen.add(key)
+                voice = read(path)
+                if voice is not None:
+                    voices.append(voice)
+                    seen.add(key)
             for path in sorted(self.root.glob("*.safetensors")):
                 if path.stem in seen:
                     continue
-                try:
-                    voices.append(_read_voice_file(path))
-                except Exception:  # noqa: BLE001
-                    continue
+                voice = read(path)
+                if voice is not None:
+                    voices.append(voice)
             return voices
 
     def read_audio(self, name: str) -> tuple[np.ndarray, int]:
@@ -362,7 +382,10 @@ class VoiceStore:
         self.settings.backups_dir.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
         safe_reason = re.sub(r"[^A-Za-z0-9_-]", "_", reason)[:60]
-        target = self.settings.backups_dir / f"voices-{stamp}-{safe_reason}.zip"
+        # Random suffix: two same-second edits with the same reason must not overwrite
+        # each other (SPEC §5 promises a pre-change backup); the stamp keeps them sorted.
+        suffix = secrets.token_hex(2)
+        target = self.settings.backups_dir / f"voices-{stamp}-{safe_reason}-{suffix}.zip"
         with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as zf:
             for path in sorted(self.root.glob("*.safetensors")):
                 zf.write(path, arcname=f"voices/{path.name}")
@@ -493,7 +516,7 @@ class TakeStore:
             self._wave_cache.pop(take_id, None)
 
     def prune(self) -> None:
-        """Keep the newest ``take_retention`` takes (SPEC §7)."""
+        """Keep the newest ``take_retention`` takes (SPEC §7), then sweep garbage."""
         items = self.list(limit=10**9)
         for item in items[self.settings.take_retention :]:
             take_id = item.get("id", "")
@@ -503,6 +526,34 @@ class TakeStore:
             wav_path.unlink(missing_ok=True)  # wav may already be gone; must not raise
             json_path.unlink(missing_ok=True)
             self._wave_cache.pop(take_id, None)
+        self._prune_orphans()
+
+    def _prune_orphans(self) -> None:
+        """Remove WAVs without JSON and JSON that can never name a take; never raises.
+
+        Only files older than the grace window count as garbage: ``create()`` writes
+        the WAV before the JSON, so a fresh orphan is a take mid-write.
+        """
+        # ponytail: fixed 1 h grace; retention is count-based, so there is no real
+        # time window to compare against. Wire to a setting if this ever matters.
+        cutoff = time.time() - _ORPHAN_GRACE_S
+        for path in self.root.glob("*.wav"):
+            with contextlib.suppress(OSError):
+                if not (self.root / f"{path.stem}.json").exists() and path.stat().st_mtime < cutoff:
+                    path.unlink(missing_ok=True)
+        for path in self.root.glob("*.json"):
+            with contextlib.suppress(OSError):
+                if path.stat().st_mtime < cutoff and not self._is_take(path):
+                    path.unlink(missing_ok=True)
+
+    @staticmethod
+    def _is_take(path: Path) -> bool:
+        try:
+            item = json.loads(path.read_text("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError, OSError):
+            return False
+        take_id = str(item.get("id", "")) if isinstance(item, dict) else ""
+        return take_id == path.stem and bool(TAKE_ID_RE.match(take_id))
 
     def take_urls(self, take_id: str) -> dict[str, str]:
         return {

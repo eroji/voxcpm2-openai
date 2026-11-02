@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 import zipfile
 
@@ -303,6 +304,80 @@ def test_take_prune_survives_missing_wav_and_bad_ids(tmp_path):
     assert not (takes.root / f"{first}.json").exists()
     assert not (takes.root / "orphan1.json").exists()  # json removed despite missing wav
     assert (takes.root / "junk.json").exists()  # malformed id skipped
+
+
+def test_list_is_metadata_only_with_cached_duration(store: VoiceStore, make_voice, monkeypatch):
+    """/api/engine polls list() every 5 s: it must read metadata + the cached duration only."""
+    import app.store as store_module
+
+    make_voice("ashley-en", "en", seconds=2.0)
+    calls: list[str] = []
+    real_open = store_module.safe_open
+
+    class TensorSpy:
+        def __init__(self, *args, **kwargs):
+            self._handle = real_open(*args, **kwargs)
+
+        def __enter__(self):
+            self._handle.__enter__()
+            return self
+
+        def __exit__(self, *exc):
+            return self._handle.__exit__(*exc)
+
+        def metadata(self):
+            return self._handle.metadata()
+
+        def get_tensor(self, name):
+            calls.append(name)
+            return self._handle.get_tensor(name)
+
+    monkeypatch.setattr(store_module, "safe_open", TensorSpy)
+    voices = store.list()
+    assert [v.key for v in voices] == ["ashley-en"]
+    assert voices[0].duration_s == pytest.approx(2.0, abs=0.01)
+    assert calls == []  # duration came from the index, no audio decoded
+
+    store._index["voices"]["ashley-en"]["duration_s"] = None
+    voices = store.list()  # cache miss: compute once from the tensor...
+    assert calls == ["audio"]
+    assert voices[0].duration_s == pytest.approx(2.0, abs=0.01)
+    assert store.list()[0].duration_s == pytest.approx(2.0, abs=0.01)
+    assert calls == ["audio"]  # ...then persisted, so later lists stay metadata-only
+    index = json.loads(store.index_path.read_text("utf-8"))
+    assert index["voices"]["ashley-en"]["duration_s"] == pytest.approx(2.0, abs=0.01)
+
+
+def test_same_second_backups_do_not_overwrite(store: VoiceStore, make_voice):
+    make_voice("ashley-en", "en")
+    first = store.backup("update-ashley-en")
+    second = store.backup("update-ashley-en")
+    assert first != second
+    for path in (first, second):
+        assert path.exists()
+        with zipfile.ZipFile(path) as zf:
+            assert "voices/ashley-en.safetensors" in zf.namelist()
+
+
+def test_prune_removes_orphan_wavs_and_malformed_json(tmp_path):
+    from app.store import TakeStore
+
+    settings = Settings(data_dir=tmp_path / "data", take_retention=50)
+    takes = TakeStore(settings)
+    keep = takes.create(tone(0.1), 24000, voice="v", text="keep")["id"]
+    stale = time.time() - 7200
+    (takes.root / "orphan.wav").write_bytes(b"RIFFjunk")
+    (takes.root / "broken.json").write_text("{not json", "utf-8")
+    (takes.root / "badid.json").write_text(json.dumps({"id": "!!", "created_at": 0}), "utf-8")
+    (takes.root / "fresh.wav").write_bytes(b"RIFFjunk")  # a take mid-write, not garbage
+    for name in ("orphan.wav", "broken.json", "badid.json"):
+        os.utime(takes.root / name, (stale, stale))
+    takes.prune()  # must not raise
+    assert not (takes.root / "orphan.wav").exists()
+    assert not (takes.root / "broken.json").exists()
+    assert not (takes.root / "badid.json").exists()
+    assert (takes.root / "fresh.wav").exists()
+    assert takes.get(keep)["text"] == "keep"
 
 
 @pytest.mark.parametrize("text", ["こんにちは、世界", "안녕하세요 세계", "你好，世界"])

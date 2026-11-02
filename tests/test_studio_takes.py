@@ -117,6 +117,60 @@ def test_take_wave_has_72_amps(client: Any, library: Any) -> None:
     assert all(0.0 <= amp <= 1.0 for amp in amps)
 
 
+def _design_take(settings: Any) -> dict[str, Any]:
+    """Design candidate written straight to disk (kind="design", Q-007 extras)."""
+    from app.store import TakeStore
+
+    return TakeStore(settings).create(
+        np.full(4800, 0.1, dtype=np.float32),
+        48000,
+        voice="design",
+        text="design sample",
+        kind="design",
+        extra={"design_prompt": "warm narrator", "design_seed": 7},
+    )
+
+
+def test_takes_list_filters_by_kind(client: Any, library: Any, settings: Any) -> None:
+    studio = _speak(client).json()["id"]
+    design = _design_take(settings)["id"]
+    assert [t["id"] for t in client.get("/api/takes").json()["takes"]] == [studio]
+    assert [t["id"] for t in client.get("/api/takes?kind=design").json()["takes"]] == [design]
+    assert {t["id"] for t in client.get("/api/takes?kind=all").json()["takes"]} == {
+        studio,
+        design,
+    }
+
+
+def test_take_is_48k_when_sample_rate_configured_24k(
+    client: Any, library: Any, settings: Any
+) -> None:
+    # SPEC §5: takes are 48 kHz whatever SAMPLE_RATE or the request asks for.
+    settings.sample_rate = 24000
+    take = _speak(client, sample_rate=24000).json()
+    _, rate = audio.read_audio(client.get(take["audio_url"]).content)
+    assert rate == 48000
+
+    resp = _speak(client, stream=True, sample_rate=24000)
+    assert resp.headers["X-Sample-Rate"] == "24000"  # the caller still gets 24 kHz
+    saved = _wait_for_take(client, resp.headers["X-Take-Id"])
+    _, rate = audio.read_audio(client.get(saved["audio_url"]).content)
+    assert rate == 48000
+
+
+def test_save_design_take_as_voice(client: Any, library: Any, settings: Any, store: Any) -> None:
+    take = _design_take(settings)
+    resp = client.post(
+        f"/api/takes/{take['id']}/save-as-voice", json={"name": "Designed-Voice", "language": "en"}
+    )
+    assert resp.status_code == 200
+    assert resp.json()["source"] == "designed"
+    voice = store.get("designed-voice")
+    assert voice.consent == "own-generated-voice"
+    assert voice.metadata["design_prompt"] == "warm narrator"
+    assert voice.metadata["design_seed"] == "7"
+
+
 def test_save_as_voice_uses_take_text(client: Any, library: Any, store: Any) -> None:
     take = _speak(client).json()
     resp = client.post(
@@ -125,6 +179,7 @@ def test_save_as_voice_uses_take_text(client: Any, library: Any, store: Any) -> 
     assert resp.status_code == 200
     voice = resp.json()
     assert voice["key"] == "new-voice"
+    assert voice["source"] == "uploaded"
     assert voice["ref_text"] == take["text"]
     assert voice["language"] == "ja"
     assert store.get("new-voice").consent == "own-generated-voice"
