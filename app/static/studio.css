@@ -112,8 +112,9 @@ a.btn-link { color: inherit; text-decoration: none; } /* Download reads as a lin
 .vs-wave path { fill: var(--vs-wave-idle); }
 .vs-wave path.accent { fill: var(--vs-accent); } /* the played part, clipped to the playhead */
 .vs-wave.is-current path { fill: var(--vs-accent); }
-.vs-take.is-playing .vs-wave path { fill: var(--vs-wave-idle); }
-.vs-take.is-playing .vs-wave path.accent { fill: var(--vs-accent); }
+/* playing or paused: grey base + accent up to the playhead (overrides the newest take's all-accent) */
+.vs-take.is-playing .vs-wave path, .vs-take.is-paused .vs-wave path { fill: var(--vs-wave-idle); }
+.vs-take.is-playing .vs-wave path.accent, .vs-take.is-paused .vs-wave path.accent { fill: var(--vs-accent); }
 
 /* Voices table + empty states */
 .vs-toolbar { display: flex; flex-wrap: wrap; gap: var(--vs-s5) var(--vs-s9); align-items: center; padding: var(--vs-s3) 0; border-top: var(--vs-rule-section); border-bottom: var(--vs-rule-row); }
@@ -122,10 +123,17 @@ a.btn-link { color: inherit; text-decoration: none; } /* Download reads as a lin
 .vs-filter { min-height: var(--vs-h-input); padding: 0; background: none; border: none; border-bottom: 2px solid transparent; color: var(--vs-muted); }
 .vs-filter[aria-pressed="true"] { color: var(--vs-fg); font-weight: 700; border-bottom-color: var(--vs-fg); }
 .vs-table-wrap { overflow-x: auto; }
-.vs-table { width: 100%; min-width: 820px; border-collapse: collapse; }
+/* Fixed layout: column widths come from the colgroup, so opening the inline editor (or a
+ * long transcript) never reflows the columns of the other rows. */
+.vs-table { width: 100%; min-width: 820px; border-collapse: collapse; table-layout: fixed; }
+.vs-table col.c-name { width: 170px; }
+.vs-table col.c-lang { width: 140px; }
+.vs-table col.c-src { width: 120px; }
+.vs-table col.c-ref { width: 90px; }
+.vs-table col.c-act { width: 230px; }
 .vs-table th { text-align: left; font-weight: 400; font-size: var(--vs-fs-label); color: var(--vs-muted); padding: var(--vs-s3) var(--vs-s6) var(--vs-s3) 0; border-bottom: var(--vs-rule-row); }
 .vs-table td { padding: var(--vs-s1) var(--vs-s6) var(--vs-s1) 0; border-bottom: 1px solid var(--vs-rule-faint); height: 36px; }
-.vs-table td.name { font-weight: 700; font-size: var(--vs-fs-body); }
+.vs-table td.name { font-weight: 700; font-size: var(--vs-fs-body); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vs-table td.tx { font-size: var(--vs-fs-small); color: var(--vs-muted); }
 /* one-line clamp on the content, not the cell: max-width on the <td> lets one long
  * transcript move that row's columns and misalign the whole table */
@@ -138,14 +146,13 @@ a.btn-link { color: inherit; text-decoration: none; } /* Download reads as a lin
 }
 .vs-table td.act { text-align: right; white-space: nowrap; }
 .vs-table td.act .btn-link { margin-left: var(--vs-s6); font-size: var(--vs-fs-small); }
-/* Inline voice editor: a normal aligned table row; it grows with the transcript. */
-.vs-edit td { height: auto; vertical-align: top; }
-/* the controls contribute no intrinsic width, so the columns keep the widths of the other rows */
-.vs-edit td > .vs-input, .vs-edit td > .vs-select, .vs-edit td > .vs-edit-txcell {
-  width: 0;
-  min-width: 100%;
-}
-.vs-edit-txcell { display: flex; flex-direction: column; gap: var(--vs-s3); min-width: 0; }
+.vs-table td.act.confirming { white-space: normal; font-size: var(--vs-fs-small); } /* inline delete prompt wraps inside the fixed column */
+/* Inline voice editor: a normal aligned table row; it grows with the transcript. Every cell
+ * is top-aligned on one 32px control line so text, inputs and links share a baseline. */
+.vs-edit td { height: auto; vertical-align: top; padding-top: var(--vs-s2); padding-bottom: var(--vs-s3); line-height: var(--vs-h-input); }
+.vs-edit td > .vs-input, .vs-edit td > .vs-select, .vs-edit td > .vs-edit-txcell { width: 100%; line-height: var(--vs-lh); }
+.vs-edit td.act .btn-link { margin-top: var(--vs-s1); }
+.vs-edit-txcell { display: flex; flex-direction: column; gap: var(--vs-s3); min-width: 0; line-height: var(--vs-lh); }
 .vs-edit-txcell > .btn-link { align-self: flex-start; }
 .vs-edit-tx {
   display: block;
@@ -186,8 +193,8 @@ a.btn-link { color: inherit; text-decoration: none; } /* Download reads as a lin
 /* Design candidates */
 .vs-cand { border-top: var(--vs-rule-row); padding: var(--vs-s4) 0 var(--vs-s5); display: flex; flex-direction: column; gap: var(--vs-s4); }
 .vs-cand:hover, .vs-cand.is-selected, .vs-cand.is-playing { background: var(--vs-code-bg); }
-.vs-cand.is-playing .vs-wave path { fill: var(--vs-wave-idle); }
-.vs-cand.is-playing .vs-wave path.accent { fill: var(--vs-accent); }
+.vs-cand.is-playing .vs-wave path, .vs-cand.is-paused .vs-wave path { fill: var(--vs-wave-idle); }
+.vs-cand.is-playing .vs-wave path.accent, .vs-cand.is-paused .vs-wave path.accent { fill: var(--vs-accent); }
 .vs-cand .row { display: flex; justify-content: space-between; align-items: center; gap: var(--vs-s3); }
 .vs-cand .pick { min-height: 26px; padding: 0 var(--vs-s5); border: 1px solid var(--vs-fg); background: var(--vs-bg); font-size: var(--vs-fs-label); }
 .vs-cand .pick[aria-pressed="true"] { background: var(--vs-fg); color: var(--vs-bg); font-weight: 700; }

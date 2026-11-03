@@ -647,6 +647,23 @@ def test_take_play_pause_and_waveform_progress(page, live_app, open_studio):
     assert width > 0
     page.wait_for_timeout(200)
     assert float(rect.get_attribute("width")) == width
+    # the newest take is all-accent when idle; paused it must show grey past the playhead
+    expect(row).to_have_class(re.compile("is-paused"))
+    expect(row.locator("svg.vs-wave path.base")).to_have_css("fill", "rgb(138, 138, 138)")
+
+
+def test_streamed_take_autoplay_drives_the_row_player(page, live_app, open_studio):
+    """Streaming (the default) hands the still-playing stream to the new take's player."""
+    open_studio(page)
+    page.fill("#speak-text", "Streamed take check line.")
+    page.click("#generate")
+    row = page.locator("#takes-list .vs-take").first
+    button = row.locator("button.btn-play")
+    expect(row).to_have_class(re.compile("is-playing"), timeout=15000)
+    expect(button).to_have_attribute("aria-label", "Pause take")
+    button.click()
+    expect(row).to_have_class(re.compile("is-paused"))
+    assert float(row.locator("svg.vs-wave clipPath rect").get_attribute("width")) > 0
 
 
 def test_take_hover_highlights_the_row(page, live_app, open_studio):
@@ -700,9 +717,17 @@ def test_candidate_play_pause_and_waveform_progress(page, live_app, open_studio)
     page.locator("#candidates .vs-cand").nth(1).locator("button.btn-play").click()
     expect(first).not_to_have_class(re.compile("is-playing"))
     expect(page.locator("#candidates .vs-cand").nth(1)).to_have_class(re.compile("is-playing"))
-    # selecting is independent of the player
+    # selecting is independent of the player, and only highlights the row: nothing moves
+    # and the top rule keeps its colour
+    cands = page.locator("#candidates .vs-cand")
+    ys = cands.evaluate_all("els => els.map(e => e.getBoundingClientRect().y)")
+    border = first.evaluate("el => getComputedStyle(el).borderTop")
     first.locator(".pick").click()
     expect(first).to_have_class(re.compile("is-selected"))
+    page.mouse.move(0, 0)
+    expect(first).to_have_css("background-color", "rgb(26, 26, 26)")  # --vs-code-bg
+    assert cands.evaluate_all("els => els.map(e => e.getBoundingClientRect().y)") == ys
+    assert first.evaluate("el => getComputedStyle(el).borderTop") == border
 
 
 def test_voice_editor_is_an_aligned_table_row(page, live_app, open_studio):
@@ -720,8 +745,11 @@ def test_voice_editor_is_an_aligned_table_row(page, live_app, open_studio):
         assert other.evaluate(xs) == grid
 
     aligned()
+    columns = page.locator(".vs-table thead tr").evaluate(xs)
     row.get_by_role("button", name="Edit").click()
     expect(row.locator('textarea[data-field="ref_text"]')).to_be_visible()
+    # fixed layout: opening the editor never moves the columns
+    assert page.locator(".vs-table thead tr").evaluate(xs) == columns
     assert row.evaluate("tr => tr.children.length") == 6  # a normal row, never a colspan
     aligned()
     expect(row.locator("td.name input")).to_be_visible()

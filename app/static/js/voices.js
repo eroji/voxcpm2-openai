@@ -239,6 +239,7 @@ function openDelete(tr) {
   const cell = tr.querySelector("td.act");
   if (!cell) return;
   cell.textContent = "";
+  cell.classList.add("confirming");
   cell.append(document.createTextNode(`Delete ${tr.dataset.name}? This can't be undone from the UI. `));
   const confirm = actionButton("Delete", "confirm");
   cell.append(confirm, actionButton("Cancel", "cancel"));
@@ -295,6 +296,10 @@ registerScreen("voices", {
     document.getElementById("voice-search").addEventListener("input", e => {
       query = e.target.value.toLowerCase();
       render();
+    });
+    // a narrower window rewraps an open transcript: keep it fully visible, never clipped
+    addEventListener("resize", () => {
+      for (const tx of document.querySelectorAll("#voice-rows .vs-edit-tx")) grow(tx);
     });
     document.getElementById("lang-filters").addEventListener("click", e => {
       const button = e.target.closest("button[data-lang]");

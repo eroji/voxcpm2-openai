@@ -263,7 +263,11 @@ export function stopAudio() {
   if (cb) cb("stop", el);
 }
 
-export function play(url, state) {
+/* `handoff` (optional) continues audio that is already audible elsewhere (the Speak stream's
+ * AudioContext): once this clip can play, `handoff.at()` returns the offset to resume from
+ * (null = nothing left, skip), and `handoff.started()` runs when this element is audible so
+ * the other source can stop without a gap. */
+export function play(url, state, handoff) {
   if (audio && playingUrl === url) {
     if (audio.paused) {
       audio.play().then(() => emit("play", audio)).catch(() => stopAudio());
@@ -274,19 +278,48 @@ export function play(url, state) {
     return; // second click on the same source toggles play/pause
   }
   stopAudio();
-  audio = new Audio(url);
+  const el = new Audio(url);
+  audio = el;
   playingUrl = url;
   onState = state || null;
-  audio.addEventListener("ended", stopAudio);
-  audio.addEventListener("error", stopAudio);
-  audio.addEventListener("timeupdate", () => emit("time", audio));
-  audio.play().then(() => emit("play", audio)).catch(() => stopAudio());
+  el.addEventListener("ended", stopAudio);
+  el.addEventListener("error", stopAudio);
+  el.addEventListener("timeupdate", () => emit("time", el));
+  const begin = () =>
+    el
+      .play()
+      .then(() => {
+        emit("play", el);
+        if (handoff) handoff.started();
+      })
+      .catch(() => {
+        if (audio === el) stopAudio(); // a newer clip may already own the player
+      });
+  if (!handoff) {
+    begin();
+    return;
+  }
+  el.addEventListener(
+    "canplay",
+    () => {
+      if (audio !== el) return;
+      const at = handoff.at();
+      if (at == null) {
+        stopAudio();
+        return;
+      }
+      el.currentTime = at;
+      begin();
+    },
+    { once: true },
+  );
 }
 
 /* Shared take/candidate player. A screen hands over its nodes and gets one click-to-toggle
  * player: play/pause icon, `.is-playing` on the row and the waveform playhead. core still owns
  * the single Audio element, so starting another row stops this one and `stop` resets it.
- * Returns { play } so a screen can auto-play without duplicating the state machine. */
+ * Returns { play(handoff?) } so a screen can auto-play (or take over a stream, see play())
+ * without duplicating the state machine. */
 const PLAY_D = "M2 1l9 5-9 5z";
 const PAUSE_D = "M2 1h3v10H2zM7 1h3v10H7z";
 let raf = 0; // one playhead animation at a time (only one clip can play)
@@ -300,6 +333,8 @@ export function attachPlayer({ url, row, btn, icon, wave, label = "take" }) {
       // timeupdate only moves the playhead: it must not look like the clip stopped (bug report)
       const playing = phase === "play";
       row.classList.toggle("is-playing", playing);
+      // paused keeps the playhead visible: the wave stops where the clip stopped
+      row.classList.toggle("is-paused", phase === "pause");
       icon.setAttribute("d", playing ? PAUSE_D : PLAY_D);
       btn.setAttribute("aria-label", `${playing ? "Pause" : "Play"} ${label}`);
       btn.title = playing ? "Pause" : "Play";
@@ -315,8 +350,8 @@ export function attachPlayer({ url, row, btn, icon, wave, label = "take" }) {
     }
     paint(); // pause lands where the clip stopped, stop resets to 0
   };
-  const start = () => play(url, sync);
-  btn.addEventListener("click", start);
+  const start = handoff => play(url, sync, handoff);
+  btn.addEventListener("click", () => start());
   sync("stop"); // initial state: triangle, Play label, no highlight, progress 0
   return { play: start };
 }

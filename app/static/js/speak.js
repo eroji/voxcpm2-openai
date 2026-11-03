@@ -222,12 +222,15 @@ async function errorFrom(res) {
 
 /* s16le mono chunks → gapless AudioContext playback, starting on the first chunk.
  * The rate comes from X-Sample-Rate (M1-T20), never hard-coded.
- * Resolves when the response stream ends — scheduled audio keeps playing after that. */
+ * Resolves when the response stream ends — scheduled audio keeps playing after that — with
+ * { ctx, start, end } (context times of the first sample and the scheduled tail), or null
+ * when no audio arrived. */
 async function playPcmStream(res) {
   const rate = Number(res.headers.get("X-Sample-Rate")) || 48000;
   const ctx = new AudioContext({ sampleRate: rate });
   const reader = res.body.getReader();
   let when = ctx.currentTime;
+  let first = null;
   try {
     await ctx.resume();
     let carry = null;
@@ -252,6 +255,7 @@ async function playPcmStream(res) {
       src.buffer = buffer;
       src.connect(ctx.destination);
       const start = Math.max(when, ctx.currentTime);
+      if (first == null) first = start;
       src.start(start);
       when = start + buffer.duration;
     }
@@ -261,6 +265,22 @@ async function playPcmStream(res) {
     const tailMs = Math.max(0, when - ctx.currentTime) * 1000 + 50;
     setTimeout(() => ctx.close().catch(() => {}), tailMs);
   }
+  return first == null ? null : { ctx, start: first, end: when };
+}
+
+/* The streamed take is still audible when its row appears: the row's shared player takes
+ * over at the same offset, so the button, highlight and waveform playhead follow it and
+ * pause works like any other take. The AudioContext closes once the element is audible. */
+function streamHandoff({ ctx, start, end }) {
+  return {
+    at() {
+      if (ctx.state === "closed" || end - ctx.currentTime < 0.25) return null; // already over
+      return Math.max(0, ctx.currentTime - start);
+    },
+    started() {
+      ctx.close().catch(() => {});
+    },
+  };
 }
 
 async function playWhole(res) {
@@ -317,8 +337,9 @@ async function generate() {
       return;
     }
     if (stream) {
-      await playPcmStream(res);
+      const playback = await playPcmStream(res);
       await loadTakes();
+      if (playback && firstPlayer) firstPlayer.play(streamHandoff(playback));
     } else {
       await playWhole(res);
     }

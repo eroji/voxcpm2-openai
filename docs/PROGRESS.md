@@ -277,6 +277,11 @@ spikes remain host-run. CI has not run yet: the branch is local (47+ commits ahe
   selection is a background row highlight (no border/colour shift); candidate counts 1–4; design
   previews normalized; Speak no longer offers Save as voice. Release v0.3.6.
 
+- **2026-11-03 —** Streamed takes hand off to the new take's shared player (pause icon, row
+  highlight, waveform playhead); a paused take keeps its playhead (grey past it, even on the newest
+  take); Voices table uses fixed column widths so the inline editor never reflows or clips rows.
+  Release v0.3.7.
+
 ## Next action
 
 1. `git push origin main` and watch the GitLab pipeline (`checks`, `javascript`, `test`, `e2e`,

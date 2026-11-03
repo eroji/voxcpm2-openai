@@ -729,7 +729,13 @@ def test_take_row_hover_and_download_css():
         "{ background: var(--vs-code-bg); }"
     ) in CSS
     assert ".vs-cand.is-selected { border-top" not in CSS, "selection must not shift the row"
-    assert ".vs-cand.is-playing .vs-wave path.accent { fill: var(--vs-accent); }" in CSS
+    assert (
+        ".vs-cand.is-playing .vs-wave path.accent, .vs-cand.is-paused .vs-wave path.accent "
+        "{ fill: var(--vs-accent); }"
+    ) in CSS
+    # paused keeps the playhead: grey base, even on the newest (all-accent) take
+    assert ".vs-take.is-paused .vs-wave path { fill: var(--vs-wave-idle); }" in CSS
+    assert 'row.classList.toggle("is-paused", phase === "pause")' in CORE
     assert ".vs-wave path.accent { fill: var(--vs-accent); }" in CSS
     rule = re.search(r"\.btn-link \{([^}]*)\}", CSS).group(1)
     assert "color: inherit" in rule and "text-decoration: none" in rule
@@ -766,8 +772,10 @@ def test_voice_editor_is_an_aligned_table_row():
     assert "nameInput.focus()" in voices  # focus management
     for selector in [".vs-edit td", ".vs-edit-tx", ".vs-edit-txcell"]:
         assert selector in CSS, selector
-    # the controls must not change the column widths
-    assert re.search(r"\.vs-edit td > \.vs-input[^{]*\{[^}]*min-width: 100%", CSS, re.S)
+    # the editor must not change the column widths: fixed layout from the colgroup
+    table = re.search(r"\.vs-table \{([^}]*)\}", CSS).group(1)
+    assert "table-layout: fixed" in table
+    assert '<col class="c-name">' in HTML
 
 
 def test_studio_session_id_scopes_takes():
