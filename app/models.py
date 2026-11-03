@@ -94,6 +94,7 @@ class TakeInfo(APIModel):
     first_audio_ms: float | None = None
     created_at: int
     format: str = "wav"
+    speed: float = 1.0  # playback tempo; the WAV on disk stays unstretched (SPEC §5)
     audio_url: str
     wave_url: str
 

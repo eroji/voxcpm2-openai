@@ -104,7 +104,9 @@ async function loadTakes() {
 }
 
 function takeStats(t) {
-  const parts = [fmtDuration(t.duration_s)];
+  const speed = Number(t.speed) || 1;
+  const parts = [fmtDuration(t.duration_s / speed)]; // played length at the take's tempo
+  if (speed !== 1) parts.push(`${speed.toFixed(2)}×`);
   if (t.rtf != null) parts.push(`RTF ${Number(t.rtf).toFixed(2)}`);
   if (t.first_audio_ms != null) parts.push(`${Math.round(t.first_audio_ms)} ms`);
   return parts.join(" · ");
@@ -227,7 +229,7 @@ async function errorFrom(res) {
  * The rate comes from X-Sample-Rate (M1-T20), never hard-coded.
  * Resolves when the response stream ends — scheduled audio keeps playing after that — with
  * { ctx, start, end, gaps } (context times of the first sample, the scheduled tail and any
- * re-buffer silences), or null when no audio arrived. */
+ * re-buffer silences), or null when no audio arrived. The caller owns closing `ctx`. */
 const STREAM_LEAD_S = 0.3;
 
 async function playPcmStream(res) {
@@ -270,37 +272,63 @@ async function playPcmStream(res) {
       src.start(start);
       when = start + buffer.duration;
     }
+  } catch (err) {
+    ctx.close().catch(() => {});
+    throw err;
   } finally {
     reader.cancel().catch(() => {}); // no-op once done, releases the body on error
-    // close the context after the scheduled tail, never while it still plays
-    const tailMs = Math.max(0, when - ctx.currentTime) * 1000 + 50;
-    setTimeout(() => ctx.close().catch(() => {}), tailMs);
   }
-  return first == null ? null : { ctx, start: first, end: when, gaps };
+  if (first == null) {
+    ctx.close().catch(() => {});
+    return null;
+  }
+  return { ctx, start: first, end: when, gaps };
 }
 
-/* The streamed take is still audible when its row appears: the row's shared player takes
- * over at the same offset, so the button, highlight and waveform playhead follow it and
- * pause works like any other take. at() suspends the stream and returns where it stopped (the
- * two never overlap, which sounded like a stutter); started() closes it, failed() resumes it. */
-function streamHandoff({ ctx, start, end, gaps }) {
-  return {
-    at() {
-      const now = ctx.currentTime;
-      if (ctx.state === "closed" || end - now < 0.25) return null; // already over
-      ctx.suspend().catch(() => {});
-      // audio position = context time since the first sample, minus re-buffer silences
-      let offset = now - start;
-      for (const [from, to] of gaps) offset -= Math.max(0, Math.min(now, to) - from);
-      return Math.max(0, offset);
-    },
-    started() {
-      ctx.close().catch(() => {});
-    },
-    failed() {
-      if (ctx.state === "suspended") ctx.resume().catch(() => {});
-    },
-  };
+/* The streamed take is still audible when its row appears. The row's shared player adopts
+ * this Audio-like wrapper (core play() `source`) instead of reloading the take file and
+ * seeking — switching sources mid-clip was the audible glitch. Pause/resume suspend and
+ * resume the context; the row switches to the take file only after this clip ends. */
+class StreamPlayback extends EventTarget {
+  constructor({ ctx, start, end, gaps }) {
+    super();
+    this.ctx = ctx;
+    this.start = start;
+    this.end = end;
+    this.gaps = gaps;
+    const silent = gaps.reduce((sum, [from, to]) => sum + (to - from), 0);
+    this.duration = end - start - silent; // seconds of audio, re-buffer silences excluded
+    this.timer = setInterval(() => this.tick(), 100);
+  }
+
+  get currentTime() {
+    const now = Math.min(this.ctx.currentTime, this.end);
+    let t = now - this.start;
+    for (const [from, to] of this.gaps) t -= Math.max(0, Math.min(now, to) - from);
+    return Math.max(0, t);
+  }
+
+  get paused() {
+    return this.ctx.state !== "running";
+  }
+
+  tick() {
+    if (this.ctx.currentTime >= this.end) this.dispatchEvent(new Event("ended"));
+    else if (!this.paused) this.dispatchEvent(new Event("timeupdate"));
+  }
+
+  play() {
+    return this.ctx.resume();
+  }
+
+  pause() {
+    this.ctx.suspend().catch(() => {});
+  }
+
+  stop() {
+    clearInterval(this.timer);
+    this.ctx.close().catch(() => {});
+  }
 }
 
 async function playWhole(res) {
@@ -310,11 +338,27 @@ async function playWhole(res) {
   if (firstPlayer) firstPlayer.play(); // auto-play the new take through the shared player
 }
 
-/* Streams are PCM at 48 kHz, so Format only applies when streaming is off (Q-024). */
+/* Streams are PCM at 48 kHz, so Format only applies when streaming is off (Q-024); speed is
+ * ignored for streamed responses (SPEC §6), so the Speed slider follows the same rule. */
 function syncFmt() {
   const streaming = $("stream-toggle").getAttribute("aria-pressed") === "true";
   $("fmt").disabled = streaming;
   $("fmt-hint").hidden = !streaming;
+  $("speed").disabled = streaming;
+  syncSpeed();
+}
+
+/* Speed: 0.90–1.10× sounds natural; the 0.85/1.15 ends may sound processed (time-stretch).
+ * While streaming the label says it is not applied, so the values row stays aligned. */
+function syncSpeed() {
+  const value = +$("speed").value;
+  const off = $("speed").disabled;
+  const natural = value >= 0.895 && value <= 1.105; // float-safe 0.90–1.10
+  const zone = $("speed-zone");
+  $("speed-out").textContent = `${value.toFixed(2)}×`;
+  zone.textContent = off ? "Not applied while streaming" : natural ? "Natural" : "May sound processed";
+  zone.classList.toggle("is-warn", !off && !natural);
+  zone.classList.toggle("is-off", off);
 }
 
 async function generate() {
@@ -332,6 +376,7 @@ async function generate() {
     return;
   }
   clearError("speak");
+  stopAudio(); // a take that is still playing must not talk over the new one
   button.disabled = true;
   button.textContent = "Generating…";
   const stream = $("stream-toggle").getAttribute("aria-pressed") === "true";
@@ -345,6 +390,7 @@ async function generate() {
     response_format: stream ? "pcm" : $("fmt").value,
     stream,
   };
+  if (!stream && +$("speed").value !== 1) body.speed = +$("speed").value;
   if (stream) body.sample_rate = 48000; // playPcmStream decodes 48 kHz: pin the request to it
   try {
     const res = await fetch("/api/speak", {
@@ -359,7 +405,11 @@ async function generate() {
     if (stream) {
       const playback = await playPcmStream(res);
       await loadTakes();
-      if (playback && firstPlayer) firstPlayer.play(streamHandoff(playback));
+      if (playback) {
+        const live = new StreamPlayback(playback);
+        if (firstPlayer) firstPlayer.play(live);
+        else setTimeout(() => live.stop(), (live.duration - live.currentTime) * 1000 + 100);
+      }
     } else {
       await playWhole(res);
     }
@@ -414,6 +464,8 @@ async function init() {
     }
   });
 
+  $("speed").addEventListener("input", syncSpeed);
+  syncSpeed();
   for (const id of ["cfg", "steps"]) {
     const el = $(id);
     const out = $(`${id}-out`);

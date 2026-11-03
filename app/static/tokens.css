@@ -21,6 +21,8 @@
   --vs-accent: #FF3B30;        /* the only accent: active tab, primary button, newest take, selection */
   --vs-on-accent: #0E0E0E;     /* text on accent (6:1) */
   --vs-danger: #FF3B30;        /* errors reuse the accent; always pair with text */
+  --vs-zone-ok: #34C759;            /* Speed slider safe zone (human decision 2026-11-03); paired with text */
+  --vs-zone-warn: #FFCC00;          /* Speed slider caution zone; paired with text */
   --vs-ok: #EDEDED;            /* status text stays neutral; no green */
 
   /* Type */

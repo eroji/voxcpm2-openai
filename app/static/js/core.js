@@ -52,9 +52,16 @@ export const api = {
   postForm: (path, form) => request(path, { method: "POST", body: form }),
 };
 
+/* Voices everywhere (Speak chips, library) are ordered by language tag, then name. */
+export function compareVoices(a, b) {
+  const la = String(a.language || "").toLowerCase();
+  const lb = String(b.language || "").toLowerCase();
+  return la.localeCompare(lb) || String(a.name).localeCompare(String(b.name));
+}
+
 export async function loadVoices() {
   const data = await api.get("/api/voices");
-  state.voices = data.voices || [];
+  state.voices = (data.voices || []).slice().sort(compareVoices);
   return state.voices;
 }
 
@@ -275,17 +282,20 @@ export function stopAudio() {
   audio = null;
   playingUrl = null;
   onState = null;
-  if (el) el.pause();
+  if (el) {
+    if (el.stop) el.stop(); // an adopted source (Speak stream) is released, not just paused
+    else el.pause();
+  }
   // revoke blob: URLs we created (playWhole / test line) so they cannot leak
   if (url && url.startsWith("blob:")) URL.revokeObjectURL(url);
   if (cb) cb("stop", el);
 }
 
-/* `handoff` (optional) continues audio that is already audible elsewhere (the Speak stream's
- * AudioContext): once this clip can play, `handoff.at()` pauses that source and returns the
- * offset to resume from (null = nothing left, skip); `handoff.started()` runs when this element
- * is audible and `handoff.failed()` when it could not start, so the other source resumes. */
-export function play(url, state, handoff) {
+/* `source` (optional) adopts audio that is already playing instead of loading `url`: an
+ * Audio-like object (currentTime, duration, paused, play(), pause(), stop(), "ended" /
+ * "timeupdate" events). Speak hands over its live stream this way, so the take row drives
+ * it without switching audio sources mid-clip (switching was the audible glitch). */
+export function play(url, state, source) {
   if (audio && playingUrl === url) {
     if (audio.paused) {
       audio.play().then(() => emit("play", audio)).catch(() => stopAudio());
@@ -296,48 +306,28 @@ export function play(url, state, handoff) {
     return; // second click on the same source toggles play/pause
   }
   stopAudio();
-  const el = new Audio(url);
+  const el = source || new Audio(url);
   audio = el;
   playingUrl = url;
   onState = state || null;
   el.addEventListener("ended", stopAudio);
   el.addEventListener("error", stopAudio);
   el.addEventListener("timeupdate", () => emit("time", el));
-  const begin = () =>
-    el
-      .play()
-      .then(() => {
-        emit("play", el);
-        if (handoff) handoff.started();
-      })
-      .catch(() => {
-        if (handoff) handoff.failed();
-        if (audio === el) stopAudio(); // a newer clip may already own the player
-      });
-  if (!handoff) {
-    begin();
+  if (source) {
+    emit("play", el); // already audible
     return;
   }
-  el.addEventListener(
-    "canplay",
-    () => {
-      if (audio !== el) return;
-      const at = handoff.at();
-      if (at == null) {
-        stopAudio();
-        return;
-      }
-      el.currentTime = at;
-      begin();
-    },
-    { once: true },
-  );
+  el.play()
+    .then(() => emit("play", el))
+    .catch(() => {
+      if (audio === el) stopAudio(); // a newer clip may already own the player
+    });
 }
 
 /* Shared take/candidate player. A screen hands over its nodes and gets one click-to-toggle
  * player: play/pause icon, `.is-playing` on the row and the waveform playhead. core still owns
  * the single Audio element, so starting another row stops this one and `stop` resets it.
- * Returns { play(handoff?) } so a screen can auto-play (or take over a stream, see play())
+ * Returns { play(source?) } so a screen can auto-play (or adopt a live stream, see play())
  * without duplicating the state machine. */
 const PLAY_D = "M2 1l9 5-9 5z";
 const PAUSE_D = "M2 1h3v10H2zM7 1h3v10H7z";
@@ -369,7 +359,7 @@ export function attachPlayer({ url, row, btn, icon, wave, label = "take" }) {
     }
     paint(); // pause lands where the clip stopped, stop resets to 0
   };
-  const start = handoff => play(url, sync, handoff);
+  const start = source => play(url, sync, source);
   btn.addEventListener("click", () => start());
   sync("stop"); // initial state: triangle, Play label, no highlight, progress 0
   return { play: start };

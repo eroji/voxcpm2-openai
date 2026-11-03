@@ -67,6 +67,7 @@
         <div class="ctl vs-grid-params">
           <div class="vs-field"><label for="cfg">Guidance (CFG)</label><output class="vs-value" for="cfg" id="cfg-out">2.0</output><input id="cfg" type="range" min="1" max="4" step="0.1" value="2"></div>
           <div class="vs-field"><label for="steps">Diffusion steps</label><output class="vs-value" for="steps" id="steps-out">10</output><input id="steps" type="range" min="4" max="30" step="1" value="10"></div>
+          <div class="vs-field"><label for="speed">Speed</label><output class="vs-value" for="speed" id="speed-out">1.00×</output><input id="speed" type="range" min="0.85" max="1.15" step="0.05" value="1" aria-describedby="speed-zone"><div class="vs-zone" aria-hidden="true"><span class="warn"></span><span class="ok"></span><span class="warn"></span></div><span class="vs-zone-label" id="speed-zone">Natural</span></div>
           <div class="vs-field"><label for="fmt">Format<span class="hint" id="fmt-hint">Streaming uses PCM at 48 kHz</span></label><select class="vs-select" id="fmt"><option value="wav">WAV · 48 kHz</option><option value="pcm">PCM stream</option><option value="mp3">MP3</option><option value="opus">Opus</option></select></div>
         </div>
       </div>
@@ -119,7 +120,7 @@
     <div class="vs-table-wrap">
       <table class="vs-table">
         <colgroup><col class="c-name"><col class="c-lang"><col class="c-src"><col class="c-ref"><col><col class="c-act"></colgroup>
-        <thead><tr><th>Name</th><th>Language</th><th>Source</th><th>Reference</th><th>Transcript</th><th><span class="sr">Actions</span></th></tr></thead>
+        <thead><tr><th><button class="vs-sort" data-sort="name">Name</button></th><th aria-sort="ascending"><button class="vs-sort" data-sort="language">Language</button></th><th><button class="vs-sort" data-sort="source">Source</button></th><th><button class="vs-sort" data-sort="ref">Reference</button></th><th><button class="vs-sort" data-sort="tx">Transcript</button></th><th><span class="sr">Actions</span></th></tr></thead>
         <tbody id="voice-rows"></tbody>
       </table>
     </div>

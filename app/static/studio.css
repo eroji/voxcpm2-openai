@@ -66,8 +66,17 @@ code, pre { font-family: var(--vs-mono); }
 .vs-field > label { font-size: var(--vs-fs-label); color: var(--vs-muted); }
 .vs-field > label .hint { display: block; font-weight: 400; }
 .vs-value { font-size: var(--vs-fs-value); font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
-.vs-grid-params { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--vs-s7); }
+.vs-grid-params { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: var(--vs-s7); }
 input[type="range"] { accent-color: var(--vs-fg); }
+/* Speed zones under the slider: 0.90–1.10× natural (green), the ends may sound processed
+ * (yellow). The inline margin lines the segments up with the thumb's travel. */
+.vs-zone { display: flex; height: 3px; margin: 0 8px; }
+.vs-zone .ok { flex: 4; background: var(--vs-zone-ok); }
+.vs-zone .warn { flex: 1; background: var(--vs-zone-warn); }
+.vs-zone-label { font-size: var(--vs-fs-label); color: var(--vs-zone-ok); }
+.vs-zone-label.is-warn { color: var(--vs-zone-warn); }
+.vs-zone-label.is-off { color: var(--vs-muted); }
+input:disabled ~ .vs-zone { opacity: .45; }
 input[type="checkbox"] { width: 14px; height: 14px; margin: 0; accent-color: var(--vs-fg); }
 
 /* Buttons */
@@ -146,11 +155,19 @@ a.btn-link { color: inherit; text-decoration: none; } /* Download reads as a lin
 }
 .vs-table td.act { text-align: right; white-space: nowrap; }
 .vs-table td.act .btn-link { margin-left: var(--vs-s6); font-size: var(--vs-fs-small); }
-.vs-table td.act.confirming { white-space: normal; font-size: var(--vs-fs-small); } /* inline delete prompt wraps inside the fixed column */
+/* Sortable headers: plain text buttons; the active column shows its direction */
+.vs-sort { padding: 0; background: none; border: none; color: inherit; font-size: inherit; display: inline-flex; align-items: center; gap: var(--vs-s1); }
+.vs-table th[aria-sort] { color: var(--vs-fg); }
+.vs-table th[aria-sort="ascending"] .vs-sort::after { content: "↑"; }
+.vs-table th[aria-sort="descending"] .vs-sort::after { content: "↓"; }
+/* Language group header (default sort): one full-width row above each language's voices */
+.vs-table tr.vs-group td { height: auto; padding: var(--vs-s6) 0 var(--vs-s2); border-bottom: var(--vs-rule-row); font-size: var(--vs-fs-label); }
+.vs-table tr.vs-group:first-child td { padding-top: var(--vs-s4); }
+.vs-table tr.vs-group .meta { margin-left: var(--vs-s2); }
 /* Inline voice editor: the first line keeps the normal row's geometry (4px padding + a 28px
  * line), so Name, Language, Source, Reference and the links never move; only the transcript
  * cell grows downward ("slides down", voices.js animates it open). */
-.vs-edit td { height: auto; vertical-align: top; padding-top: calc(var(--vs-s1) - 1px); padding-bottom: var(--vs-s1); line-height: 28px; }
+.vs-edit td, .vs-confirm td { height: auto; vertical-align: top; padding-top: calc(var(--vs-s1) - 1px); padding-bottom: var(--vs-s1); line-height: 28px; }
 .vs-edit td > .vs-input, .vs-edit td > .vs-edit-txcell { width: 100%; }
 .vs-edit td.act .btn-link { vertical-align: top; margin-top: calc((28px - var(--vs-h-link)) / 2 + 0.5px); }
 .vs-edit td > .vs-input { display: block; height: 28px; min-height: 0; padding: 0; line-height: 27px; }
@@ -165,6 +182,10 @@ a.btn-link { color: inherit; text-decoration: none; } /* Download reads as a lin
   padding-bottom: 0;
   line-height: normal;
 }
+/* delete confirm: the question sits on the actions' line, the rest slides down below it */
+.vs-confirm-box { display: flex; flex-direction: column; align-items: flex-end; overflow: hidden; white-space: normal; text-align: right; font-size: var(--vs-fs-small); }
+.vs-confirm-box .why { line-height: var(--vs-lh); color: var(--vs-muted); }
+.vs-confirm-box .btns { padding-top: var(--vs-s2); line-height: 1; }
 /* editor focus: no accent outline box, the field's own rule turns solid instead */
 .vs-edit .vs-input:focus-visible, .vs-edit .vs-edit-tx:focus-visible { outline: none; border-bottom-color: var(--vs-fg); }
 .vs-edit .vs-select:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--vs-fg); }

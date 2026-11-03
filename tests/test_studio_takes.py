@@ -349,6 +349,19 @@ def test_take_audio_format_falls_back_to_stored_format(client: Any, library: Any
     assert client.get(legacy["audio_url"]).headers["content-type"].startswith("audio/wav")
 
 
+def test_take_speed_is_recorded_and_applied_on_playback(client: Any, library: Any) -> None:
+    # Speak's Speed slider: disk stays unstretched, the take plays back at the chosen tempo.
+    take = _speak(client, speed=0.9).json()
+    assert take["speed"] == 0.9
+    assert abs(take["duration_s"] - 0.6) < 0.05  # stored WAV is unstretched
+    samples, rate = audio.read_audio(client.get(take["audio_url"]).content)
+    assert abs(audio.duration_s(samples, rate) - 0.6 / 0.9) < 0.05
+    plain = _speak(client).json()
+    assert plain["speed"] == 1.0
+    samples, rate = audio.read_audio(client.get(plain["audio_url"]).content)
+    assert abs(audio.duration_s(samples, rate) - 0.6) < 0.05
+
+
 # --- M1-T18: empty library + warm-only routing (SPEC §4/§8) -------------------------------
 
 

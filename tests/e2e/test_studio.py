@@ -119,12 +119,12 @@ def test_voices_screen(page, live_app, open_studio):
 
     page.click('#lang-filters [data-lang="ja"]')
     expect(rows).to_have_count(1)
-    expect(page.locator("#voice-rows tr")).to_have_attribute("data-key", "ashley-ja")
+    expect(page.locator("#voice-rows tr[data-key]")).to_have_attribute("data-key", "ashley-ja")
     page.click('#lang-filters [data-lang="all"]')
 
     page.fill("#voice-search", "ashley-ko")
     expect(rows).to_have_count(1)
-    expect(page.locator("#voice-rows tr")).to_have_attribute("data-key", "ashley-ko")
+    expect(page.locator("#voice-rows tr[data-key]")).to_have_attribute("data-key", "ashley-ko")
     page.fill("#voice-search", "")
     expect(rows).to_have_count(3)
 
@@ -661,9 +661,19 @@ def test_streamed_take_autoplay_drives_the_row_player(page, live_app, open_studi
     button = row.locator("button.btn-play")
     expect(row).to_have_class(re.compile("is-playing"), timeout=15000)
     expect(button).to_have_attribute("aria-label", "Pause take")
+    # the row drives the live stream itself (no source switch): its playhead moves past the
+    # 0.3 s start buffer, and pause freezes it there
+    page.wait_for_function(
+        "() => +document.querySelector('#takes-list .vs-take clipPath rect')"
+        ".getAttribute('width') > 0"
+    )
     button.click()
     expect(row).to_have_class(re.compile("is-paused"))
-    assert float(row.locator("svg.vs-wave clipPath rect").get_attribute("width")) > 0
+    rect = row.locator("svg.vs-wave clipPath rect")
+    width = float(rect.get_attribute("width"))
+    assert width > 0
+    page.wait_for_timeout(200)
+    assert float(rect.get_attribute("width")) == width
 
 
 def test_take_hover_highlights_the_row(page, live_app, open_studio):
@@ -856,3 +866,70 @@ def test_style_and_design_description_survive_a_reload(page, live_app, open_stud
     expect(page.locator("#speak-style")).to_have_value("warm, slow, smiling")
     open_studio(page, "design")
     expect(page.locator("#design-desc")).to_have_value(tagged)
+
+
+def test_speed_slider_zones_and_take_tempo(page, live_app, open_studio):
+    """Speed 0.85–1.15×: 0.90–1.10 natural (green), the ends yellow; off while streaming."""
+    open_studio(page)
+    speed, zone = page.locator("#speed"), page.locator("#speed-zone")
+    expect(speed).to_be_disabled()  # streaming is the default: speed is not applied
+    expect(zone).to_have_text("Not applied while streaming")
+    page.click("#stream-toggle")
+    expect(speed).to_be_enabled()
+    expect(page.locator("#speed-out")).to_have_text("1.00×")
+    expect(zone).to_have_text("Natural")
+    expect(zone).to_have_css("color", "rgb(52, 199, 89)")  # --vs-zone-ok
+    speed.fill("1.1")
+    expect(zone).to_have_text("Natural")
+    speed.fill("0.85")
+    expect(page.locator("#speed-out")).to_have_text("0.85×")
+    expect(zone).to_have_text("May sound processed")
+    expect(zone).to_have_css("color", "rgb(255, 204, 0)")  # --vs-zone-warn
+    sent = []
+    page.on("request", lambda r: sent.append(r.post_data_json) if "/api/speak" in r.url else None)
+    page.fill("#speak-text", "Speed check line.")
+    page.click("#generate")
+    expect(page.locator("#takes-list .vs-take").first).to_contain_text("0.85×", timeout=30000)
+    assert sent and sent[-1]["speed"] == 0.85
+
+
+def test_voices_grouped_by_language_and_sortable(page, live_app, open_studio):
+    open_studio(page, "voices")
+    groups = page.locator("#voice-rows tr.vs-group")
+    expect(groups).to_have_count(3)  # default: grouped by language, one header each
+    expect(groups.first).to_contain_text("English")
+    expect(page.locator("th:has(.vs-sort[data-sort='language'])")).to_have_attribute(
+        "aria-sort", "ascending"
+    )
+    keys = "els => els.map(e => e.dataset.key)"
+    rows = page.locator("#voice-rows tr[data-key]")
+    assert rows.evaluate_all(keys) == ["ashley-en", "ashley-ja", "ashley-ko"]
+    name = page.locator(".vs-sort[data-sort='name']")
+    name.click()
+    expect(groups).to_have_count(0)  # another column: a flat sorted list
+    name.click()  # same column again flips the direction
+    expect(page.locator("th:has(.vs-sort[data-sort='name'])")).to_have_attribute(
+        "aria-sort", "descending"
+    )
+    assert rows.evaluate_all(keys) == ["ashley-ko", "ashley-ja", "ashley-en"]
+    page.locator(".vs-sort[data-sort='language']").click()
+    expect(groups).to_have_count(3)
+
+
+def test_delete_confirm_slides_down_without_moving_the_row(page, live_app, open_studio):
+    open_studio(page, "voices")
+    row = page.locator('#voice-rows tr[data-key="ashley-ja"]')
+    centres = """tr => [...tr.children].slice(0, 5).map(td => {
+      const r = document.createRange();
+      r.selectNodeContents(document.createTreeWalker(td, NodeFilter.SHOW_TEXT).nextNode());
+      const b = r.getBoundingClientRect();
+      return b.top + b.height / 2;
+    })"""
+    before = row.evaluate(centres)
+    row.get_by_role("button", name="Delete").click()
+    expect(row.locator(".vs-confirm-box")).to_contain_text("This can't be undone from the UI.")
+    page.wait_for_timeout(300)  # slide-open animation
+    for was, now in zip(before, row.evaluate(centres), strict=True):
+        assert abs(was - now) <= 1
+    row.get_by_role("button", name="Cancel").click()
+    expect(row.get_by_role("button", name="Audition")).to_be_visible()

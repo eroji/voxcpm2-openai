@@ -9,6 +9,7 @@ import {
   loadLanguages,
   languageOptions,
   languageEntry,
+  compareVoices,
   play,
   showError,
   clearError,
@@ -22,6 +23,46 @@ const NAME_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/; // same rule the server validates 
 let query = "";
 let lang = "all";
 let busy = false; // one editor round trip at a time (save or transcribe)
+// Column sort. "language" (the default) groups rows under a header per language.
+let sortKey = "language";
+let sortDir = 1; // 1 ascending, -1 descending
+
+const SORT_VALUE = {
+  name: v => String(v.name).toLowerCase(),
+  language: v => String(v.language || "").toLowerCase(),
+  source: v => String(v.source || "").toLowerCase(),
+  ref: v => Number(v.ref_duration_s) || 0,
+  tx: v => String(v.ref_text || "").toLowerCase(),
+};
+
+/* Primary column in the chosen direction; ties fall back to language, then name, A–Z. */
+function sortVoices(list) {
+  const value = SORT_VALUE[sortKey];
+  return list.slice().sort((a, b) => {
+    const x = value(a);
+    const y = value(b);
+    const primary = typeof x === "number" ? x - y : x.localeCompare(y);
+    return sortDir * primary || compareVoices(a, b);
+  });
+}
+
+/* aria-sort on the active header; the arrow is drawn from it in CSS. */
+function syncSortHeaders() {
+  for (const button of document.querySelectorAll("#voices-list .vs-sort")) {
+    const th = button.closest("th");
+    if (button.dataset.sort !== sortKey) th.removeAttribute("aria-sort");
+    else th.setAttribute("aria-sort", sortDir > 0 ? "ascending" : "descending");
+  }
+}
+
+function groupRow(code, count) {
+  const tr = el("tr", "vs-group");
+  const td = el("td");
+  td.colSpan = 6;
+  td.append(el("b", null, formatLang(code) || "No language"), " ", el("span", "meta", String(count)));
+  tr.append(td);
+  return tr;
+}
 
 function el(tag, cls, text) {
   const node = document.createElement(tag);
@@ -127,7 +168,17 @@ function render() {
     tr.append(td);
     tbody.append(tr);
   } else {
-    for (const v of list) tbody.append(voiceRow(v));
+    syncSortHeaders();
+    let group = null;
+    const sorted = sortVoices(list);
+    for (const v of sorted) {
+      const code = SORT_VALUE.language(v);
+      if (sortKey === "language" && code !== group) {
+        group = code;
+        tbody.append(groupRow(code, sorted.filter(x => SORT_VALUE.language(x) === code).length));
+      }
+      tbody.append(voiceRow(v));
+    }
   }
 }
 
@@ -184,8 +235,8 @@ function openEditor(tr) {
   nameInput.focus();
 }
 
-/* "Slide down": the transcript cell opens from the one-line row height to its full height.
- * Only that cell grows; every other cell keeps the normal row's first line. */
+/* "Slide down": a cell's content (editor transcript, delete confirm) opens from the one-line
+ * row height to its full height. Only that cell grows; every other cell keeps its first line. */
 function slideOpen(node) {
   if (!node.animate || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
   node.animate([{ height: "28px" }, { height: `${node.scrollHeight}px` }], {
@@ -245,15 +296,23 @@ async function errorFrom(res) {
   return `HTTP ${res.status}`;
 }
 
-/* Inline delete confirm: replaces the actions cell, never uses confirm(). */
+/* Inline delete confirm, never confirm(): the question takes the actions' line and the
+ * rest slides down inside the actions cell, like the editor — no other cell moves. */
 function openDelete(tr) {
   const cell = tr.querySelector("td.act");
   if (!cell) return;
-  cell.textContent = "";
-  cell.classList.add("confirming");
-  cell.append(document.createTextNode(`Delete ${tr.dataset.name}? This can't be undone from the UI. `));
+  tr.classList.add("vs-confirm");
   const confirm = actionButton("Delete", "confirm");
-  cell.append(confirm, actionButton("Cancel", "cancel"));
+  const buttons = el("div", "btns");
+  buttons.append(confirm, actionButton("Cancel", "cancel"));
+  const box = el("div", "vs-confirm-box");
+  box.append(
+    el("div", "q", `Delete ${tr.dataset.name}? `),
+    el("div", "why", "This can't be undone from the UI."),
+    buttons,
+  );
+  cell.replaceChildren(box);
+  slideOpen(box);
   confirm.focus();
 }
 
@@ -311,6 +370,14 @@ registerScreen("voices", {
     // a narrower window rewraps an open transcript: keep it fully visible, never clipped
     addEventListener("resize", () => {
       for (const tx of document.querySelectorAll("#voice-rows .vs-edit-tx")) grow(tx);
+    });
+    document.querySelector("#voices-list thead").addEventListener("click", e => {
+      const button = e.target.closest(".vs-sort");
+      if (!button) return;
+      // same column flips the direction; a new column starts ascending
+      sortDir = button.dataset.sort === sortKey ? -sortDir : 1;
+      sortKey = button.dataset.sort;
+      render();
     });
     document.getElementById("lang-filters").addEventListener("click", e => {
       const button = e.target.closest("button[data-lang]");

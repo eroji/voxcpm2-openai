@@ -112,6 +112,9 @@ async def speak(request: Request, payload: SpeechRequest, save: bool = True) -> 
 
 def _take_extra(payload: SpeechRequest, sid: str | None) -> dict[str, Any]:
     extra: dict[str, Any] = {"format": payload.response_format}
+    if payload.speed != 1.0:
+        # disk stays unstretched (SPEC §5); playback applies the tempo, like it does the format
+        extra["speed"] = payload.speed
     if sid:
         extra["session"] = sid
     return extra
@@ -231,21 +234,26 @@ async def list_takes(request: Request, kind: str = "studio") -> dict[str, list[T
 async def take_audio(
     request: Request, take_id: str, format: str = "", sample_rate: int | None = None
 ) -> Response:
-    """Serve a take, transcoded on the fly to ``format`` (Q-024). Default: its stored format."""
+    """Serve a take, transcoded on the fly to ``format`` (Q-024). Default: its stored format.
+
+    A take saved with a ``speed`` plays back at that tempo; the WAV on disk stays unstretched.
+    """
     takes: Any = request.app.state.takes
     path = await asyncio.to_thread(takes.audio_path, take_id)  # 404 when the WAV is gone
-    fmt = format or str((await asyncio.to_thread(takes.get, take_id)).get("format") or "wav")
+    meta = await asyncio.to_thread(takes.get, take_id)
+    fmt = format or str(meta.get("format") or "wav")
+    speed = float(meta.get("speed") or 1.0)
     if fmt not in audio.MIME_TYPES:
         raise BadRequest(
             f"Unsupported format '{format}'. Valid formats: {', '.join(audio.MIME_TYPES)}.",
             param="format",
             code="invalid_format",
         )
-    if fmt == "wav" and sample_rate is None:
+    if fmt == "wav" and sample_rate is None and speed == 1.0:
         return FileResponse(path, media_type=audio.mime_for("wav"))
     samples, rate = await asyncio.to_thread(audio.read_audio_file, path)
     data = await asyncio.to_thread(
-        audio.transcode, samples, rate, fmt, target_rate=sample_rate, speed=1.0
+        audio.transcode, samples, rate, fmt, target_rate=sample_rate, speed=speed
     )
     return Response(data, media_type=audio.mime_for(fmt))
 

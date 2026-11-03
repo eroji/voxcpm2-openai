@@ -292,6 +292,13 @@ spikes remain host-run. CI has not run yet: the branch is local (47+ commits ahe
   (and re-buffers on underrun) instead of stuttering, and the stream→take handoff suspends the
   stream before the take plays (no overlap). Release v0.3.9.
 
+- **2026-11-03 —** Streamed auto-play no longer switches sources: the take row adopts the live
+  stream (pause/resume/playhead) — the mid-clip switch was the audible artifact. Speak gets a
+  Speed slider 0.85–1.15× (0.90–1.10 green, ends yellow; human decision, new `--vs-zone-ok` /
+  `--vs-zone-warn` tokens); takes record `speed` and play back stretched, disk stays unstretched.
+  Voices are ordered by language tag then name; the library groups by language by default with
+  sortable columns; delete confirm slides down without moving the row. Release v0.3.10.
+
 ## Next action
 
 1. `git push origin main` and watch the GitLab pipeline (`checks`, `javascript`, `test`, `e2e`,
