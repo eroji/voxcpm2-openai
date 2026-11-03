@@ -247,6 +247,9 @@ spikes remain host-run. CI has not run yet: the branch is local (47+ commits ahe
   Voices editor is full-width with auto-transcribe, Download matches Save as voice, and the clone
   button says “Transcribe with STT”.
 
+- **2026-11-03 —** Release v0.3.0: languages management, stream format/rate fix, design control
+  syntax, session-scoped takes, player/editor UX.
+
 ## Next action
 
 1. `git push origin main` and watch the GitLab pipeline (`checks`, `javascript`, `test`, `e2e`,
