@@ -19,9 +19,9 @@ Locally (or on any machine with a registry login):
 
 ```bash
 docker build -f deploy/Containerfile \
-  -t harbor.dotslash.io/dotslash/voxcpm2-openai:v0.3.1 \
+  -t harbor.dotslash.io/dotslash/voxcpm2-openai:v0.3.2 \
   -t harbor.dotslash.io/dotslash/voxcpm2-openai:latest .
-docker push harbor.dotslash.io/dotslash/voxcpm2-openai:v0.3.1
+docker push harbor.dotslash.io/dotslash/voxcpm2-openai:v0.3.2
 docker push harbor.dotslash.io/dotslash/voxcpm2-openai:latest
 ```
 
@@ -50,7 +50,7 @@ The host layout is `/opt/voxcpm2-openai/{compose.yaml,.env,data}`. The image tag
 manual equivalent:
 
 ```bash
-IMAGE=harbor.dotslash.io/dotslash/voxcpm2-openai:v0.3.1
+IMAGE=harbor.dotslash.io/dotslash/voxcpm2-openai:v0.3.2
 ssh jumpbox "sudo -n ssh vllm 'cat > /opt/voxcpm2-openai/compose.yaml'" < deploy/compose.yaml
 ssh jumpbox "sudo -n ssh vllm \"
   cd /opt/voxcpm2-openai
@@ -217,14 +217,14 @@ Keep `/opt/qwen3-tts` untouched for a week. Voices created on voxcpm2-openai liv
 
 ## 6. Deploy (CD)
 
-A `vX.Y.Z` tag pipeline builds the image, then the `deploy` job automatically ships it to `vllm`.
-The runner reaches the host through the jumpbox:
+A `vX.Y.Z` tag pipeline builds the image, then the `deploy` job ships it directly to `vllm`:
 
 ```
-runner --(JUMP_SSH_KEY)--> jimmy@jumpbox --(sudo -n)--> root@jumpbox --(existing key)--> root@vllm
+runner --(DEPLOY_SSH_KEY)--> root@vllm.dotslash.io
 ```
 
-The job copies `deploy/compose.yaml` to `/opt/voxcpm2-openai/compose.yaml`, writes
+The job logs the target into Harbor over stdin, copies `deploy/compose.yaml` to
+`/opt/voxcpm2-openai/compose.yaml`, writes
 `VOXCPM2_IMAGE=harbor.dotslash.io/dotslash/voxcpm2-openai:<tag>` into `.env` (preserving other
 keys), runs `podman-compose up -d --force-recreate --pull`, then waits up to 10 minutes for
 `http://127.0.0.1:8881/ready`.
@@ -233,14 +233,14 @@ Required **protected** CI variables (Settings → CI/CD → Variables):
 
 | Variable | Value |
 |---|---|
-| `JUMP_SSH_KEY` | base64 -w0 of the private key whose public half is in `jimmy@jumpbox:~/.ssh/authorized_keys` (fallback: `DEPLOY_SSH_KEY`) |
-| `HARBOR_USER` / `HARBOR_TOKEN` | Harbor push/pull credentials; the job logs `root@vllm` into `harbor.dotslash.io` over stdin |
-| `DEPLOY_HOST` | `vllm` (default in the job) |
+| `DEPLOY_SSH_KEY` | base64 -w0 of the private key whose public half is in `root@vllm:~/.ssh/authorized_keys` |
+| `HARBOR_USER` / `HARBOR_TOKEN` | Harbor credentials; the job logs `root@vllm` in over stdin |
+| `DEPLOY_HOST` | `vllm.dotslash.io` (default in the job) |
 | `DEPLOY_PATH` | `/opt/voxcpm2-openai` (default in the job) |
 
-Release: `git tag vX.Y.Z && git push origin vX.Y.Z`. The tag must be protected so protected
-variables are available. Rollback of a bad deploy is §5; redeploy a previous tag by writing its
-image into `.env` and re-running `podman-compose up -d --force-recreate`.
+Release: `git tag vX.Y.Z && git push origin vX.Y.Z`; the tag must be protected so protected
+variables are available. Rollback a bad deploy with §5, or write a previous tag's image into `.env`
+and re-run `podman-compose up -d --force-recreate`.
 
 ## 7. M0 spikes
 

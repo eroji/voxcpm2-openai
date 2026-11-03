@@ -282,10 +282,10 @@ def test_deploy_uses_jumpbox_and_podman():
     deploy = CI_FILE.read_text().split("\ndeploy:")[-1]
     assert r"$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/" in deploy
     assert "when: on_success" in deploy, "tag releases deploy automatically"
-    assert "JUMP_HOST: jumpbox.dotslash.io" in deploy
-    assert "JUMP_USER: jimmy" in deploy
-    assert "DEPLOY_HOST: vllm" in deploy
-    assert "sudo -n ssh" in deploy
+    assert "DEPLOY_HOST: vllm.dotslash.io" in deploy
+    assert "DEPLOY_USER: root" in deploy
+    assert "sudo" not in deploy
+    assert "jumpbox" not in deploy
     assert "podman login" in deploy and "--password-stdin" in deploy
     assert "podman-compose -f compose.yaml up -d --force-recreate" in deploy
     assert "VOXCPM2_IMAGE=%s" in deploy and ".env" in deploy
@@ -295,12 +295,11 @@ def test_deploy_uses_jumpbox_and_podman():
 
 def test_deploy_uses_base64_ssh_key_pattern():
     ci = CI_FILE.read_text()
-    assert "JUMP_SSH_KEY" in ci and "DEPLOY_SSH_KEY" in ci
-    assert "base64 -d" in ci, "jumpbox key is base64 -w0"
+    assert "DEPLOY_SSH_KEY" in ci
+    assert "base64 -d" in ci, "deploy key is base64 -w0"
     assert "BatchMode=yes" in ci
     assert "StrictHostKeyChecking=accept-new" in ci
-    assert "DEPLOY_HOST: vllm" in ci
-    assert "JUMP_HOST: jumpbox.dotslash.io" in ci
+    assert "DEPLOY_HOST: vllm.dotslash.io" in ci
     assert "DEPLOY_PATH: /opt/voxcpm2-openai" in ci
 
 

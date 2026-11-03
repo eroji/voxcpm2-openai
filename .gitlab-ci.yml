@@ -57,12 +57,8 @@ build:
       dotenv: build.env
 
 # ------------------------------------------------------------------ deploy
-# One automatic deploy per vX.Y.Z tag, after the image build. The runner reaches the
-# target through the jumpbox: runner -> jimmy@jumpbox -> sudo -> root@vllm. The jumpbox
-# already holds the root key used to reach vllm. The target runs rootful podman.
-#
-# Required CI variables: DEPLOY_SSH_KEY (base64 -w0 of the jumpbox key, masked),
-# HARBOR_USER, HARBOR_TOKEN. The image tag lives in /opt/voxcpm2-openai/.env.
+# One automatic deploy per vX.Y.Z tag, after the image build. The runner reaches vllm directly
+# with DEPLOY_SSH_KEY (rootful podman). The image tag lives in /opt/voxcpm2-openai/.env.
 deploy:
   stage: deploy
   image: alpine:3.20
@@ -72,9 +68,8 @@ deploy:
     name: vllm
     url: http://vllm.dotslash.io:8881
   variables:
-    JUMP_HOST: jumpbox.dotslash.io
-    JUMP_USER: jimmy
-    DEPLOY_HOST: vllm
+    DEPLOY_HOST: vllm.dotslash.io
+    DEPLOY_USER: root
     DEPLOY_PATH: /opt/voxcpm2-openai
     HEALTH_URL: http://127.0.0.1:8881/ready
   rules:
@@ -84,32 +79,27 @@ deploy:
   before_script:
     - apk add --no-cache openssh-client
     - |
-      # JUMP_SSH_KEY (base64 of the key authorized for jimmy@jumpbox) is preferred;
-      # DEPLOY_SSH_KEY is accepted as a fallback for environments that reuse the release key.
-      KEY="${JUMP_SSH_KEY:-${DEPLOY_SSH_KEY:-}}"
-      if [ -z "$KEY" ]; then
-        echo "JUMP_SSH_KEY (or DEPLOY_SSH_KEY) must be set: base64 -w0 of the jumpbox key."
+      if [ -z "${DEPLOY_SSH_KEY:-}" ]; then
+        echo "DEPLOY_SSH_KEY must be set: base64 -w0 of the key authorized on vllm."
         exit 1
       fi
       mkdir -p ~/.ssh
-      printf '%s' "$KEY" | tr -dc 'A-Za-z0-9+/=' | base64 -d > ~/.ssh/id_ed25519
+      printf '%s' "$DEPLOY_SSH_KEY" | tr -dc 'A-Za-z0-9+/=' | base64 -d > ~/.ssh/id_ed25519
       chmod 600 ~/.ssh/id_ed25519
   script:
     - IMAGE="$HARBOR_IMAGE:$CI_COMMIT_TAG"
     - printf '%s' "$HARBOR_TOKEN" > /tmp/harbor_token && chmod 600 /tmp/harbor_token
     - |
       ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
-        "$JUMP_USER@$JUMP_HOST" \
-        "sudo -n ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new $DEPLOY_HOST \
-         'podman login harbor.dotslash.io -u $HARBOR_USER --password-stdin'" < /tmp/harbor_token
+        "$DEPLOY_USER@$DEPLOY_HOST" \
+        "podman login harbor.dotslash.io -u $HARBOR_USER --password-stdin" < /tmp/harbor_token
     - |
       ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
-        "$JUMP_USER@$JUMP_HOST" \
-        "sudo -n ssh -o BatchMode=yes $DEPLOY_HOST 'cat > $DEPLOY_PATH/compose.yaml'" < deploy/compose.yaml
+        "$DEPLOY_USER@$DEPLOY_HOST" \
+        "mkdir -p $DEPLOY_PATH && cat > $DEPLOY_PATH/compose.yaml" < deploy/compose.yaml
     - |
       ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
-        "$JUMP_USER@$JUMP_HOST" \
-        "sudo -n ssh -o BatchMode=yes $DEPLOY_HOST 'bash -s -- \"$IMAGE\" \"$HEALTH_URL\"'" <<'REMOTE'
+        "$DEPLOY_USER@$DEPLOY_HOST" 'bash -s -- "$IMAGE" "$HEALTH_URL"' <<'REMOTE'
       set -euo pipefail
       IMAGE="$1"
       HEALTH="$2"
