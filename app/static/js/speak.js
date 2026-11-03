@@ -10,8 +10,7 @@ import {
   registerScreen,
   selectVoice,
   renderWave,
-  setWaveProgress,
-  play,
+  attachPlayer,
   stopAudio,
   showError,
   clearError,
@@ -112,7 +111,7 @@ function takeStats(t) {
 
 function renderTakes() {
   stopAudio(); // rows are replaced: a detached row must not keep playing unseen
-  firstUi = null;
+  firstPlayer = null;
   const list = $("takes-list");
   list.textContent = ""; // empty takes: no fake rows
   takes.forEach((t, index) => list.append(takeRow(t, index)));
@@ -122,36 +121,7 @@ function renderTakes() {
 /* Q-024: play/download a take in the container it was requested with; disk stays WAV. */
 const takeUrl = take => `${take.audio_url}?format=${take.format || "wav"}`;
 
-const PLAY_D = "M2 1l9 5-9 5z";
-const PAUSE_D = "M2 1h3v10H2zM7 1h3v10H7z";
-let raf = 0; // one playhead animation at a time (only one take can play)
-let firstUi = null; // newest row, so the auto-play after Generate animates too
-
-/* core.play() state → this row: pause icon, .is-playing, waveform progress. */
-function syncPlayer(ui, phase, el) {
-  const playing = phase === "play";
-  ui.row.classList.toggle("is-playing", playing);
-  ui.icon.setAttribute("d", playing ? PAUSE_D : PLAY_D);
-  ui.btn.setAttribute("aria-label", playing ? "Pause take" : "Play take");
-  ui.btn.title = playing ? "Pause" : "Play";
-  const paint = () => setWaveProgress(ui.wave, el && el.duration ? el.currentTime / el.duration : 0);
-  if (playing) {
-    const tick = () => {
-      paint();
-      raf = requestAnimationFrame(tick);
-    };
-    cancelAnimationFrame(raf);
-    tick(); // smooth playhead; "time" below covers a tab where rAF is throttled
-  } else if (phase === "stop") {
-    cancelAnimationFrame(raf);
-    raf = 0;
-    setWaveProgress(ui.wave, 0);
-  } else if (phase === "pause") {
-    cancelAnimationFrame(raf);
-    raf = 0;
-    paint(); // the playhead stays where the clip stopped
-  } else paint(); // "time"
-}
+let firstPlayer = null; // newest row, so the auto-play after Generate uses the shared player
 
 function takeRow(take, index) {
   const row = document.createElement("article");
@@ -179,15 +149,12 @@ function takeRow(take, index) {
   player.className = "player";
   const playBtn = document.createElement("button");
   playBtn.className = "btn-play";
-  playBtn.setAttribute("aria-label", "Play take");
-  playBtn.title = "Play";
   const icon = document.createElementNS(SVG_NS, "svg");
   icon.setAttribute("width", "8");
   icon.setAttribute("height", "8");
   icon.setAttribute("viewBox", "0 0 12 12");
   icon.setAttribute("aria-hidden", "true");
   const tri = document.createElementNS(SVG_NS, "path");
-  tri.setAttribute("d", PLAY_D);
   tri.setAttribute("fill", "currentColor");
   icon.append(tri);
   playBtn.append(icon);
@@ -214,9 +181,15 @@ function takeRow(take, index) {
   accent.setAttribute("clip-path", `url(#${clipId})`);
   wave.append(defs, base, accent);
   if (index === 0) wave.classList.add("is-current");
-  const ui = { row, btn: playBtn, icon: tri, wave };
-  if (index === 0) firstUi = ui;
-  playBtn.addEventListener("click", () => play(takeUrl(take), (phase, el) => syncPlayer(ui, phase, el)));
+  const rowPlayer = attachPlayer({
+    url: takeUrl(take),
+    row,
+    btn: playBtn,
+    icon: tri,
+    wave,
+    label: "take",
+  });
+  if (index === 0) firstPlayer = rowPlayer;
   api
     .get(take.wave_url)
     .then(w => renderWave(wave, w.amps, index === 0))
@@ -309,7 +282,7 @@ async function playWhole(res) {
   const take = await res.json(); // contract §2: non-stream /api/speak → TakeInfo (Q-024)
   takes.unshift(take);
   renderTakes();
-  play(takeUrl(take), (phase, el) => firstUi && syncPlayer(firstUi, phase, el));
+  if (firstPlayer) firstPlayer.play(); // auto-play the new take through the shared player
 }
 
 /* Streams are PCM at 48 kHz, so Format only applies when streaming is off (Q-024). */

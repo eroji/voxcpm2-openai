@@ -146,6 +146,7 @@ def test_core_exports():
         "renderWave",
         "play",
         "stopAudio",
+        "attachPlayer",
         "showError",
         "clearError",
         "formatLang",
@@ -395,7 +396,7 @@ def test_take_playback_appends_format():
     speak = js("speak.js")
     # play/download use the take's requested container; the waveform keeps wave_url
     assert "${take.audio_url}?format=${take.format" in speak
-    assert "play(takeUrl(take)" in speak
+    assert "url: takeUrl(take)," in speak
     assert "dl.href = takeUrl(take)" in speak
     assert ".get(take.wave_url)" in speak
 
@@ -686,37 +687,75 @@ def test_clone_transcribe_button_copy():
 
 
 def test_take_player_toggles_play_pause():
-    speak = js("speak.js")
-    assert '"M2 1h3v10H2zM7 1h3v10H7z"' in speak  # the pause icon
-    assert '"M2 1l9 5-9 5z"' in speak  # the play triangle
-    assert 'setAttribute("aria-label", playing ? "Pause take" : "Play take")' in speak
-    assert 'classList.toggle("is-playing"' in speak
+    core = CORE
+    assert "export function attachPlayer(" in core
+    assert '"M2 1h3v10H2zM7 1h3v10H7z"' in core  # the pause icon
+    assert '"M2 1l9 5-9 5z"' in core  # the play triangle
+    assert 'btn.setAttribute("aria-label", `${playing ? "Pause" : "Play"} ${label}`)' in core
+    assert 'row.classList.toggle("is-playing", playing)' in core
+    assert 'if (phase !== "time")' in core  # timeupdate moves the playhead only, never the state
+    # core owns the rAF playhead; a screen must not keep its own
+    assert "requestAnimationFrame" in core
+    assert "requestAnimationFrame" not in js("speak.js")
     # core owns the single Audio element and resets the row on ended/error
     assert 'addEventListener("ended", stopAudio)' in CORE
     assert 'addEventListener("error", stopAudio)' in CORE
+    # Speak uses the shared binding for its takes and auto-plays the new row through it
+    speak = js("speak.js")
+    assert "attachPlayer(" in speak
+    assert "firstPlayer.play()" in speak
+    assert "syncPlayer" not in speak
+
+
+def test_candidate_player_uses_the_same_binding():
+    design = js("design.js")
+    assert "attachPlayer(" in design
+    assert "label: `candidate ${c.index}`" in design
+    assert "clipPath" in design and 'setAttribute("clip-path"' in design
+    assert "play(playBtn.dataset.url)" not in design  # no stateless play() call left
+    assert "stopAudio()" in design  # replaced rows stop the old candidate
 
 
 def test_take_waveform_clips_the_accent_overlay_to_the_playhead():
     speak = js("speak.js")
-    for fragment in ["clipPath", 'setAttribute("clip-path"', "setWaveProgress"]:
+    for fragment in ["clipPath", 'setAttribute("clip-path"', "attachPlayer"]:
         assert fragment in speak, fragment
     assert 'addEventListener("timeupdate"' in CORE  # progress follows the playhead
     assert 'svg.querySelector("clipPath rect")' in CORE
     assert "300 * Math.min(1, Math.max(0, fraction))" in CORE
+    assert "setWaveProgress(wave, el && el.duration ? el.currentTime / el.duration : 0)" in CORE
 
 
 def test_take_row_hover_and_download_css():
     assert ".vs-take:hover, .vs-take.is-playing { background: var(--vs-code-bg); }" in CSS
     assert ".vs-take.is-playing { border-top-color: var(--vs-accent); }" in CSS
+    assert ".vs-cand.is-playing { background: var(--vs-code-bg); }" in CSS
+    assert ".vs-cand.is-playing .vs-wave path.accent { fill: var(--vs-accent); }" in CSS
     assert ".vs-wave path.accent { fill: var(--vs-accent); }" in CSS
     rule = re.search(r"\.btn-link \{([^}]*)\}", CSS).group(1)
     assert "color: inherit" in rule and "text-decoration: none" in rule
     assert "a.btn-link { color: inherit; text-decoration: none; }" in CSS
+    # <a> Download and <button> Save as voice share one box, so one baseline
+    shared = re.search(r"\.btn-link, a\.btn-link \{([^}]*)\}", CSS).group(1)
+    for decl in [
+        "display: inline-flex",
+        "align-items: center",
+        "line-height: 1",
+        "vertical-align: middle",
+    ]:
+        assert decl in shared, decl
+    links = re.search(r"\.vs-take \.links \{([^}]*)\}", CSS).group(1)
+    assert "align-items: center" in links
 
 
-def test_voice_editor_is_a_full_width_row_with_a_growing_transcript():
+def test_voice_editor_is_an_aligned_table_row():
     voices = js("voices.js")
-    assert "td.colSpan = 6" in voices
+    editor = re.search(r"function openEditor\(tr\) \{(?P<body>.*?)\n\}", voices, re.S).group("body")
+    assert "colSpan" not in editor  # a normal row: one cell per column
+    assert 'tr.classList.add("vs-edit")' in editor
+    appended = re.search(r"tr\.append\((?P<args>.*?)\n  \);", editor, re.S).group("args")
+    assert len([line for line in appended.splitlines() if line.strip()]) == 6  # one per column
+    assert "sourceCell(v)" in voices  # Source/Reference reuse the normal cells
     assert 'el("textarea", "vs-edit-tx")' in voices
     assert "tx.scrollHeight" in voices  # auto-grow hook
     assert 'actionButton("Auto-transcribe", "transcribe")' in voices
@@ -725,8 +764,11 @@ def test_voice_editor_is_a_full_width_row_with_a_growing_transcript():
     assert "/api/transcribe" in voices
     assert "/audio`" in voices  # the reference audio feeds the transcriber
     assert "let busy = false" in voices  # in-flight guard
-    for selector in [".vs-edit-grid", ".vs-edit-tx", ".vs-edit-acts"]:
+    assert "nameInput.focus()" in voices  # focus management
+    for selector in [".vs-edit td", ".vs-edit-tx", ".vs-edit-txcell"]:
         assert selector in CSS, selector
+    # the controls must not change the column widths
+    assert re.search(r"\.vs-edit td > \.vs-input[^{]*\{[^}]*min-width: 100%", CSS, re.S)
 
 
 def test_studio_session_id_scopes_takes():

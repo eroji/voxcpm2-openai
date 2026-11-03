@@ -59,9 +59,6 @@ function voiceRow(v) {
   const tr = document.createElement("tr");
   tr.dataset.key = v.key; // API path
   tr.dataset.name = v.name; // display only
-  const designed = String(v.source || "").toLowerCase() === "designed";
-  const srcTd = el("td");
-  srcTd.append(el("span", designed ? "src designed" : "src", designed ? "Designed" : "Uploaded"));
   const actTd = el("td", "act");
   actTd.append(
     actionButton("Audition", "audition"),
@@ -71,12 +68,27 @@ function voiceRow(v) {
   tr.append(
     el("td", "name", v.name),
     languageCell(v),
-    srcTd,
+    sourceCell(v),
     el("td", null, fmtDuration(v.ref_duration_s)),
-    el("td", "tx", v.ref_text || ""),
+    transcriptCell(v.ref_text),
     actTd,
   );
   return tr;
+}
+
+/* The transcript cell clamps to one line. The cap is on the content, never on the cell: a
+ * max-width on the <td> would let one long transcript move that row's columns. */
+function transcriptCell(text) {
+  const td = el("td", "tx");
+  td.append(el("span", null, text || ""));
+  return td;
+}
+
+function sourceCell(v) {
+  const designed = String(v.source || "").toLowerCase() === "designed";
+  const td = el("td");
+  td.append(el("span", designed ? "src designed" : "src", designed ? "Designed" : "Uploaded"));
+  return td;
 }
 
 /* Language filters: All first, then the enabled languages, default first (SPEC §5a). */
@@ -119,14 +131,14 @@ function render() {
   }
 }
 
-/* Full-width inline editor: one row, one <td colspan="6"> — name, language and an
- * auto-growing transcript with an Auto-transcribe button beside it. */
+/* Inline editor: a normal table row — one cell per column, so the header and every other
+ * row stay aligned. The transcript cell holds an auto-growing textarea with Auto-transcribe
+ * under it; the row grows with the text instead of scrolling. */
 function openEditor(tr) {
   const v = findVoice(tr.dataset.key);
   if (!v) return;
   tr.textContent = "";
-  const td = el("td", "vs-edit");
-  td.colSpan = 6;
+  tr.classList.add("vs-edit");
 
   const nameInput = el("input", "vs-input");
   nameInput.type = "text";
@@ -154,27 +166,28 @@ function openEditor(tr) {
   tx.setAttribute("aria-label", "Transcript");
   tx.dataset.field = "ref_text";
   tx.addEventListener("input", () => grow(tx));
-  const transcribe = actionButton("Auto-transcribe", "transcribe");
+  const txCell = el("div", "vs-edit-txcell");
+  txCell.append(tx, actionButton("Auto-transcribe", "transcribe"));
 
-  const grid = el("div", "vs-edit-grid");
-  grid.append(field("Name", nameInput), field("Language", langSelect), field("Transcript", tx, transcribe));
-  const acts = el("div", "vs-edit-acts");
-  acts.append(actionButton("Save", "save"), actionButton("Cancel", "cancel"));
-  td.append(grid, acts);
-  tr.append(td);
+  const actTd = el("td", "act");
+  actTd.append(actionButton("Save", "save"), actionButton("Cancel", "cancel"));
+  tr.append(
+    cell("name", nameInput),
+    cell(null, langSelect),
+    sourceCell(v),
+    el("td", null, fmtDuration(v.ref_duration_s)),
+    cell("tx", txCell),
+    actTd,
+  );
   grow(tx); // the stored transcript may already need more than one line
   nameInput.focus();
 }
 
-/* Labelled cell of the editor grid. */
-function field(label, control, extra) {
-  const box = el("div", "vs-edit-field");
-  box.append(el("label", null, label));
-  const ctl = el("div", "vs-edit-ctl");
-  ctl.append(control);
-  if (extra) ctl.append(extra);
-  box.append(ctl);
-  return box;
+/* Editor cell holding one control; the classes keep the column styling of the normal row. */
+function cell(cls, control) {
+  const td = el("td", cls);
+  td.append(control);
+  return td;
 }
 
 /* Auto-grow: never a scrollbar inside the transcript, the row expands instead. */

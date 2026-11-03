@@ -196,6 +196,8 @@ Wave 0 is the lead scaffold (contracts + tooling). A task is ready only when eve
 | M2-T21 | M2 | 20 | Session-scoped takes | `app/routers/studio_takes.py`, `tests/test_studio_takes.py` | M2-T12 | `pytest tests/test_studio_takes.py` |
 | M3-T17 | M3 | 19 | Player/editor/session/tab fixes | `app/static/js/core.js`, `speak.js`, `voices.js`, `clone.js`, `index.html`, `studio.css`, UI/e2e tests | M3-T14 | `pytest tests/e2e` |
 | M4-T3 | M4 | 19 | Voice design/style control syntax | `app/design.py`, `app/speech.py`, `tests/test_design.py` | M4-T1 | `pytest tests/test_design.py` |
+| M1-T21 | M1 | 22 | Raw-audio stream flag (`stream_format=audio`) | `app/engine.py`, `tests/test_engine.py` | M1-T20 | `pytest tests/test_engine.py` |
+| M3-T18 | M3 | 22 | Shared player, aligned editor, Download link | `app/static/js/core.js`, `speak.js`, `design.js`, `voices.js`, `studio.css`, UI/e2e tests | M3-T17 | `pytest tests/e2e` |
 | M1-T2 | M1 | 5 | `/v1` API (speech, models, voices) | `app/routers/v1.py`, `tests/test_v1.py`, `tests/test_streaming.py` | M1-T1 | `.venv/bin/python -m pytest tests/test_v1.py tests/test_streaming.py -q` |
 | M1-T4 | M1 | 4 | Startup/warm-up/readiness wiring | `app/warmup.py`, `app/main.py`, `tests/test_warmup.py` | M1-T1 | `.venv/bin/python -m pytest tests/test_warmup.py -q` |
 | M2-T2 | M2 | 2 | Clone + transcribe API | `app/routers/studio_clone.py`, `tests/test_studio_clone.py` | — | `.venv/bin/python -m pytest tests/test_studio_clone.py -q` |

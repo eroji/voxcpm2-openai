@@ -87,6 +87,7 @@ async def test_stream(fake_engine: Any) -> None:
     chunks = [chunk async for chunk in handle.chunks]
     await handle.aclose()  # idempotent after exhaustion
     assert len(chunks) >= 2
+    assert fake_engine.state["last"]["stream_format"] == "audio"
     pcm = b"".join(chunks)
     assert len(pcm) % 2 == 0
     assert b"RIFF" not in pcm  # the container the engine streamed is stripped (M1-T20)

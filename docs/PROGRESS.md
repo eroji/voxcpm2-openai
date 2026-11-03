@@ -263,6 +263,12 @@ spikes remain host-run. CI has not run yet: the branch is local (47+ commits ahe
 - **2026-11-03 —** Deploy job now mirrors notely: `deploy@vllm.dotslash.io` with `DEPLOY_SSH_KEY`,
   Harbor login, `.env` update, `sudo -n podman-compose` recreate; release v0.3.3.
 
+- **2026-11-03 —** Found the actual streaming bug: vLLM-Omni defaults `stream=true` to SSE
+  (`speech.audio.delta`), so the app relayed SSE text as PCM. `stream_format=audio` now forces raw
+  WAV; verified directly against the engine (first bytes `RIFF`). Player state was cleared by the
+  first `timeupdate`; `attachPlayer` now only changes state on play/pause/stop. Speak and Design
+  share it; Download/editor alignment fixed.
+
 ## Next action
 
 1. `git push origin main` and watch the GitLab pipeline (`checks`, `javascript`, `test`, `e2e`,

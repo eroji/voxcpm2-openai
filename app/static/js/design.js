@@ -8,7 +8,8 @@ import {
   loadLanguages,
   languageOptions,
   noPhrasesNote,
-  play,
+  attachPlayer,
+  stopAudio,
   renderWave,
   showError,
   clearError,
@@ -101,15 +102,12 @@ function buildCandidate(c) {
 
   const playBtn = document.createElement("button");
   playBtn.className = "btn-play lg";
-  playBtn.setAttribute("aria-label", `Play candidate ${c.index}`);
-  playBtn.dataset.url = c.audio_url;
   const icon = document.createElementNS(SVG_NS, "svg");
   icon.setAttribute("width", "10");
   icon.setAttribute("height", "10");
   icon.setAttribute("viewBox", "0 0 12 12");
   icon.setAttribute("aria-hidden", "true");
   const iconPath = document.createElementNS(SVG_NS, "path");
-  iconPath.setAttribute("d", "M2 1l9 5-9 5z");
   iconPath.setAttribute("fill", "currentColor");
   icon.append(iconPath);
   playBtn.append(icon);
@@ -119,7 +117,30 @@ function buildCandidate(c) {
   wave.setAttribute("viewBox", "0 0 300 24");
   wave.setAttribute("preserveAspectRatio", "none");
   wave.setAttribute("aria-hidden", "true");
-  wave.append(document.createElementNS(SVG_NS, "path"));
+  // grey base + accent overlay clipped to the playhead, exactly like a Speak take
+  const clipId = `cd-${c.id}`;
+  const defs = document.createElementNS(SVG_NS, "defs");
+  const clipPath = document.createElementNS(SVG_NS, "clipPath");
+  clipPath.setAttribute("id", clipId);
+  const clipRect = document.createElementNS(SVG_NS, "rect");
+  clipRect.setAttribute("width", "0");
+  clipRect.setAttribute("height", "24");
+  clipPath.append(clipRect);
+  defs.append(clipPath);
+  const base = document.createElementNS(SVG_NS, "path");
+  base.setAttribute("class", "base");
+  const accent = document.createElementNS(SVG_NS, "path");
+  accent.setAttribute("class", "accent");
+  accent.setAttribute("clip-path", `url(#${clipId})`);
+  wave.append(defs, base, accent);
+  attachPlayer({
+    url: c.audio_url,
+    row: art,
+    btn: playBtn,
+    icon: iconPath,
+    wave,
+    label: `candidate ${c.index}`,
+  });
 
   rowTop.append(playBtn, wave);
 
@@ -149,11 +170,6 @@ function buildCandidate(c) {
 }
 
 function onCandidatesClick(e) {
-  const playBtn = e.target.closest(".btn-play");
-  if (playBtn) {
-    play(playBtn.dataset.url);
-    return;
-  }
   const pick = e.target.closest(".pick");
   if (!pick) return;
   const chosen = pick.closest(".vs-cand");
@@ -195,6 +211,7 @@ async function generate() {
     });
     candidates = data.candidates || [];
     selectedCandidate = null;
+    stopAudio(); // the rows are replaced: an old candidate must not keep playing unseen
     $("candidates").replaceChildren(...candidates.map(buildCandidate));
     updateSaveState();
   } catch (err) {
@@ -219,6 +236,7 @@ async function save() {
     await loadVoices();
     candidates = [];
     selectedCandidate = null;
+    stopAudio();
     $("candidates").replaceChildren();
     $("design-name").value = "";
     btn.textContent = "Saved ✓";

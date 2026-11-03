@@ -450,6 +450,10 @@ class EngineClient:
             "response_format": "wav" if params.stream else params.fmt,
             "stream": params.stream,
         }
+        if params.stream:
+            # vLLM-Omni defaults stream=true to SSE (speech.audio.delta events). Raw audio
+            # bytes (the WAV we parse) require stream_format="audio".
+            body["stream_format"] = "audio"
         if params.ref_audio is not None:
             body["ref_audio"] = params.ref_audio
         if params.ref_text is not None:

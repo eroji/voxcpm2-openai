@@ -607,20 +607,30 @@ def test_unsupported_language_blocks_speak(fake_engine, tmp_path, page, open_stu
 # --- M3-T17: take player, waveform progress, voice editor, clone copy, session --------------
 
 
-def _new_take(page, live_app, open_studio) -> None:
-    """Stream-generate one take (the default) so the row appears without core auto-play."""
+def _new_take(page, open_studio) -> None:
+    """Non-stream generate: the take row appears and auto-plays once (the reported bug)."""
     open_studio(page)
+    page.click("#stream-toggle")  # off → Format applies and the new take auto-plays
     page.fill("#speak-text", "Take player check line.")
     page.click("#generate")
     expect(page.locator("#generate")).to_have_text("Generate", timeout=30000)
     expect(page.locator("#takes-list .vs-take")).to_have_count(1)
+    row = page.locator("#takes-list .vs-take")
+    # the auto-play must drive the shared player state, then wait the 0.6 s clip out so the
+    # next click means "play" and not "pause" (the reported bug)
+    expect(row).to_have_class(re.compile("is-playing"), timeout=5000)
+    gone = "() => !document.querySelector('#takes-list .is-playing')"
+    page.wait_for_function(gone, timeout=15000)
 
 
 def test_take_play_pause_and_waveform_progress(page, live_app, open_studio):
-    _new_take(page, live_app, open_studio)
+    _new_take(page, open_studio)
     row = page.locator("#takes-list .vs-take")
     button = row.locator("button.btn-play")
+    # the auto-play ended: the row is back to the idle state, progress reset
     expect(button).to_have_attribute("aria-label", "Play take")
+    expect(row).not_to_have_class(re.compile("is-playing"))
+    assert float(row.locator("svg.vs-wave clipPath rect").get_attribute("width")) == 0
     button.click()
     expect(row).to_have_class(re.compile("is-playing"))
     expect(button).to_have_attribute("aria-label", "Pause take")
@@ -631,13 +641,16 @@ def test_take_play_pause_and_waveform_progress(page, live_app, open_studio):
     button.click()
     expect(row).not_to_have_class(re.compile("is-playing"))
     expect(button).to_have_attribute("aria-label", "Play take")
-    # the accent overlay is clipped to the playhead the clip reached
-    width = row.locator("svg.vs-wave clipPath rect").get_attribute("width")
-    assert float(width) > 0
+    # the accent overlay is clipped to the playhead the clip reached, and stays there
+    rect = row.locator("svg.vs-wave clipPath rect")
+    width = float(rect.get_attribute("width"))
+    assert width > 0
+    page.wait_for_timeout(200)
+    assert float(rect.get_attribute("width")) == width
 
 
 def test_take_hover_highlights_the_row(page, live_app, open_studio):
-    _new_take(page, live_app, open_studio)
+    _new_take(page, open_studio)
     row = page.locator("#takes-list .vs-take")
     plain = row.evaluate("el => getComputedStyle(el).backgroundColor")
     row.hover()
@@ -646,40 +659,96 @@ def test_take_hover_highlights_the_row(page, live_app, open_studio):
 
 
 def test_download_link_is_styled_like_save_as_voice(page, live_app, open_studio):
-    _new_take(page, live_app, open_studio)
+    _new_take(page, open_studio)
     link = page.locator("#takes-list .vs-take a.btn-link")
     button = page.locator("#takes-list .vs-take button.btn-link")
     assert link.evaluate("el => getComputedStyle(el).color") == button.evaluate(
         "el => getComputedStyle(el).color"
     )
     assert link.evaluate("el => getComputedStyle(el).textDecorationLine") == "none"
+    # <a> and <button> share one box: same top and height, so one baseline
+    assert abs(link.bounding_box()["y"] - button.bounding_box()["y"]) < 1
+    assert abs(link.bounding_box()["height"] - button.bounding_box()["height"]) < 1
 
 
-def test_voice_editor_spans_the_row_and_grows(page, live_app, open_studio):
+def test_candidate_play_pause_and_waveform_progress(page, live_app, open_studio):
+    """M3-T18: Design candidates use the same player as Speak takes."""
+    open_studio(page, "design")
+    page.fill("#design-desc", "calm, professional, early 30s")
+    page.fill("#design-sample", "Good morning, here is the sample line.")
+    page.select_option("#design-n", "2")
+    page.click("#generate-candidates")
+    expect(page.locator("#candidates .vs-cand")).to_have_count(2)
+
+    first = page.locator("#candidates .vs-cand").first
+    button = first.locator("button.btn-play")
+    expect(button).to_have_attribute("aria-label", "Play candidate 1")
+    button.click()
+    expect(first).to_have_class(re.compile("is-playing"))
+    expect(button).to_have_attribute("aria-label", "Pause candidate 1")
+    expect(button).to_have_attribute("title", "Pause")
+    rect = first.locator("svg.vs-wave clipPath rect")
+    expect(first.locator("svg.vs-wave path.accent")).to_have_attribute(
+        "clip-path", re.compile(r"url\(#cd-\d+")
+    )
+    page.wait_for_timeout(150)
+    assert float(rect.get_attribute("width")) > 0
+    button.click()
+    expect(first).not_to_have_class(re.compile("is-playing"))
+    expect(button).to_have_attribute("aria-label", "Play candidate 1")
+    width = float(rect.get_attribute("width"))
+    page.wait_for_timeout(200)
+    assert float(rect.get_attribute("width")) == width
+    # the other candidate stops the one that was playing: one active player
+    page.locator("#candidates .vs-cand").nth(1).locator("button.btn-play").click()
+    expect(first).not_to_have_class(re.compile("is-playing"))
+    expect(page.locator("#candidates .vs-cand").nth(1)).to_have_class(re.compile("is-playing"))
+    # selecting is independent of the player
+    first.locator(".pick").click()
+    expect(first).to_have_class(re.compile("is-selected"))
+
+
+def test_voice_editor_is_an_aligned_table_row(page, live_app, open_studio):
     transcript = "Thanks for waiting. Everything checks out."
     open_studio(page, "voices")
     row = page.locator('#voice-rows tr[data-key="ashley-en"]')
+    other = page.locator('#voice-rows tr[data-key="ashley-ja"]')
+    xs = "tr => [...tr.children].map(td => Math.round(td.getBoundingClientRect().x))"
+
+    def aligned() -> None:
+        """Every row, edited or not, sits on the header's six-column grid."""
+        grid = page.locator(".vs-table thead tr").evaluate(xs)
+        assert len(grid) == 6
+        assert row.evaluate(xs) == grid
+        assert other.evaluate(xs) == grid
+
+    aligned()
     row.get_by_role("button", name="Edit").click()
-    cell = row.locator("td.vs-edit")
-    expect(cell).to_be_visible()
-    assert cell.evaluate("td => td.colSpan") == 6
-    wrap = page.locator("#voices-list .vs-table-wrap")
-    assert cell.evaluate("td => td.scrollWidth") <= wrap.evaluate("el => el.clientWidth") + 1
+    expect(row.locator('textarea[data-field="ref_text"]')).to_be_visible()
+    assert row.evaluate("tr => tr.children.length") == 6  # a normal row, never a colspan
+    aligned()
+    expect(row.locator("td.name input")).to_be_visible()
+    expect(row.locator('select[data-field="language"]')).to_be_visible()
+
     tx = row.locator('textarea[data-field="ref_text"]')
     one_line = tx.evaluate("el => el.clientHeight")
     expect(row.get_by_role("button", name="Auto-transcribe")).to_be_visible()
     tx.fill(" ".join(["Edited transcript"] * 20))
-    assert tx.evaluate("el => el.clientHeight") > one_line  # auto-grew
-    assert tx.evaluate("el => el.scrollHeight") <= tx.evaluate("el => el.clientHeight") + 1
+    assert tx.evaluate("el => el.clientHeight") > one_line  # auto-grew, never scrolled
+    assert tx.evaluate("el => el.scrollHeight <= el.clientHeight + 1")
+    assert tx.evaluate("el => el.scrollWidth <= el.clientWidth + 1")
+    aligned()
     row.get_by_role("button", name="Save").click()
     expect(row.locator("textarea")).to_have_count(0)  # collapsed back to a normal row
     expect(row.locator("td.tx")).to_have_text(re.compile("Edited transcript"))
     assert row.evaluate("tr => tr.getBoundingClientRect().height") < 60
+    aligned()
     # restore the seeded transcript: live_app is shared by the rest of the suite
     row.get_by_role("button", name="Edit").click()
     row.locator('textarea[data-field="ref_text"]').fill(transcript)
     row.get_by_role("button", name="Save").click()
     expect(row.locator("td.tx")).to_have_text(transcript)
+    aligned()
 
 
 def test_clone_transcribe_copy_is_transcribe_with_stt(page, live_app, open_studio):
@@ -689,7 +758,7 @@ def test_clone_transcribe_copy_is_transcribe_with_stt(page, live_app, open_studi
 
 def test_takes_are_scoped_to_the_page_session(page, live_app, open_studio):
     """M2-T21 parity: a new page load is a new session, so the Takes list starts empty."""
-    _new_take(page, live_app, open_studio)
+    _new_take(page, open_studio)
     page.reload()
     page.wait_for_function(
         "document.getElementById('engine-status')?.textContent?.startsWith('Ready')", timeout=10000

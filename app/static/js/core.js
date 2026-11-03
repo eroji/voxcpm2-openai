@@ -283,6 +283,44 @@ export function play(url, state) {
   audio.play().then(() => emit("play", audio)).catch(() => stopAudio());
 }
 
+/* Shared take/candidate player. A screen hands over its nodes and gets one click-to-toggle
+ * player: play/pause icon, `.is-playing` on the row and the waveform playhead. core still owns
+ * the single Audio element, so starting another row stops this one and `stop` resets it.
+ * Returns { play } so a screen can auto-play without duplicating the state machine. */
+const PLAY_D = "M2 1l9 5-9 5z";
+const PAUSE_D = "M2 1h3v10H2zM7 1h3v10H7z";
+let raf = 0; // one playhead animation at a time (only one clip can play)
+
+export function attachPlayer({ url, row, btn, icon, wave, label = "take" }) {
+  let el = null; // our Audio element while it plays, for the rAF playhead
+  const paint = () => setWaveProgress(wave, el && el.duration ? el.currentTime / el.duration : 0);
+  const sync = (phase, node) => {
+    el = phase === "stop" ? null : node || el;
+    if (phase !== "time") {
+      // timeupdate only moves the playhead: it must not look like the clip stopped (bug report)
+      const playing = phase === "play";
+      row.classList.toggle("is-playing", playing);
+      icon.setAttribute("d", playing ? PAUSE_D : PLAY_D);
+      btn.setAttribute("aria-label", `${playing ? "Pause" : "Play"} ${label}`);
+      btn.title = playing ? "Pause" : "Play";
+      cancelAnimationFrame(raf);
+      raf = 0;
+      if (playing) {
+        const tick = () => {
+          paint();
+          raf = requestAnimationFrame(tick);
+        };
+        tick(); // smooth playhead; "time" covers a tab where rAF is throttled
+      }
+    }
+    paint(); // pause lands where the clip stopped, stop resets to 0
+  };
+  const start = () => play(url, sync);
+  btn.addEventListener("click", start);
+  sync("stop"); // initial state: triangle, Play label, no highlight, progress 0
+  return { play: start };
+}
+
 export function showError(screen, message) {
   const el = document.getElementById(`${screen}-error`);
   if (!el) return;
