@@ -16,8 +16,17 @@ import pytest
 import soundfile as sf
 from playwright.sync_api import expect  # missing Playwright = collection error, never a skip
 
+from conftest import _serve, _settings
+
 RESULTS_DIR = Path(__file__).resolve().parents[2] / "test-results"
 SCREENS = ["speak", "voices", "clone", "design", "engine"]
+
+
+@pytest.fixture(scope="session")
+def live_app_empty(fake_engine, tmp_path_factory: pytest.TempPathFactory):
+    """Same app without seeded voices: the SPEC §8 empty-library states."""
+    data_dir = tmp_path_factory.mktemp("e2e-data-empty")
+    yield from _serve(_settings(data_dir, fake_engine))
 
 
 def test_shell_and_engine_status(page, live_app, open_studio):
@@ -131,6 +140,73 @@ def test_voices_screen(page, live_app, open_studio):
     )
     ja_row.get_by_role("button", name="Cancel").click()
     expect(ja_row.get_by_role("button", name="Delete")).to_be_visible()
+
+
+def test_speak_presets_follow_voice_language(page, live_app, open_studio):
+    """M3-T14: six chips, default Question, in the selected voice's language."""
+    open_studio(page)
+    expect(page.locator("#speak-presets .btn-tag")).to_have_count(6)
+    question = page.locator('#speak-presets [data-id="question"]')
+    expect(question).to_have_attribute("aria-pressed", "true")
+    expect(page.locator("#speak-lang-name")).to_have_text("English")
+    expect(page.locator("#speak-text")).to_have_value(re.compile("certificate"))
+
+    page.click('#voice-chips .vs-chip[data-key="ashley-ja"]')
+    expect(page.locator("#speak-lang-name")).to_have_text("Japanese")
+    expect(page.locator("#speak-text")).to_have_value(re.compile("[぀-ゟ゠-ヿ]"))
+    expect(question).to_have_attribute("aria-pressed", "true")
+
+    # switch the preset, then the voice: same preset id, new language's text
+    page.click('#speak-presets [data-id="greeting"]')
+    greeting_ja = "おはようございます。今日は会議が三つあり、最初の会議は九時半からです。"
+    expect(page.locator("#speak-text")).to_have_value(greeting_ja)
+    page.click('#voice-chips .vs-chip[data-key="ashley-en"]')
+    greeting = page.locator('#speak-presets [data-id="greeting"]')
+    expect(greeting).to_have_attribute("aria-pressed", "true")
+    expect(page.locator("#speak-text")).to_have_value(re.compile("^Good morning"))
+    expect(page.locator("#speak-text")).to_have_attribute("lang", "en")
+
+
+def test_design_presets_follow_language(page, live_app, open_studio):
+    """M3-T14: Design chips follow the language select; a selected preset swaps text."""
+    open_studio(page, "design")
+    expect(page.locator("#design-presets .btn-tag")).to_have_count(6)
+    page.click('#design-presets [data-id="question"]')
+    expect(page.locator("#design-sample")).to_have_value(re.compile("[぀-ゟ゠-ヿ]"))
+    page.select_option("#design-lang", "en")
+    expect(page.locator("#design-sample")).to_have_value(re.compile("certificate"))
+    question = page.locator('#design-presets [data-id="question"]')
+    expect(question).to_have_attribute("aria-pressed", "true")
+    expect(page.locator("#design-sample")).to_have_attribute("lang", "en")
+
+
+def test_speak_empty_library(page, live_app_empty):
+    """SPEC §8 empty library: notice instead of chips, Generate aria-disabled, no API call."""
+    page.goto(f"{live_app_empty}/")
+    expect(page.locator("#speak-novoice")).to_be_visible()
+    expect(page.locator("#voice-chips")).to_be_hidden()
+    expect(page.locator("#gen-hint")).to_be_visible()
+    expect(page.locator("#generate")).to_have_attribute("aria-disabled", "true")
+    expect(page.locator("#takes-empty")).to_be_visible()
+
+    spoken: list[str] = []
+    page.on("request", lambda r: spoken.append(r.url))
+    # aria-disabled buttons are not actionable for Playwright; the browser click must still fire
+    page.locator("#generate").dispatch_event("click")
+    expect(page.locator("#speak-novoice button").first).to_be_focused()
+    assert not any("/api/speak" in url for url in spoken)
+
+
+def test_voices_empty_library(page, live_app_empty):
+    """SPEC §8: one empty state, never both sets of buttons."""
+    page.goto(f"{live_app_empty}/#voices")
+    expect(page.locator("#voices-empty")).to_be_visible()
+    expect(page.locator("#voices-actions")).to_be_hidden()
+    expect(page.locator("#voices-list")).to_be_hidden()
+    expect(page.locator("#voices-count")).to_be_hidden()
+    assert page.locator("#screen-voices button:visible").count() == 2
+    page.click("#voices-empty [data-goto='clone']")
+    expect(page.locator("#screen-clone")).to_be_visible()
 
 
 def test_clone_gating(page, live_app, open_studio, tmp_path):

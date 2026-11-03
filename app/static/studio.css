@@ -61,10 +61,13 @@ input[type="checkbox"] { width: 14px; height: 14px; margin: 0; accent-color: var
 
 /* Buttons */
 .btn-primary { min-height: var(--vs-h-primary); padding: 0 var(--vs-s7); background: var(--vs-accent); color: var(--vs-on-accent); border: none; font-weight: 700; font-size: var(--vs-fs-body); }
+.btn-primary[aria-disabled="true"] { background: var(--vs-rule-faint); color: var(--vs-muted); cursor: not-allowed; }
 .btn-secondary { min-height: var(--vs-h-input); padding: 0 var(--vs-s7); background: var(--vs-bg); border: 1px solid var(--vs-fg); font-weight: 500; }
 .btn-inverse { min-height: var(--vs-h-input); padding: 0 var(--vs-s7); background: var(--vs-fg); color: var(--vs-bg); border: 1px solid var(--vs-fg); font-weight: 500; }
 .btn-link { min-height: var(--vs-h-link); padding: 0; background: none; border: none; border-bottom: 1px solid var(--vs-fg); font-size: var(--vs-fs-label); }
 .btn-tag { min-height: 24px; padding: 0 var(--vs-s3); background: var(--vs-bg); border: 1px solid var(--vs-rule); font-size: var(--vs-fs-small); }
+.btn-tag[aria-pressed="true"] { background: var(--vs-fg); color: var(--vs-bg); border-color: var(--vs-fg); font-weight: 700; }
+.vs-presets { display: flex; flex-wrap: wrap; gap: 6px; align-content: flex-start; }
 .btn-play { flex: none; width: var(--vs-play); height: var(--vs-play); padding: 0; border: 1px solid var(--vs-fg); background: var(--vs-bg); display: inline-flex; align-items: center; justify-content: center; }
 .btn-play.lg { width: 30px; height: 30px; }
 
@@ -111,6 +114,16 @@ input[type="checkbox"] { width: 14px; height: 14px; margin: 0; accent-color: var
 .src::before { content: ""; width: 8px; height: 8px; border: 1.5px solid var(--vs-fg); }
 .src.designed::before { background: var(--vs-fg); }
 .vs-empty { padding: var(--vs-s6) 0; border-top: var(--vs-rule-row); color: var(--vs-muted); font-size: var(--vs-fs-small); display: flex; flex-direction: column; gap: var(--vs-s5); align-items: flex-start; }
+/* Library empty state (SPEC §8): one block, its own buttons — the header actions are hidden. */
+#voices-empty { padding: 28px 0 var(--vs-s6); border-top: var(--vs-rule-section); color: var(--vs-fg); font-size: var(--vs-fs-body); max-width: 560px; align-items: stretch; }
+#voices-empty .t { margin: 0; font-size: 15px; font-weight: 700; letter-spacing: -0.01em; }
+#voices-empty p { margin: 0; color: var(--vs-fg-2); }
+/* Speak "no voices" notice + takes column empty line */
+.vs-novoice { display: flex; flex-direction: column; gap: var(--vs-s3); padding: 2px 0 4px; }
+.vs-novoice .t { display: inline-flex; align-items: center; gap: var(--vs-s3); font-weight: 700; }
+.vs-novoice .t::before { content: ""; width: 8px; height: 8px; background: var(--vs-accent); }
+.vs-novoice p { margin: 0; font-size: var(--vs-fs-small); color: var(--vs-fg-2); }
+#takes-empty { white-space: normal; margin: 0; padding: 12px 0; border-top: var(--vs-rule-row); }
 
 /* Clone */
 #clone-notes { white-space: normal; } /* .meta is nowrap; the hint must wrap at 390 px */

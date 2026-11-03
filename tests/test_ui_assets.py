@@ -4,6 +4,7 @@ Text-based on purpose: the browser behaviour is covered by the Playwright suite
 (tests/e2e). Here we only prove the shell matches docs/CONTRACTS.md §7.
 """
 
+import json
 import re
 import shutil
 import subprocess
@@ -418,17 +419,27 @@ def test_starting_asset_exists_and_matches_contract():
 
 
 def test_starting_asset_is_the_reference_copy_plus_documented_deltas():
-    """ui/starting.html is the source of truth; M3-T13 adds exactly three markup deltas."""
+    """ui/starting.html is the source of truth; M3-T13/T14 add exactly these markup deltas."""
     reference = (ROOT / "ui" / "starting.html").read_text(encoding="utf-8")
-    ours = STARTING.replace('href="/static/tokens.css"', 'href="tokens.css"')
+    ours = STARTING.replace('href="/static/tokens.css"', 'href="tokens.css"').replace(
+        'href="/static/icons/', 'href="icons/'
+    )
     our_markup, our_js = ours.split("<script>", 1)
     ref_markup, ref_js = reference.split("<script>", 1)
-    for delta in [
-        ' tabindex="0" role="region" aria-label="Engine log"',  # keyboard-scrollable log
-        '\n      <p class="lbl" id="startup-error" role="alert" hidden></p>',  # inline errors
+    for ours_text, ref_text in [
+        # keyboard-scrollable, labelled log region instead of the bare role="log"
+        (
+            ' id="log-box" tabindex="0" role="region" aria-label="Engine log" aria-live="polite"',
+            ' role="log" aria-live="polite"',
+        ),
+        # inline status line for the errors M3-T13 stopped swallowing
+        (
+            '\n      <p class="lbl" id="startup-error" role="alert" hidden></p>',
+            "",
+        ),
     ]:
-        assert delta in our_markup, delta
-        our_markup = our_markup.replace(delta, "", 1)
+        assert ours_text in our_markup, ours_text
+        our_markup = our_markup.replace(ours_text, ref_text, 1)
     assert our_markup == ref_markup
     # the script is the reference's demo + render; only the handlers above may differ
     tail = "/* Demo mode for previewing the asset without a backend. */"
@@ -448,7 +459,7 @@ def test_copy_log_works_over_plain_http():
 
 def test_log_pane_is_keyboard_scrollable():
     assert (
-        '<div class="log" id="log-box" tabindex="0" role="region" aria-label="Engine log">'
+        '<div class="log" id="log-box" tabindex="0" role="region" aria-label="Engine log"'
         in STARTING
     )
 
@@ -499,3 +510,75 @@ def test_engine_stats_labels_and_notes_match_the_reference():
         assert fragment in engine, fragment
     assert "VRAM in use" not in engine
     assert "Non-streamed WAV" not in engine
+
+
+# --- M3-T14: presets, empty-library states, icons, startup log table -----------------
+
+PRESETS = json.loads((ROOT / "app" / "static" / "presets.json").read_text(encoding="utf-8"))
+PRESET_IDS = ["greeting", "status", "numbers", "question", "long", "twister"]
+ICON_FILES = [
+    "favicon.ico",
+    "favicon.svg",
+    "favicon-16.png",
+    "favicon-32.png",
+    "apple-touch-icon.png",
+    "icon-192.png",
+    "icon-512.png",
+]
+
+
+def test_presets_asset_is_valid():
+    for lang in ["en", "ja", "ko", "zh"]:
+        items = PRESETS[lang]
+        assert [p["id"] for p in items] == PRESET_IDS, lang
+        assert all(p["label"] and p["text"] for p in items), lang
+
+
+def test_presets_and_icons_are_served(client):
+    assert client.get("/static/presets.json").json() == PRESETS
+    for icon in ICON_FILES:
+        assert client.get(f"/static/icons/{icon}").status_code == 200, icon
+
+
+def test_pages_link_the_icons():
+    for page_html in [HTML, STARTING]:
+        for href in [
+            "/static/icons/favicon.ico",
+            "/static/icons/favicon.svg",
+            "/static/icons/apple-touch-icon.png",
+        ]:
+            assert f'href="{href}"' in page_html, href
+    for icon in ICON_FILES:
+        assert (ROOT / "app" / "static" / "icons" / icon).is_file(), icon
+
+
+def test_empty_state_and_preset_ids_exist():
+    for el_id in [
+        "speak-novoice",
+        "gen-hint",
+        "takes-empty",
+        "speak-presets",
+        "speak-lang-name",
+        "voices-actions",
+        "voices-empty",
+        "voices-list",
+        "design-presets",
+    ]:
+        assert f'id="{el_id}"' in HTML, el_id
+    # the textarea declares a language and the JS swaps it with the preset
+    assert re.search(r'id="speak-text"[^>]*\blang="en"', HTML)
+    assert '$("speak-text").lang = presetLang' in js("speak.js")
+    # Voices header actions live only in the two mutually exclusive containers
+    assert HTML.count('data-goto="clone"') == 3  # voices-actions, voices-empty, speak-novoice
+
+
+def test_starting_log_uses_grid_rows_and_parser():
+    for fragment in [
+        "function parseLog(line)",
+        "VLLM_RE",
+        "APP_RE",
+        'class="log-row',
+        "grid-template-columns: 56px 44px 40px minmax(0, 1fr)",
+        "r.classList.toggle('open')",
+    ]:
+        assert fragment in STARTING, fragment

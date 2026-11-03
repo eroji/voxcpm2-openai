@@ -68,39 +68,20 @@ function voiceRow(v) {
   return tr;
 }
 
-function emptyRow() {
-  const td = el("td");
-  td.colSpan = 6;
-  const box = el(
-    "div",
-    "vs-empty",
-    "No voices yet. Clone one from a recording or design one from a description.",
-  );
-  for (const [label, target] of [
-    ["Clone from a recording", "clone"],
-    ["Design from a description", "design"],
-  ]) {
-    const b = el("button", "btn-secondary", label);
-    b.addEventListener("click", () => {
-      location.hash = target;
-    });
-    box.append(b);
-  }
-  td.append(box);
-  const tr = document.createElement("tr");
-  tr.append(td);
-  return tr;
-}
-
 function render() {
   const tbody = document.getElementById("voice-rows");
   tbody.textContent = "";
   const list = visibleVoices();
   // the header count is the library total (SPEC §8); filters only change the rows
   document.getElementById("voices-count").textContent = String(state.voices.length);
-  if (!state.voices.length) {
-    tbody.append(emptyRow());
-  } else if (!list.length) {
+  // empty library: one empty state, never both sets of buttons (SPEC §8)
+  const empty = !state.voices.length;
+  for (const id of ["voices-actions", "voices-list", "voices-count"]) {
+    document.getElementById(id).hidden = empty;
+  }
+  document.getElementById("voices-empty").hidden = !empty;
+  if (empty) return;
+  if (!list.length) {
     const td = el("td");
     td.colSpan = 6;
     td.append(el("div", "vs-empty", "No voices match the current search or filter."));

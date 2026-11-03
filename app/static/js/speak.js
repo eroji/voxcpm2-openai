@@ -9,6 +9,7 @@ import {
   play,
   showError,
   clearError,
+  formatLang,
   fmtDuration,
   fmtClock,
 } from "./core.js";
@@ -16,6 +17,51 @@ import {
 const $ = id => document.getElementById(id);
 const SVG_NS = "http://www.w3.org/2000/svg";
 let takes = [];
+
+/* Test-phrase presets (SPEC §8): six chips, default "question", in the selected voice's
+ * language; switching voice keeps the preset id and swaps the language's text. */
+let presets = null;
+let presetId = "question";
+let presetLang = null;
+
+function voiceLang() {
+  const lang = String(state.voices.find(v => v.key === state.selectedVoice)?.language || "en").toLowerCase();
+  return presets && presets[lang] ? lang : "en";
+}
+
+function syncPresets() {
+  if (!presets) return;
+  const lang = voiceLang();
+  if (lang === presetLang) return;
+  presetLang = lang;
+  $("speak-lang-name").textContent = formatLang(lang);
+  const items = presets[lang] || presets.en;
+  const box = $("speak-presets");
+  box.replaceChildren();
+  for (const p of items) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "btn-tag";
+    chip.dataset.id = p.id;
+    chip.textContent = p.label;
+    chip.setAttribute("aria-pressed", String(p.id === presetId));
+    box.append(chip);
+  }
+  const sel = items.find(p => p.id === presetId);
+  if (sel) {
+    $("speak-text").value = sel.text;
+    $("speak-text").lang = lang;
+  }
+}
+
+/* Empty-library state (SPEC §8): notice instead of chips, Generate aria-disabled, hint shown. */
+function applyEmpty() {
+  const empty = !state.voices.length;
+  $("voice-chips").hidden = empty;
+  $("speak-novoice").hidden = !empty;
+  $("gen-hint").hidden = !empty;
+  $("generate").setAttribute("aria-disabled", String(empty));
+}
 
 function renderChips() {
   const box = $("voice-chips");
@@ -31,6 +77,7 @@ function renderChips() {
     chip.append(v.name, " ", lang);
     box.append(chip);
   }
+  applyEmpty();
 }
 
 async function loadTakes() {
@@ -50,6 +97,7 @@ function renderTakes() {
   const list = $("takes-list");
   list.textContent = ""; // empty takes: no fake rows
   takes.forEach((t, index) => list.append(takeRow(t, index)));
+  $("takes-empty").hidden = takes.length > 0;
 }
 
 /* Q-024: play/download a take in the container it was requested with; disk stays WAV. */
@@ -204,6 +252,11 @@ function syncFmt() {
 async function generate() {
   const button = $("generate");
   if (button.disabled) return;
+  if (button.getAttribute("aria-disabled") === "true") {
+    // empty library: never call the API, move focus to the notice's first button (SPEC §8)
+    $("speak-novoice").querySelector("button").focus();
+    return;
+  }
   clearError("speak");
   button.disabled = true;
   button.textContent = "Generating…";
@@ -261,7 +314,29 @@ async function init() {
     if (!chip) return;
     for (const c of $("voice-chips").children) c.setAttribute("aria-pressed", String(c === chip));
     selectVoice(chip.dataset.key);
+    syncPresets(); // keep the preset id, swap in the new voice's language
   });
+
+  $("speak-presets").addEventListener("click", e => {
+    const chip = e.target.closest(".btn-tag");
+    if (!chip) return;
+    for (const c of $("speak-presets").children) c.setAttribute("aria-pressed", String(c === chip));
+    presetId = chip.dataset.id;
+    const p = (presets[presetLang] || presets.en).find(x => x.id === presetId);
+    if (p) {
+      $("speak-text").value = p.text;
+      $("speak-text").lang = presetLang;
+    }
+  });
+  api
+    .get("/static/presets.json")
+    .then(data => {
+      presets = data;
+      syncPresets();
+    })
+    .catch(() => {
+      /* presets are a convenience: the text box stays free-form without them */
+    });
 
   $("generate").addEventListener("click", generate);
   $("speak-text").addEventListener("keydown", e => {
@@ -293,6 +368,7 @@ async function show() {
     state.selectedVoice = state.voices[0] ? state.voices[0].key : null;
   }
   renderChips();
+  syncPresets(); // a voice/language change while away must re-label the presets
   await loadTakes();
 }
 

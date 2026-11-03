@@ -18,7 +18,32 @@ const SVG_NS = "http://www.w3.org/2000/svg";
 let candidates = [];
 let selectedCandidate = null;
 
+/* Sample-line presets (SPEC §8): follow the Design language; no preset selected initially. */
+let presets = null;
+let designPresetId = null;
+
 const $ = id => document.getElementById(id);
+
+function renderDesignPresets(swapText) {
+  $("design-sample").lang = $("design-lang").value;
+  if (!presets) return;
+  const lang = presets[$("design-lang").value] ? $("design-lang").value : "en";
+  const box = $("design-presets");
+  box.replaceChildren();
+  for (const p of presets[lang]) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "btn-tag";
+    chip.dataset.id = p.id;
+    chip.textContent = p.label;
+    chip.setAttribute("aria-pressed", String(p.id === designPresetId));
+    box.append(chip);
+  }
+  if (swapText && designPresetId) {
+    const p = presets[lang].find(x => x.id === designPresetId);
+    if (p) $("design-sample").value = p.text;
+  }
+}
 
 function appendTag(tag) {
   const desc = $("design-desc");
@@ -179,9 +204,28 @@ registerScreen("design", {
     $("save-designed").addEventListener("click", save);
     $("design-name").addEventListener("input", updateSaveState);
     $("candidates").addEventListener("click", onCandidatesClick);
-    $("design-lang").addEventListener("change", () => {
-      $("design-sample").lang = $("design-lang").value; // sample text is Japanese until proven otherwise
+    $("design-lang").addEventListener("change", () => renderDesignPresets(true));
+    $("design-presets").addEventListener("click", e => {
+      const chip = e.target.closest(".btn-tag");
+      if (!chip) return;
+      for (const c of $("design-presets").children) c.setAttribute("aria-pressed", String(c === chip));
+      designPresetId = chip.dataset.id;
+      const lang = presets[$("design-lang").value] ? $("design-lang").value : "en";
+      const p = (presets[lang] || []).find(x => x.id === designPresetId);
+      if (p) {
+        $("design-sample").value = p.text;
+        $("design-sample").lang = lang;
+      }
     });
+    api
+      .get("/static/presets.json")
+      .then(data => {
+        presets = data;
+        renderDesignPresets(false); // no preset selected: the reference sample text stays
+      })
+      .catch(() => {
+        /* presets are a convenience: the sample box stays free-form without them */
+      });
     updateSaveState();
   },
   async show() {

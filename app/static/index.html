@@ -6,6 +6,9 @@
 <title>Voice Studio</title>
 <link rel="stylesheet" href="/static/tokens.css">
 <link rel="stylesheet" href="/static/studio.css">
+<link rel="icon" href="/static/icons/favicon.ico" sizes="any">
+<link rel="icon" type="image/svg+xml" href="/static/icons/favicon.svg">
+<link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
 </head>
 <body>
 
@@ -39,10 +42,20 @@
       <div class="vs-row">
         <span class="lbl" id="voice-lbl">Voice</span>
         <div class="ctl vs-chips" role="group" aria-labelledby="voice-lbl" id="voice-chips"></div>
+        <!-- Shown instead of the chips when the library is empty -->
+        <div class="ctl vs-novoice" id="speak-novoice" role="status" hidden>
+          <span class="t">No voices in the library yet</span>
+          <p>Synthesis needs a voice. Clone one from a recording or design one from a description, then come back here.</p>
+          <span style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn-secondary" data-goto="clone" style="min-height:28px">Clone from audio</button><button class="btn-inverse" data-goto="design" style="min-height:28px;font-weight:700">Design a voice</button></span>
+        </div>
       </div>
       <div class="vs-row">
         <label class="lbl" for="speak-text">Text</label>
-        <div class="ctl"><textarea class="vs-text" id="speak-text" rows="4"></textarea></div>
+        <div class="ctl"><textarea class="vs-text" id="speak-text" rows="4" lang="en"></textarea></div>
+      </div>
+      <div class="vs-row">
+        <span class="lbl" id="speak-presets-lbl">Test phrases<span class="hint"><span id="speak-lang-name">English</span>, follows the voice</span></span>
+        <div class="ctl vs-presets" role="group" aria-labelledby="speak-presets-lbl" id="speak-presets"></div>
       </div>
       <div class="vs-row">
         <label class="lbl" for="speak-style">Style control<span class="hint">Optional</span></label>
@@ -59,12 +72,16 @@
       <p class="vs-error" id="speak-error" role="alert" hidden></p>
       <div class="vs-actions">
         <button class="vs-toggle" id="stream-toggle" aria-pressed="true"><span class="box" aria-hidden="true"></span>Stream audio</button>
-        <button class="btn-primary" id="generate">Generate</button>
+        <span style="display:inline-flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <span class="meta" id="gen-hint" hidden>Add a voice to enable Generate</span>
+          <button class="btn-primary" id="generate" aria-describedby="gen-hint">Generate</button>
+        </span>
       </div>
     </section>
 
     <section class="vs-col-side" aria-labelledby="takes-h">
       <div class="vs-head"><h2 class="vs-h2" id="takes-h">Takes</h2><span class="meta">This session</span></div>
+      <p class="meta" id="takes-empty" hidden>No takes yet. Once you have a voice, everything you generate shows up here with playback, download and Save as voice.</p>
       <div id="takes-list"></div>
     </section>
   </div>
@@ -75,11 +92,21 @@
   <section aria-labelledby="voices-h">
     <div class="vs-head">
       <h2 class="vs-h2" id="voices-h">Library <span class="count" id="voices-count">0</span></h2>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <!-- Header actions show only when the library has voices; the empty state carries them otherwise. Never both. -->
+      <div style="display:flex;gap:8px;flex-wrap:wrap" id="voices-actions">
         <button class="btn-secondary" data-goto="clone">Clone from audio</button>
         <button class="btn-primary" data-goto="design">Design a voice</button>
       </div>
     </div>
+    <div class="vs-empty" id="voices-empty" hidden>
+      <p class="t">No voices yet</p>
+      <p>Add one from a recording of a real speaker, or describe a voice and let VoxCPM2 create it.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;padding-top:4px">
+        <button class="btn-secondary" data-goto="clone">Clone from audio</button>
+        <button class="btn-primary" data-goto="design">Design a voice</button>
+      </div>
+    </div>
+    <div id="voices-list">
     <div class="vs-toolbar">
       <label class="sr" for="voice-search">Search voices</label>
       <input class="vs-input" id="voice-search" type="search" placeholder="Search">
@@ -97,6 +124,7 @@
         <thead><tr><th>Name</th><th>Language</th><th>Source</th><th>Reference</th><th>Transcript</th><th><span class="sr">Actions</span></th></tr></thead>
         <tbody id="voice-rows"></tbody>
       </table>
+    </div>
     </div>
   </section>
 </div>
@@ -168,7 +196,10 @@
       </div>
       <div class="vs-row">
         <label class="lbl" for="design-sample">Sample line<span class="hint">Saved as the reference transcript</span></label>
-        <div class="ctl"><textarea class="vs-text" id="design-sample" rows="2" lang="ja" style="font-size:14px"></textarea></div>
+        <div class="ctl" style="display:flex;flex-direction:column;gap:10px">
+          <textarea class="vs-text" id="design-sample" rows="2" lang="ja" style="font-size:14px"></textarea>
+          <div class="vs-presets" role="group" aria-label="Sample line presets" id="design-presets"></div>
+        </div>
       </div>
       <p class="vs-error" id="design-error" role="alert" hidden></p>
       <div class="vs-actions" style="justify-content:flex-end"><button class="btn-primary" id="generate-candidates">Generate candidates</button></div>

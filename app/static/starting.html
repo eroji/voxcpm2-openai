@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Voice Studio · Starting</title>
 <link rel="stylesheet" href="/static/tokens.css">
+<link rel="icon" href="/static/icons/favicon.ico" sizes="any">
+<link rel="icon" type="image/svg+xml" href="/static/icons/favicon.svg">
+<link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
 <!--
   Engine startup page. The app serves this at "/" (and for any Studio route) until
   GET /ready returns 200, then the page redirects to the Studio.
@@ -45,8 +48,9 @@ body.failed .bar::after { width: 100%; animation: none; }
 @keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(400%); } }
 
 .main { max-width: var(--vs-max); margin: 0 auto; padding: 28px var(--vs-gutter) 48px; }
-.cols { display: flex; flex-wrap: wrap; gap: var(--vs-s9) var(--vs-col-gap); align-items: flex-start; }
-.col { flex: 1 1 480px; min-width: 0; display: flex; flex-direction: column; }
+.cols { display: grid; grid-template-columns: minmax(300px, 3fr) minmax(0, 7fr); gap: var(--vs-s9) var(--vs-col-gap); align-items: start; }   /* 30 / 70 */
+@media (max-width: 1000px) { .cols { grid-template-columns: minmax(0, 1fr); } }
+.col { min-width: 0; display: flex; flex-direction: column; }
 
 .top { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: var(--vs-s6); margin-bottom: var(--vs-s3); }
 .h2 { margin: 0; font-size: var(--vs-fs-stat); font-weight: 700; letter-spacing: -0.02em; }
@@ -78,9 +82,18 @@ body.failed .actions { display: flex; }
 
 .side-h { display: flex; justify-content: space-between; align-items: baseline; padding-bottom: var(--vs-s3); border-bottom: 1px solid var(--vs-fg); margin: 6px 0 var(--vs-s5); }
 .side-h h3, .notes h3 { margin: 0; font-size: var(--vs-fs-label); font-weight: 700; }
-.log { overflow: auto; background: var(--vs-code-bg); min-height: 360px; max-height: 60vh; }
-.log pre { margin: 0; padding: 14px 16px; font-size: var(--vs-fs-label); line-height: 1.6; color: var(--vs-fg-2); white-space: pre; }
-.log .e { color: var(--vs-fg); font-weight: 400; }
+.log { background: var(--vs-code-bg); min-height: 360px; padding: 6px 0 10px; overflow: hidden; font-family: var(--vs-mono); font-size: var(--vs-fs-label); line-height: 1.7; }
+/* One row per line, four fixed columns; the message is clipped with an ellipsis (full line in title). No horizontal scroll. */
+.log-row { display: grid; grid-template-columns: 56px 44px 40px minmax(0, 1fr); gap: 10px; padding: 0 14px; color: var(--vs-fg-2); }
+.log-row.head { font-family: var(--vs-font); color: var(--vs-muted); padding-bottom: 6px; margin-bottom: 4px; border-bottom: 1px solid var(--vs-rule-faint); }
+.log-row .t, .log-row .s { color: var(--vs-muted); font-variant-numeric: tabular-nums; }
+.log-row .m { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.log-row.open .m { white-space: normal; overflow-wrap: anywhere; }
+.log-row.warn, .log-row.error { color: var(--vs-fg); }
+.log-row.warn .l { font-weight: 700; }
+.log-row.error { background: #241414; }
+.log-row.error .l { font-weight: 700; color: var(--vs-accent); }
+.log-row:not(.head) { cursor: pointer; }
 .notes { display: flex; flex-direction: column; gap: var(--vs-s3); padding-top: 18px; }
 .notes h3 { padding-bottom: var(--vs-s3); border-bottom: 1px solid var(--vs-fg); }
 .notes p { margin: 0; font-size: var(--vs-fs-small); }
@@ -121,8 +134,8 @@ body.failed .actions { display: flex; }
     </section>
 
     <aside class="col" aria-labelledby="log-h">
-      <div class="side-h"><h3 id="log-h">Engine log</h3><span class="lbl">Last 16 lines · follows live</span></div>
-      <div class="log" id="log-box" tabindex="0" role="region" aria-label="Engine log"><pre id="log"></pre></div>
+      <div class="side-h"><h3 id="log-h">Engine log</h3><span class="lbl">Last 16 lines · follows live · click a line to expand</span></div>
+      <div class="log" id="log-box" tabindex="0" role="region" aria-label="Engine log" aria-live="polite"><div class="log-row head" aria-hidden="true"><span>Time</span><span>Source</span><span>Level</span><span>Message</span></div><div id="log"></div></div>
       <div class="notes">
         <h3>While you wait</h3>
         <p>This page checks <code>/ready</code> every 2 seconds and opens the Studio as soon as warm-up finishes.</p>
@@ -141,6 +154,23 @@ const fmtDur = s => Math.floor(s / 60) + ':' + String(Math.round(s % 60)).padSta
 const esc = t => t.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 
 let lastLog = '';
+
+/* vLLM / vLLM-Omni lines look like:
+   (APIServer pid=127) INFO 11-03 05:01:08 [serving_speech.py:414] Resolved TTS serving adapter: VoxCPM2Adapter
+   (StageEngineCoreProc_stage0_replica0 pid=555) WARNING 11-03 05:01:08 [file.py:63] ...
+   App lines may use the simpler form: "INFO  [app] message". Anything else is shown as-is. */
+const VLLM_RE = /^\((\w+?)(?:_stage\d+_replica\d+)? pid=\d+\)\s+(DEBUG|INFO|WARNING|ERROR|CRITICAL)\s+\d\d-\d\d\s+(\d\d:\d\d:\d\d)\s+\[([^\]]+)\]\s+(.*)$/;
+const APP_RE = /^(DEBUG|INFO|WARNING|ERROR|CRITICAL)\s+(?:(\d\d:\d\d:\d\d)\s+)?\[app\]\s+(.*)$/;
+const SRC = { APIServer: 'API', StageEngineCoreProc: 'Engine' };
+function parseLog(line) {
+  let m = VLLM_RE.exec(line), level = 'INFO', time = '', src = '', msg = line;
+  if (m) { level = m[2]; time = m[3]; src = SRC[m[1]] || m[1]; msg = m[5].replace(/^VoxCPM2:\s*/, '').replace(/^\[\w+\]\s*/, ''); }
+  else if ((m = APP_RE.exec(line))) { level = m[1]; time = m[2] || ''; src = 'App'; msg = m[3]; }
+  else if (/\b(ERROR|CRITICAL|Traceback)\b/.test(line)) level = 'ERROR';
+  else if (/\bWARNING\b/.test(line)) level = 'WARNING';
+  const bad = level === 'ERROR' || level === 'CRITICAL', warn = level === 'WARNING';
+  return { time, src, msg, lvl: bad ? 'ERROR' : warn ? 'WARN' : '', cls: bad ? 'error' : warn ? 'warn' : '' };
+}
 function render(d) {
   const failed = d.state === 'failed';
   document.body.classList.toggle('failed', failed);
@@ -166,11 +196,14 @@ function render(d) {
       <span class="st"><span class="dot" aria-hidden="true"></span>${st}</span></li>`;
   }).join('');
 
-  const text = (d.log || []).slice(-16).join('\n');
+  const lines = (d.log || []).slice(-16);
+  const text = lines.join('\n');
   if (text !== lastLog) {
     lastLog = text;
-    $('log').innerHTML = esc(text).replace(/^(ERROR.*)$/gm, '<span class="e">$1</span>');
-    const box = $('log-box'); box.scrollTop = box.scrollHeight;
+    $('log').innerHTML = lines.map(line => {
+      const r = parseLog(line);
+      return `<div class="log-row ${r.cls}" title="${esc(line).replace(/"/g, '&quot;')}"><span class="t">${r.time}</span><span class="s">${esc(r.src)}</span><span class="l">${r.lvl}</span><span class="m">${esc(r.msg)}</span></div>`;
+    }).join('');
   }
 }
 
@@ -197,6 +230,8 @@ async function poll() {
   }
   setTimeout(poll, POLL_MS);
 }
+
+$('log').addEventListener('click', e => { const r = e.target.closest('.log-row'); if (r) r.classList.toggle('open'); });
 
 let copyTimer = null;
 function copyResult(ok) {
@@ -248,8 +283,14 @@ function demo() {
     ['Starting the engine', 'vLLM-Omni 0.30.0 · 2 GiB KV cache · RTX 3090', 38],
     ['Warming up', 'One full and one streamed synthesis, so the first real request is fast', 16],
   ];
+  const A = (t, f, msg, lvl = 'INFO') => `(APIServer pid=127) ${lvl} 11-03 05:01:${t} [${f}] ${msg}`;
+  const E = (t, f, msg, lvl = 'INFO') => `(StageEngineCoreProc_stage0_replica0 pid=555) ${lvl} 11-03 05:01:${t} [${f}] ${msg}`;
   const logAll = [
-    'INFO  [app] Voice library loaded: 8 voices', 'INFO  [app] Waiting for engine on 127.0.0.1:8102',
+    'INFO  05:00:10 [app] Voice library loaded: 8 voices', 'INFO  05:00:10 [app] Waiting for engine on 127.0.0.1:8102',
+    A('08', 'omni_base.py:246', '[AsyncOmni] Initialized with 1 stages for model /models/openbmb/VoxCPM2'),
+    A('08', 'serving_speech.py:414', 'Resolved TTS serving adapter: VoxCPM2Adapter'),
+    A('08', 'capabilities.py:63', 'Failed to load codec frame rate from speech tokenizer config: /models/openbmb/VoxCPM2 does not appear to have a file named speech_tokenizer', 'WARNING'),
+    E('09', 'voxcpm2_talker.py:1271', 'VoxCPM2: eager optimizations applied to: LocDiT fused-qkv attention (12 layers), LocDiT fused gate-up MLP (12 layers)'),
     'INFO  Delegating entrypoint handling to vllm-omni', 'INFO  vLLM server version 0.30.0, serving /models/openbmb/VoxCPM2',
     'INFO  [OmniEngine] Launching Orchestrator thread with 1 stages', 'INFO  Patched empty HF config with model_type=voxcpm2',
     'INFO  Resolved architecture: VoxCPM2TalkerForConditionalGeneration', 'INFO  Using max model len 4096',

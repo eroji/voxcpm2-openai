@@ -1,0 +1,131 @@
+{
+  "_note": "Test phrases for Speak (follow the selected voice's language) and Design sample lines (follow the Design language). Keys: en, ja, ko, zh.",
+  "en": [
+    {
+      "id": "greeting",
+      "label": "Greeting",
+      "text": "Good morning. You have three meetings today, and the first one starts at nine thirty."
+    },
+    {
+      "id": "status",
+      "label": "Status update",
+      "text": "The backup finished without errors. Three old snapshots were pruned, and the pool is at sixty-two percent."
+    },
+    {
+      "id": "numbers",
+      "label": "Numbers & dates",
+      "text": "Your total comes to $1,284.50, due on March 3rd, 2027. The reference number is 4417-B."
+    },
+    {
+      "id": "question",
+      "label": "Question",
+      "text": "Heads up: the certificate on the jumpbox expires in nine days. Want me to renew it now?"
+    },
+    {
+      "id": "long",
+      "label": "Long passage",
+      "text": "It was late in the evening when the rain finally stopped. The streets were quiet, the air smelled of wet stone, and somewhere down the block a radio was playing an old song."
+    },
+    {
+      "id": "twister",
+      "label": "Tongue twister",
+      "text": "She sells seashells by the seashore, and the shells she sells are surely seashells."
+    }
+  ],
+  "ja": [
+    {
+      "id": "greeting",
+      "label": "Greeting",
+      "text": "おはようございます。今日は会議が三つあり、最初の会議は九時半からです。"
+    },
+    {
+      "id": "status",
+      "label": "Status update",
+      "text": "バックアップはエラーなく完了しました。古いスナップショットを三つ削除し、プールの使用率は六十二パーセントです。"
+    },
+    {
+      "id": "numbers",
+      "label": "Numbers & dates",
+      "text": "合計は12,840円で、支払期限は2027年3月3日です。参照番号は4417-Bです。"
+    },
+    {
+      "id": "question",
+      "label": "Question",
+      "text": "踏み台サーバーの証明書があと九日で期限切れになります。今すぐ更新しますか？"
+    },
+    {
+      "id": "long",
+      "label": "Long passage",
+      "text": "夕方遅く、ようやく雨がやみました。通りは静かで、濡れた石の匂いがして、どこか遠くで古い歌がラジオから流れていました。"
+    },
+    {
+      "id": "twister",
+      "label": "Tongue twister",
+      "text": "生麦生米生卵。隣の客はよく柿食う客だ。"
+    }
+  ],
+  "ko": [
+    {
+      "id": "greeting",
+      "label": "Greeting",
+      "text": "좋은 아침입니다. 오늘 회의가 세 개 있고, 첫 회의는 아홉 시 반에 시작합니다."
+    },
+    {
+      "id": "status",
+      "label": "Status update",
+      "text": "백업이 오류 없이 완료되었습니다. 오래된 스냅샷 세 개를 정리했고, 풀 사용률은 62퍼센트입니다."
+    },
+    {
+      "id": "numbers",
+      "label": "Numbers & dates",
+      "text": "총 금액은 128,450원이고, 납부 기한은 2027년 3월 3일입니다. 참조 번호는 4417-B입니다."
+    },
+    {
+      "id": "question",
+      "label": "Question",
+      "text": "점프박스 인증서가 9일 후에 만료됩니다. 지금 갱신할까요?"
+    },
+    {
+      "id": "long",
+      "label": "Long passage",
+      "text": "저녁 늦게야 비가 그쳤습니다. 거리는 조용했고, 젖은 돌 냄새가 났으며, 어디선가 라디오에서 오래된 노래가 흘러나왔습니다."
+    },
+    {
+      "id": "twister",
+      "label": "Tongue twister",
+      "text": "간장 공장 공장장은 강 공장장이고, 된장 공장 공장장은 장 공장장이다."
+    }
+  ],
+  "zh": [
+    {
+      "id": "greeting",
+      "label": "Greeting",
+      "text": "早上好。你今天有三个会议，第一个会议九点半开始。"
+    },
+    {
+      "id": "status",
+      "label": "Status update",
+      "text": "备份已顺利完成，没有错误。已清理三个旧快照，存储池使用率为百分之六十二。"
+    },
+    {
+      "id": "numbers",
+      "label": "Numbers & dates",
+      "text": "总金额为1,284.50元，付款截止日期是2027年3月3日，参考编号4417-B。"
+    },
+    {
+      "id": "question",
+      "label": "Question",
+      "text": "跳板机的证书将在九天后过期。要我现在续订吗？"
+    },
+    {
+      "id": "long",
+      "label": "Long passage",
+      "text": "直到傍晚，雨才终于停了。街道很安静，空气里带着湿石头的气味，远处的收音机正放着一首老歌。"
+    },
+    {
+      "id": "twister",
+      "label": "Tongue twister",
+      "text": "四是四，十是十，十四是十四，四十是四十。"
+    }
+  ]
+}

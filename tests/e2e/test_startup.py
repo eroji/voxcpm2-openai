@@ -59,6 +59,16 @@ def test_startup_page_then_failed_state(page, fake_engine, tmp_path, width) -> N
         expect(page.locator("#log-box")).to_have_attribute("tabindex", "0")
         expect(page.locator("#log-box")).to_have_attribute("role", "region")
         expect(page.locator("#startup-error")).to_be_hidden()
+
+        # M3-T14: row-per-line grid; clicking a row toggles the expanded view
+        row = page.locator("#log .log-row").first
+        expect(row).to_be_visible(timeout=10000)
+        expect(row).not_to_have_class(re.compile(r"\bopen\b"))
+        row.click()
+        expect(row).to_have_class(re.compile(r"\bopen\b"))
+        row.click()
+        expect(row).not_to_have_class(re.compile(r"\bopen\b"))
+
         page.screenshot(path=str(RESULTS_DIR / f"ui-starting-{width}.png"), full_page=True)
 
         expect(page.locator("#h")).to_have_text("The voice engine didn’t start", timeout=15000)
