@@ -55,20 +55,22 @@ def _wait_engine_ready(base_url: str, timeout: float = 30.0) -> None:
     pytest.fail(f"engine never became ready at {base_url}")
 
 
-@pytest.fixture(scope="session")
-def live_app(fake_engine: FakeEngine, tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
-    data_dir = tmp_path_factory.mktemp("e2e-data")
-    settings = Settings(
-        data_dir=data_dir,
-        import_dir=data_dir / "import",  # does not exist → the Qwen3 importer stays off
-        engine_url=fake_engine.url,
-        static_dir=REPO_ROOT / "app" / "static",
-        asset_dir=REPO_ROOT / "app" / "assets",
-        api_keys="",
-        studio_auth="",
-        stt_url="",
-        take_retention=50,
-    )
+def _settings(data_dir, fake_engine: FakeEngine, **overrides) -> Settings:
+    base = {
+        "data_dir": data_dir,
+        "import_dir": data_dir / "import",  # does not exist → the Qwen3 importer stays off
+        "engine_url": fake_engine.url,
+        "static_dir": REPO_ROOT / "app" / "static",
+        "asset_dir": REPO_ROOT / "app" / "assets",
+        "api_keys": "",
+        "studio_auth": "",
+        "stt_url": "",
+        "take_retention": 50,
+    }
+    return Settings(**{**base, **overrides})
+
+
+def _seed(settings: Settings) -> None:
     store = VoiceStore(settings)
     t = np.linspace(0, 1.0, 24000, endpoint=False)
     for name, language in SEED_VOICES:
@@ -81,6 +83,8 @@ def live_app(fake_engine: FakeEngine, tmp_path_factory: pytest.TempPathFactory) 
             consent="uploaded-via-studio",
         )
 
+
+def _serve(settings: Settings) -> Iterator[str]:
     port = _free_port()
     server = uvicorn.Server(
         uvicorn.Config(create_app(settings), host="127.0.0.1", port=port, log_level="warning")
@@ -104,6 +108,41 @@ def live_app(fake_engine: FakeEngine, tmp_path_factory: pytest.TempPathFactory) 
         thread.join(timeout=10)
 
 
+@pytest.fixture(scope="session")
+def live_app(fake_engine: FakeEngine, tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
+    data_dir = tmp_path_factory.mktemp("e2e-data")
+    settings = _settings(data_dir, fake_engine)
+    _seed(settings)
+    yield from _serve(settings)
+
+
+@pytest.fixture(scope="session")
+def live_app_keys(
+    fake_engine: FakeEngine, tmp_path_factory: pytest.TempPathFactory
+) -> Iterator[str]:
+    """Second app with API_KEYS set: /v1 needs a bearer key, /api never does (Q-023)."""
+    data_dir = tmp_path_factory.mktemp("e2e-data-keys")
+    settings = _settings(data_dir, fake_engine, api_keys="sk-e2e-never-sent-by-the-ui")
+    _seed(settings)
+    yield from _serve(settings)
+
+
+@pytest.fixture
+def open_studio(live_app: str) -> Callable[..., None]:
+    """Load Voice Studio (optionally deep-linked, optionally another app) with the engine Ready."""
+
+    def open_(page, screen: str = "", base_url: str = "") -> None:
+        base = base_url or live_app
+        _wait_engine_ready(base)
+        page.goto(f"{base}/#{screen}" if screen else f"{base}/")
+        page.wait_for_function(
+            "document.getElementById('engine-status')?.textContent?.startsWith('Ready')",
+            timeout=10000,
+        )
+
+    return open_
+
+
 @pytest.fixture
 def page() -> Iterator:
     playwright = sync_playwright().start()
@@ -120,18 +159,3 @@ def page() -> Iterator:
     context.close()
     browser.close()
     playwright.stop()
-
-
-@pytest.fixture
-def open_studio(live_app: str) -> Callable[..., None]:
-    """Load Voice Studio (optionally deep-linked to a screen) with the engine already Ready."""
-
-    def open_(page, screen: str = "") -> None:
-        _wait_engine_ready(live_app)
-        page.goto(f"{live_app}/#{screen}" if screen else f"{live_app}/")
-        page.wait_for_function(
-            "document.getElementById('engine-status')?.textContent?.startsWith('Ready')",
-            timeout=10000,
-        )
-
-    return open_

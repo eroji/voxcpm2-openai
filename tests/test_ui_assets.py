@@ -252,9 +252,10 @@ def test_rename_body_uses_name_and_validates():
 def test_clone_gates_on_engine_flags():
     clone = js("clone.js")
     assert "state.engine?.stt" in clone
-    # Q-023 fail closed: unknown engine status gates Test-a-line, not just api_keys_required
-    assert "const gated = !state.engine || !!state.engine.api_keys_required;" in clone
-    assert "const gated = !!state.engine?.api_keys_required;" not in clone
+    # M3-T11 (Q-023 resolved): Test a line goes through /api/speak — no bearer key,
+    # so no api_keys_required gating string may remain anywhere.
+    assert "api_keys_required" not in clone
+    assert "api_keys_required" not in HTML
     assert 'api.get("/api/engine")' not in clone
     assert "setTimeout" not in clone
     assert 'id="clone-status"' in HTML
@@ -266,8 +267,9 @@ def test_speak_lifecycle_releases_resources():
     assert "reader.cancel()" in speak
     assert "ctx.close()" in speak
     assert "await new Promise(resolve => setTimeout" not in speak  # no playback-tail await
-    # Q-024: Format is disabled in the markup, not toggled by JS
-    assert re.search(r'<select[^>]*id="fmt"[^>]*\bdisabled\b', HTML)
+    # M3-T11 (Q-024 resolved): Format is live in the markup; the stream toggle disables it in JS
+    assert not re.search(r'<select[^>]*id="fmt"[^>]*\bdisabled\b', HTML)
+    assert '$("fmt").disabled = streaming;' in speak
     assert "URL.revokeObjectURL" in CORE  # object URLs revoked in stopAudio()
 
 
@@ -284,9 +286,9 @@ def test_clone_buttons_default_disabled_in_markup():
     # cold deep link must not offer auto-transcribe/test-line before gating runs
     assert re.search(r'<button[^>]*id="auto-transcribe"[^>]*\bdisabled\b', HTML)
     assert re.search(r'<button[^>]*id="test-line"[^>]*\bdisabled\b', HTML)
-    # a title on a disabled button is not announced: use a visible hint (Q-023)
-    assert 'aria-describedby="clone-notes"' in HTML
-    assert 'id="clone-notes"' in HTML
+    # M3-T11: the /v1-key hint is gone — Test a line works under Studio auth alone
+    assert 'aria-describedby="clone-notes"' not in HTML
+    assert 'id="clone-notes"' not in HTML
 
 
 def test_clone_show_gates_after_engine_status():
@@ -316,30 +318,21 @@ def test_status_row_has_css_rule():
 # --- M3-T9 wave-5 review fixes -------------------------------------------------
 
 
-def test_clone_hint_text_set_when_test_line_disabled():
+def test_clone_test_line_needs_only_a_file():
     clone = js("clone.js")
-    # the hint text is set whenever the button is gated, and wired via aria-describedby
-    assert '$("clone-notes").textContent' in clone
-    assert '$("clone-notes").hidden = !gated;' in clone
-    assert 'aria-describedby="clone-notes"' in HTML
-    # the null-engine case gets its own wording (fail closed, not silent)
-    assert "engine status" in clone
+    # M3-T11: the /v1 hint element and its gating are gone; a file is the only condition
+    assert "clone-notes" not in clone
+    assert '$("test-line").disabled = !file;' in clone
+    assert 'fetch("/api/speak?save=false"' in clone
 
 
-def test_format_disabled_with_hint_and_no_dead_branch():
-    # Q-024: Studio /api/speak always answers with TakeInfo JSON; non-WAV is a /v1 concern
-    assert "Studio takes are WAV; use /v1 for other formats." in HTML
-    assert re.search(r'<select[^>]*id="fmt"[^>]*\btitle=', HTML)
+def test_format_applies_with_stream_hint_and_no_dead_branch():
+    # Q-024 resolved: Format drives response_format; streams are PCM at 48 kHz
+    assert "Streaming uses PCM at 48 kHz" in HTML
+    assert "Studio takes are WAV; use /v1 for other formats." not in HTML
     speak = js("speak.js")
     assert "res.headers.get(" not in speak  # dead non-WAV response branch removed
     assert "res.blob()" not in speak
-
-
-def test_clone_notes_wrap_at_narrow_width():
-    # .meta is white-space: nowrap; #clone-notes must override it or it overflows at 390 px
-    rule = re.search(r"#clone-notes \{([^}]*)\}", CSS)
-    assert rule, "#clone-notes rule missing from studio.css"
-    assert "white-space: normal" in rule.group(1)
 
 
 # --- M3-T10 release review fixes ------------------------------------------------
@@ -374,6 +367,32 @@ def test_voices_count_is_the_library_total():
     voices = js("voices.js")
     assert 'getElementById("voices-count").textContent = String(state.voices.length)' in voices
     assert "No voices match the current search or filter." in voices  # filtered state is named
+
+
+# --- M3-T11: /api/speak preview + real Format ------------------------------------
+
+
+def test_clone_preview_posts_to_api_speak_save_false():
+    clone = js("clone.js")
+    assert 'fetch("/api/speak?save=false"' in clone
+    assert 'fetch("/v1/audio/speech"' not in clone
+
+
+def test_take_playback_appends_format():
+    speak = js("speak.js")
+    # play/download use the take's requested container; the waveform keeps wave_url
+    assert "${take.audio_url}?format=${take.format" in speak
+    assert "play(takeUrl(take))" in speak
+    assert "dl.href = takeUrl(take)" in speak
+    assert ".get(take.wave_url)" in speak
+
+
+def test_stream_toggle_gates_format():
+    speak = js("speak.js")
+    assert '$("fmt").disabled = streaming;' in speak
+    assert '$("fmt-hint").hidden = !streaming;' in speak
+    # streams stay pinned to the 48 kHz PCM decoder
+    assert "if (stream) body.sample_rate = 48000;" in speak
 
 
 def test_e2e_suite_never_skips_silently():

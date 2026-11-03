@@ -56,6 +56,25 @@ def test_speak_generate(page, live_app, open_studio):
     expect(newest.locator("svg.vs-wave")).to_have_class(re.compile("is-current"))
     expect(newest.locator("svg.vs-wave path")).to_have_attribute("d", re.compile("M0.+Z"))
 
+    # M3-T11: Format is real — a non-stream generate records it and the row links use it
+    expect(page.locator("#fmt")).to_be_enabled()  # streaming was turned off above
+    page.select_option("#fmt", "mp3")
+    page.fill("#speak-text", "Format check line.")
+    page.click("#generate")
+    expect(page.locator("#generate")).to_have_text("Generate", timeout=30000)
+    newest = page.locator("#takes-list .vs-take").first
+    expect(newest.locator("a.btn-link")).to_have_attribute("href", re.compile(r"\?format=mp3$"))
+
+
+def test_speak_format_follows_stream_toggle(page, live_app, open_studio):
+    """M3-T11: Format applies when streaming is off; streams are PCM at 48 kHz."""
+    open_studio(page)
+    expect(page.locator("#fmt")).to_be_disabled()  # stream on by default
+    expect(page.locator("#fmt-hint")).to_be_visible()
+    page.click("#stream-toggle")
+    expect(page.locator("#fmt")).to_be_enabled()
+    expect(page.locator("#fmt-hint")).to_be_hidden()
+
 
 def test_speak_stream(page, live_app, open_studio):
     """Stream on (default): the PCM path plays and still lands a take row (R-033)."""
@@ -124,6 +143,15 @@ def test_clone_gating(page, live_app, open_studio, tmp_path):
     sf.write(wav, (0.2 * np.sin(2 * np.pi * 180 * t)).astype(np.float32), 48000, format="WAV")
     page.set_input_files("#ref-file", str(wav))
     expect(page.locator("#drop-zone .meta")).to_contain_text("reference.wav")
+
+    # M3-T11: Test a line needs only a file — preview goes via /api/speak?save=false, no bearer key
+    expect(page.locator("#test-line")).to_be_enabled()
+    with page.expect_response(lambda r: r.url.endswith("/api/speak?save=false")) as resp:
+        page.click("#test-line")
+    assert resp.value.status == 200
+    assert resp.value.request.headers.get("authorization") is None
+    expect(page.locator("#clone-error")).to_be_hidden()
+
     expect(save).to_be_disabled()  # file alone is not enough: no name yet
 
     page.fill("#clone-name", "Bad Name")
@@ -135,6 +163,22 @@ def test_clone_gating(page, live_app, open_studio, tmp_path):
     expect(save).to_be_disabled()  # consent still missing
     page.check("#consent")
     expect(save).to_be_enabled()
+
+
+def test_clone_test_line_with_api_keys(page, live_app_keys, open_studio, tmp_path):
+    """Q-023 resolved: Test a line still works without a bearer key when API_KEYS is set."""
+    assert httpx.get(f"{live_app_keys}/api/engine").json()["api_keys_required"] is True
+    open_studio(page, "clone", live_app_keys)
+    wav = tmp_path / "reference.wav"
+    t = np.linspace(0, 5.0, 48000 * 5, endpoint=False)
+    sf.write(wav, (0.2 * np.sin(2 * np.pi * 180 * t)).astype(np.float32), 48000, format="WAV")
+    page.set_input_files("#ref-file", str(wav))
+    expect(page.locator("#test-line")).to_be_enabled()  # api_keys_required gates nothing here
+    with page.expect_response(lambda r: r.url.endswith("/api/speak?save=false")) as resp:
+        page.click("#test-line")
+    assert resp.value.status == 200
+    assert resp.value.request.headers.get("authorization") is None
+    expect(page.locator("#clone-error")).to_be_hidden()
 
 
 def test_clone_save(page, live_app, open_studio, tmp_path):

@@ -52,6 +52,9 @@ function renderTakes() {
   takes.forEach((t, index) => list.append(takeRow(t, index)));
 }
 
+/* Q-024: play/download a take in the container it was requested with; disk stays WAV. */
+const takeUrl = take => `${take.audio_url}?format=${take.format || "wav"}`;
+
 function takeRow(take, index) {
   const row = document.createElement("article");
   row.className = "vs-take";
@@ -89,7 +92,7 @@ function takeRow(take, index) {
   tri.setAttribute("fill", "currentColor");
   icon.append(tri);
   playBtn.append(icon);
-  playBtn.addEventListener("click", () => play(take.audio_url));
+  playBtn.addEventListener("click", () => play(takeUrl(take)));
 
   const wave = document.createElementNS(SVG_NS, "svg");
   wave.setAttribute("class", "vs-wave");
@@ -107,8 +110,8 @@ function takeRow(take, index) {
   links.className = "links";
   const dl = document.createElement("a");
   dl.className = "btn-link";
-  dl.href = take.audio_url;
-  dl.download = `${take.id}.wav`;
+  dl.href = takeUrl(take);
+  dl.download = `${take.id}.${take.format || "wav"}`;
   dl.textContent = "Download";
   const save = document.createElement("button");
   save.className = "btn-link";
@@ -188,7 +191,14 @@ async function playWhole(res) {
   const take = await res.json(); // contract §2: non-stream /api/speak → TakeInfo (Q-024)
   takes.unshift(take);
   renderTakes();
-  play(take.audio_url);
+  play(takeUrl(take));
+}
+
+/* Streams are PCM at 48 kHz, so Format only applies when streaming is off (Q-024). */
+function syncFmt() {
+  const streaming = $("stream-toggle").getAttribute("aria-pressed") === "true";
+  $("fmt").disabled = streaming;
+  $("fmt-hint").hidden = !streaming;
 }
 
 async function generate() {
@@ -234,6 +244,7 @@ async function generate() {
 }
 
 async function init() {
+  syncFmt(); // Format state must be right even if the voices fetch below fails
   await loadVoices();
   let saved = null;
   try {
@@ -271,6 +282,7 @@ async function init() {
   const toggle = $("stream-toggle");
   toggle.addEventListener("click", () => {
     toggle.setAttribute("aria-pressed", String(toggle.getAttribute("aria-pressed") !== "true"));
+    syncFmt();
   });
 }
 

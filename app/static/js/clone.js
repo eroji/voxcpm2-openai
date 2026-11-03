@@ -65,6 +65,7 @@ function nameProblem() {
 
 function updateSave() {
   $("save-voice").disabled = saving || !(file && !nameProblem() && $("consent").checked);
+  $("test-line").disabled = !file; // WAV preview needs no bearer key: a file is enough
 }
 
 function setStatus(message) {
@@ -73,19 +74,12 @@ function setStatus(message) {
   el.hidden = !message;
 }
 
-/* SPEC §8/§10: auto-transcribe needs STT; the test line calls /v1, which needs a
- * bearer key the browser does not have (Q-023). Gated from state.engine, which
- * show() makes sure is loaded before calling this. */
+/* SPEC §8: auto-transcribe needs STT, gated from state.engine, which show() makes
+ * sure is loaded before calling this. Test a line needs no engine flag: it goes
+ * through /api/speak?save=false under Studio auth (Q-023 resolved 2026-11-02),
+ * so it is enabled whenever a file is present (updateSave). */
 function gate() {
   $("auto-transcribe").disabled = !state.engine?.stt;
-  // Q-023: unknown engine status counts as gated, so Test-a-line fails closed
-  // (disabled + hint) instead of enabled and then 401 under API_KEYS.
-  const gated = !state.engine || !!state.engine.api_keys_required;
-  $("test-line").disabled = gated;
-  $("clone-notes").textContent = state.engine
-    ? "Test a line needs /v1 access, which requires an API key on this server."
-    : "Test a line is disabled until the engine status is available.";
-  $("clone-notes").hidden = !gated; // visible hint; a title on a disabled button is not announced
 }
 
 let probeSeq = 0; // invalidates an in-flight duration probe when a newer file is picked
@@ -178,7 +172,8 @@ async function onSave() {
   }
 }
 
-/* Ad-hoc clone via /v1/audio/speech with ref_audio data URI (Q-009). */
+/* Ad-hoc clone preview via /api/speak?save=false with ref_audio data URI
+ * (Q-009; Q-023 resolved 2026-11-02: Studio auth, no bearer key, no take saved). */
 async function onTest() {
   if (!file) {
     showError("clone", "Choose a reference audio file first.");
@@ -193,7 +188,7 @@ async function onTest() {
       reader.onerror = () => reject(new Error("Could not read the file."));
       reader.readAsDataURL(file);
     });
-    const res = await fetch("/v1/audio/speech", {
+    const res = await fetch("/api/speak?save=false", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -203,7 +198,6 @@ async function onTest() {
         response_format: "wav",
         ref_audio: refAudio,
         ref_text: $("ref-text").value,
-        stream: false,
       }),
     });
     if (!res.ok) {
