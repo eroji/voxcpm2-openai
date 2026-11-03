@@ -5,6 +5,11 @@
 (SPEC §5: takes are always 48 kHz). ``stream=true`` returns the audio with
 ``X-Take-Id`` and writes the take when the stream completes (Q-006), decoding
 any streamed container with ``audio.decode_any``.
+
+``save=false`` (Q-023) is the Studio preview / "Test a line" path: the audio is
+returned in ``response_format`` under Studio auth, no take is written and no
+``X-Take-Id`` is sent. The take's requested container is recorded in its
+``format`` field and drives playback via ``?format=`` (Q-024); disk stays WAV.
 """
 
 from __future__ import annotations
@@ -39,7 +44,7 @@ def _language(store: Any, name: str, adhoc: bool) -> str:
 
 
 @router.post("/speak", response_model=None)
-async def speak(request: Request, payload: SpeechRequest) -> Response | TakeInfo:
+async def speak(request: Request, payload: SpeechRequest, save: bool = True) -> Response | TakeInfo:
     settings: Any = request.app.state.settings
     if len(payload.input) > settings.max_input_chars:
         raise BadRequest(
@@ -48,7 +53,18 @@ async def speak(request: Request, payload: SpeechRequest) -> Response | TakeInfo
             code="input_too_long",
         )
     if payload.stream:
-        return await _speak_stream(request, payload)
+        return await _speak_stream(request, payload, save)
+    if not save:
+        # Q-023 preview: honor response_format, write nothing, no X-Take-Id.
+        result = await request.app.state.speech.synthesize(payload)
+        return Response(
+            result.audio,
+            media_type=result.media_type,
+            headers={
+                "X-Voice": safe_header_value(result.key or result.voice),
+                "X-Sample-Rate": str(result.sample_rate),
+            },
+        )
 
     # SPEC §5/§7: /api/speak returns take metadata only, so synthesize at the
     # engine's native rate without speed stretch — the stored take is always a
@@ -75,22 +91,44 @@ async def speak(request: Request, payload: SpeechRequest) -> Response | TakeInfo
         language=language,
         rtf=result.rtf,
         first_audio_ms=result.first_audio_ms,
+        extra={"format": payload.response_format},
     )
     return TakeInfo(**take, **request.app.state.takes.take_urls(take["id"]))
 
 
-async def _speak_stream(request: Request, payload: SpeechRequest) -> Response:
+async def _speak_stream(request: Request, payload: SpeechRequest, save: bool = True) -> Response:
     state = request.app.state
-    take_id: str = state.takes.new_id()
-    started = time.perf_counter()
     # Admission happens here: QueueFull/EngineNotReady still reach the error handler.
     streaming = await state.speech.stream(payload)
+    headers = {
+        "X-Voice": safe_header_value(streaming.key or streaming.voice),
+        "X-Sample-Rate": str(streaming.sample_rate),
+    }
+    if not save:
+        # Q-023 preview: stream the container through, free the slot, write nothing.
+        async def preview() -> Any:
+            try:
+                async for chunk in streaming.chunks:
+                    yield chunk
+            finally:
+                await streaming.aclose()
+
+        return StreamingResponse(
+            preview(),
+            media_type=streaming.media_type,
+            headers=headers,
+            # Disconnect before the first chunk: the idempotent aclose still frees the slot.
+            background=BackgroundTask(streaming.aclose),
+        )
+
+    take_id: str = state.takes.new_id()
+    started = time.perf_counter()
     is_pcm = payload.response_format == "pcm"
     parts: list[bytes] = []
     carry = b""
     first_audio_ms: float | None = None
 
-    def save(raw: bytes) -> None:
+    def write_take(raw: bytes) -> None:
         try:
             if is_pcm:
                 samples, rate = audio.pcm_s16le_to_float(raw), streaming.sample_rate
@@ -131,18 +169,12 @@ async def _speak_stream(request: Request, payload: SpeechRequest) -> Response:
                 yield chunk
         finally:
             await streaming.aclose()
-        await asyncio.to_thread(save, b"".join(parts))
+        await asyncio.to_thread(write_take, b"".join(parts))
 
-    # Headers must stay ASCII: use the request key, never a display name (SPEC §5).
-    voice_header = safe_header_value(payload.voice)
     return StreamingResponse(
         body(),
         media_type=streaming.media_type,
-        headers={
-            "X-Take-Id": take_id,
-            "X-Voice": voice_header,
-            "X-Sample-Rate": str(streaming.sample_rate),
-        },
+        headers={"X-Take-Id": take_id, **headers},
         # Disconnect before the first chunk: the idempotent aclose still frees the slot.
         background=BackgroundTask(streaming.aclose),
     )
@@ -165,8 +197,26 @@ async def list_takes(request: Request, kind: str = "studio") -> dict[str, list[T
 
 
 @router.get("/takes/{take_id}/audio")
-async def take_audio(request: Request, take_id: str) -> FileResponse:
-    return FileResponse(request.app.state.takes.audio_path(take_id), media_type="audio/wav")
+async def take_audio(
+    request: Request, take_id: str, format: str = "", sample_rate: int | None = None
+) -> Response:
+    """Serve a take, transcoded on the fly to ``format`` (Q-024). Default: its stored format."""
+    takes: Any = request.app.state.takes
+    path = await asyncio.to_thread(takes.audio_path, take_id)  # 404 when the WAV is gone
+    fmt = format or str((await asyncio.to_thread(takes.get, take_id)).get("format") or "wav")
+    if fmt not in audio.MIME_TYPES:
+        raise BadRequest(
+            f"Unsupported format '{format}'. Valid formats: {', '.join(audio.MIME_TYPES)}.",
+            param="format",
+            code="invalid_format",
+        )
+    if fmt == "wav" and sample_rate is None:
+        return FileResponse(path, media_type=audio.mime_for("wav"))
+    samples, rate = await asyncio.to_thread(audio.read_audio_file, path)
+    data = await asyncio.to_thread(
+        audio.transcode, samples, rate, fmt, target_rate=sample_rate, speed=1.0
+    )
+    return Response(data, media_type=audio.mime_for(fmt))
 
 
 @router.get("/takes/{take_id}/wave")

@@ -1,12 +1,15 @@
-"""M2-T3/M2-T11: /api/speak + /api/takes — persistence, streaming, wave, save-as-voice."""
+"""M2-T3/M2-T11/M2-T14: /api/speak + /api/takes — persistence, streaming, formats, wave."""
 
 from __future__ import annotations
 
+import base64
+import io
 import time
 from typing import Any
 
 import numpy as np
 import pytest
+import soundfile as sf
 from app import audio
 
 
@@ -243,3 +246,100 @@ def test_configured_max_input_chars_guard(client: Any, library: Any, settings: A
     resp = _speak(client, input="x" * 11)
     assert resp.status_code == 400
     assert resp.json()["error"]["code"] == "input_too_long"
+
+
+def _data_uri(seconds: float = 1.0, rate: int = 24000) -> str:
+    t = np.linspace(0, seconds, int(rate * seconds), endpoint=False)
+    buf = io.BytesIO()
+    sf.write(buf, (0.3 * np.sin(2 * np.pi * 220 * t)).astype(np.float32), rate, format="WAV")
+    return "data:audio/wav;base64," + base64.b64encode(buf.getvalue()).decode()
+
+
+def test_preview_non_stream_returns_audio_and_no_take(client: Any, library: Any) -> None:
+    # Q-023/Q-024: Studio preview = /api/speak?save=false, format honored, nothing stored.
+    resp = client.post(
+        "/api/speak?save=false",
+        json={
+            "model": "voxcpm2",
+            "voice": "ashley-en",
+            "input": "hello there",
+            "response_format": "mp3",
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("audio/mpeg")
+    assert resp.headers["X-Voice"] == "ashley-en"
+    assert resp.headers["X-Sample-Rate"] == "48000"
+    assert "X-Take-Id" not in resp.headers
+    assert resp.content[:3] == b"ID3" or resp.content[0:2] == b"\xff\xfb"  # mp3 frame/tag
+    assert client.get("/api/takes").json()["takes"] == []
+
+
+def test_preview_stream_returns_audio_and_no_take(client: Any, library: Any) -> None:
+    resp = client.post(
+        "/api/speak?save=false",
+        json={
+            "model": "voxcpm2",
+            "voice": "ashley-en",
+            "input": "hello there",
+            "response_format": "pcm",
+            "stream": True,
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.headers["X-Voice"] == "ashley-en"
+    assert resp.headers["X-Sample-Rate"] == "48000"
+    assert "X-Take-Id" not in resp.headers
+    assert len(resp.content) % 2 == 0 and len(resp.content) > 0
+    assert client.get("/api/takes").json()["takes"] == []
+
+
+def test_preview_with_ref_audio_is_ad_hoc_and_stores_nothing(
+    client: Any, library: Any, store: Any
+) -> None:
+    # Q-023: "Test a line" needs only Studio auth — ref_audio, no voice, no take.
+    before = len(store.list())
+    resp = client.post(
+        "/api/speak?save=false",
+        json={
+            "model": "voxcpm2",
+            "voice": "test-line",
+            "input": "checking the line",
+            "ref_audio": _data_uri(),
+            "ref_text": "Thanks for waiting.",
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("audio/wav")
+    assert "X-Take-Id" not in resp.headers
+    assert len(store.list()) == before
+    assert client.get("/api/takes").json()["takes"] == []
+
+
+def test_saved_take_records_format_and_plays_back_transcoded(client: Any, library: Any) -> None:
+    # Q-024: the take records the requested format; disk stays 48 kHz WAV; playback transcodes.
+    take = _speak(client, response_format="mp3").json()
+    assert take["format"] == "mp3"
+    samples, rate = audio.read_audio(client.get(take["audio_url"]).content)
+    assert rate == 48000
+
+    mp3 = client.get(f"{take['audio_url']}?format=mp3")
+    assert mp3.status_code == 200
+    assert mp3.headers["content-type"].startswith("audio/mpeg")
+
+    pcm = client.get(f"{take['audio_url']}?format=pcm")
+    assert pcm.status_code == 200
+    assert pcm.headers["content-type"].startswith("audio/pcm")
+    assert len(pcm.content) % 2 == 0
+
+    assert client.get(f"{take['audio_url']}?format=bogus").status_code == 400
+
+
+def test_take_audio_format_falls_back_to_stored_format(client: Any, library: Any) -> None:
+    # CONTRACTS §2: no ?format= → the take's stored format, wav when none was recorded.
+    take = _speak(client, response_format="flac").json()
+    assert take["format"] == "flac"
+    assert client.get(take["audio_url"]).headers["content-type"].startswith("audio/flac")
+    legacy = _speak(client).json()
+    assert legacy["format"] == "wav"
+    assert client.get(legacy["audio_url"]).headers["content-type"].startswith("audio/wav")

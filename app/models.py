@@ -93,6 +93,7 @@ class TakeInfo(APIModel):
     rtf: float | None = None
     first_audio_ms: float | None = None
     created_at: int
+    format: str = "wav"
     audio_url: str
     wave_url: str
 
