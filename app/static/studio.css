@@ -185,8 +185,7 @@ a.btn-link { color: inherit; text-decoration: none; } /* Download reads as a lin
 
 /* Design candidates */
 .vs-cand { border-top: var(--vs-rule-row); padding: var(--vs-s4) 0 var(--vs-s5); display: flex; flex-direction: column; gap: var(--vs-s4); }
-.vs-cand.is-selected { border-top: 3px solid var(--vs-accent); }
-.vs-cand.is-playing { background: var(--vs-code-bg); }
+.vs-cand:hover, .vs-cand.is-selected, .vs-cand.is-playing { background: var(--vs-code-bg); }
 .vs-cand.is-playing .vs-wave path { fill: var(--vs-wave-idle); }
 .vs-cand.is-playing .vs-wave path.accent { fill: var(--vs-accent); }
 .vs-cand .row { display: flex; justify-content: space-between; align-items: center; gap: var(--vs-s3); }

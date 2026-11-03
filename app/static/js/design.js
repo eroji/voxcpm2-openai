@@ -179,7 +179,6 @@ function onCandidatesClick(e) {
     const p = c.querySelector(".pick");
     p.setAttribute("aria-pressed", String(on));
     p.textContent = on ? "Selected" : "Select";
-    c.querySelector(".vs-wave").classList.toggle("is-current", on);
   }
   selectedCandidate = candidates.find(c => c.id === chosen.dataset.id) || null;
   updateSaveState();

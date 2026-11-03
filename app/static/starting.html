@@ -84,16 +84,13 @@ body.failed .actions { display: flex; }
 .side-h h3, .notes h3 { margin: 0; font-size: var(--vs-fs-label); font-weight: 700; }
 .log { background: var(--vs-code-bg); min-height: 360px; padding: 6px 0 10px; overflow: hidden; font-family: var(--vs-mono); font-size: var(--vs-fs-label); line-height: 1.7; }
 /* One row per line, four fixed columns; the message is clipped with an ellipsis (full line in title). No horizontal scroll. */
-.log-row { display: grid; grid-template-columns: 56px 44px 40px minmax(0, 1fr); gap: 10px; padding: 0 14px; color: var(--vs-fg-2); }
-.log-row.head { font-family: var(--vs-font); color: var(--vs-muted); padding-bottom: 6px; margin-bottom: 4px; border-bottom: 1px solid var(--vs-rule-faint); }
-.log-row .t, .log-row .s { color: var(--vs-muted); font-variant-numeric: tabular-nums; }
+.log-row { padding: 0 14px; color: var(--vs-fg-2); }
 .log-row .m { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .log-row.open .m { white-space: normal; overflow-wrap: anywhere; }
-.log-row.warn, .log-row.error { color: var(--vs-fg); }
-.log-row.warn .l { font-weight: 700; }
-.log-row.error { background: #241414; }
-.log-row.error .l { font-weight: 700; color: var(--vs-accent); }
-.log-row:not(.head) { cursor: pointer; }
+.log-row.warn { color: var(--vs-fg); font-weight: 700; }
+.log-row.error { background: #241414; color: var(--vs-fg); }
+.log-row.error .m { color: var(--vs-accent); font-weight: 700; }
+.log-row { cursor: pointer; }
 .notes { display: flex; flex-direction: column; gap: var(--vs-s3); padding-top: 18px; }
 .notes h3 { padding-bottom: var(--vs-s3); border-bottom: 1px solid var(--vs-fg); }
 .notes p { margin: 0; font-size: var(--vs-fs-small); }
@@ -135,7 +132,7 @@ body.failed .actions { display: flex; }
 
     <aside class="col" aria-labelledby="log-h">
       <div class="side-h"><h3 id="log-h">Engine log</h3><span class="lbl">Last 16 lines · follows live · click a line to expand</span></div>
-      <div class="log" id="log-box" tabindex="0" role="region" aria-label="Engine log" aria-live="polite"><div class="log-row head" aria-hidden="true"><span>Time</span><span>Source</span><span>Level</span><span>Message</span></div><div id="log"></div></div>
+      <div class="log" id="log-box" tabindex="0" role="region" aria-label="Engine log" aria-live="polite"><div id="log"></div></div>
       <div class="notes">
         <h3>While you wait</h3>
         <p>This page checks <code>/ready</code> every 2 seconds and opens the Studio as soon as warm-up finishes.</p>
@@ -202,7 +199,7 @@ function render(d) {
     lastLog = text;
     $('log').innerHTML = lines.map(line => {
       const r = parseLog(line);
-      return `<div class="log-row ${r.cls}" title="${esc(line).replace(/"/g, '&quot;')}"><span class="t">${r.time}</span><span class="s">${esc(r.src)}</span><span class="l">${r.lvl}</span><span class="m">${esc(r.msg)}</span></div>`;
+      return `<div class="log-row ${r.cls}" title="${esc(line).replace(/"/g, '&quot;')}"><span class="m">${esc(line)}</span></div>`;
     }).join('');
   }
 }

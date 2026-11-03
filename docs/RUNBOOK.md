@@ -19,9 +19,9 @@ Locally (or on any machine with a registry login):
 
 ```bash
 docker build -f deploy/Containerfile \
-  -t harbor.dotslash.io/dotslash/voxcpm2-openai:v0.3.5 \
+  -t harbor.dotslash.io/dotslash/voxcpm2-openai:v0.3.6 \
   -t harbor.dotslash.io/dotslash/voxcpm2-openai:latest .
-docker push harbor.dotslash.io/dotslash/voxcpm2-openai:v0.3.5
+docker push harbor.dotslash.io/dotslash/voxcpm2-openai:v0.3.6
 docker push harbor.dotslash.io/dotslash/voxcpm2-openai:latest
 ```
 
@@ -50,7 +50,7 @@ The host layout is `/opt/voxcpm2-openai/{compose.yaml,.env,data}`. The image tag
 manual equivalent:
 
 ```bash
-IMAGE=harbor.dotslash.io/dotslash/voxcpm2-openai:v0.3.5
+IMAGE=harbor.dotslash.io/dotslash/voxcpm2-openai:v0.3.6
 ssh jumpbox "sudo -n ssh vllm 'cat > /opt/voxcpm2-openai/compose.yaml'" < deploy/compose.yaml
 ssh jumpbox "sudo -n ssh vllm \"
   cd /opt/voxcpm2-openai

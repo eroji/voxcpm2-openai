@@ -202,28 +202,13 @@ function takeRow(take, index) {
   dl.href = takeUrl(take);
   dl.download = `${take.id}.${take.format || "wav"}`;
   dl.textContent = "Download";
-  const save = document.createElement("button");
-  save.className = "btn-link";
-  save.textContent = "Save as voice";
-  save.addEventListener("click", () => saveAsVoice(take));
-  links.append(dl, save);
+  links.append(dl);
 
   player.append(playBtn, wave, links);
   row.append(top, p, player);
   return row;
 }
 
-async function saveAsVoice(take) {
-  const name = prompt("Voice name");
-  if (!name) return;
-  try {
-    await api.post(`/api/takes/${take.id}/save-as-voice`, { name, language: take.language || "en" });
-    await loadVoices();
-    renderChips();
-  } catch (err) {
-    showError("speak", err.message);
-  }
-}
 
 async function errorFrom(res) {
   try {

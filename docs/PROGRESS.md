@@ -273,6 +273,10 @@ spikes remain host-run. CI has not run yet: the branch is local (47+ commits ahe
   cached JS/CSS; design previews normalized to -1 dBFS; candidate count ordered 1–4. Release
   v0.3.5.
 
+- **2026-11-03 —** Startup log is now column-free messages with ERROR/WARN highlighting; Design
+  selection is a background row highlight (no border/colour shift); candidate counts 1–4; design
+  previews normalized; Speak no longer offers Save as voice. Release v0.3.6.
+
 ## Next action
 
 1. `git push origin main` and watch the GitLab pipeline (`checks`, `javascript`, `test`, `e2e`,

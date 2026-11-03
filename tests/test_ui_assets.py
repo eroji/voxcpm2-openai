@@ -439,21 +439,16 @@ def test_starting_asset_is_the_reference_copy_plus_documented_deltas():
     )
     our_markup, our_js = ours.split("<script>", 1)
     ref_markup, ref_js = reference.split("<script>", 1)
-    for ours_text, ref_text in [
-        # keyboard-scrollable, labelled log region instead of the bare role="log"
-        (
-            ' id="log-box" tabindex="0" role="region" aria-label="Engine log" aria-live="polite"',
-            ' role="log" aria-live="polite"',
-        ),
-        # inline status line for the errors M3-T13 stopped swallowing
-        (
-            '\n      <p class="lbl" id="startup-error" role="alert" hidden></p>',
-            "",
-        ),
-    ]:
-        assert ours_text in our_markup, ours_text
-        our_markup = our_markup.replace(ours_text, ref_text, 1)
-    assert our_markup == ref_markup
+    assert (
+        ' id="log-box" tabindex="0" role="region" aria-label="Engine log" aria-live="polite"'
+        in our_markup
+    )
+    assert '\n      <p class="lbl" id="startup-error" role="alert" hidden></p>' in our_markup
+    # SPEC v0.2.0 startup log: plain message rows, no Time/Source/Level/Message columns,
+    # but ERROR/WARN rows keep their highlight.
+    assert "Time</span>" not in ours and "grid-template-columns: 56px" not in ours
+    assert '<span class="m">${esc(line)}</span>' in ours
+    assert ".log-row.error" in ours and ".log-row.warn" in ours
     # the script is the reference's demo + render; only the handlers above may differ
     tail = "/* Demo mode for previewing the asset without a backend. */"
     assert our_js[our_js.index(tail) :] == ref_js[ref_js.index(tail) :]
@@ -591,7 +586,7 @@ def test_starting_log_uses_grid_rows_and_parser():
         "VLLM_RE",
         "APP_RE",
         'class="log-row',
-        "grid-template-columns: 56px 44px 40px minmax(0, 1fr)",
+        ".log-row { padding: 0 14px;",
         "r.classList.toggle('open')",
     ]:
         assert fragment in STARTING, fragment
@@ -729,13 +724,17 @@ def test_take_waveform_clips_the_accent_overlay_to_the_playhead():
 def test_take_row_hover_and_download_css():
     assert ".vs-take:hover, .vs-take.is-playing { background: var(--vs-code-bg); }" in CSS
     assert ".vs-take.is-playing { border-top-color: var(--vs-accent); }" in CSS
-    assert ".vs-cand.is-playing { background: var(--vs-code-bg); }" in CSS
+    assert (
+        ".vs-cand:hover, .vs-cand.is-selected, .vs-cand.is-playing "
+        "{ background: var(--vs-code-bg); }"
+    ) in CSS
+    assert ".vs-cand.is-selected { border-top" not in CSS, "selection must not shift the row"
     assert ".vs-cand.is-playing .vs-wave path.accent { fill: var(--vs-accent); }" in CSS
     assert ".vs-wave path.accent { fill: var(--vs-accent); }" in CSS
     rule = re.search(r"\.btn-link \{([^}]*)\}", CSS).group(1)
     assert "color: inherit" in rule and "text-decoration: none" in rule
     assert "a.btn-link { color: inherit; text-decoration: none; }" in CSS
-    # <a> Download and <button> Save as voice share one box, so one baseline
+    # <a> Download shares one box with the other text buttons, so one baseline
     shared = re.search(r"\.btn-link, a\.btn-link \{([^}]*)\}", CSS).group(1)
     for decl in [
         "display: inline-flex",

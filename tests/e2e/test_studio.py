@@ -658,17 +658,14 @@ def test_take_hover_highlights_the_row(page, live_app, open_studio):
     assert plain != "rgb(26, 26, 26)"
 
 
-def test_download_link_is_styled_like_save_as_voice(page, live_app, open_studio):
+def test_download_link_is_styled_as_a_text_button(page, live_app, open_studio):
     _new_take(page, open_studio)
     link = page.locator("#takes-list .vs-take a.btn-link")
-    button = page.locator("#takes-list .vs-take button.btn-link")
-    assert link.evaluate("el => getComputedStyle(el).color") == button.evaluate(
-        "el => getComputedStyle(el).color"
-    )
+    expect(link).to_have_text("Download")
     assert link.evaluate("el => getComputedStyle(el).textDecorationLine") == "none"
-    # <a> and <button> share one box: same top and height, so one baseline
-    assert abs(link.bounding_box()["y"] - button.bounding_box()["y"]) < 1
-    assert abs(link.bounding_box()["height"] - button.bounding_box()["height"]) < 1
+    assert link.evaluate("el => getComputedStyle(el).color") == "rgb(237, 237, 237)"
+    assert link.bounding_box()["height"] == 24
+    assert page.locator("#takes-list .vs-take button", has_text="Save as voice").count() == 0
 
 
 def test_candidate_play_pause_and_waveform_progress(page, live_app, open_studio):
