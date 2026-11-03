@@ -164,3 +164,60 @@ def test_reference_deploy_files_byte_identical():
     for rel, want in REFERENCE_SHA256.items():
         got = hashlib.sha256((ROOT / rel).read_bytes()).hexdigest()
         assert got == want, f"{rel} was edited (sha256 {got} != pinned {want})"
+
+
+# ------------------------------------------------- M5-T4: CI/CD house pattern (notely parity)
+CI_FILE = ROOT / ".gitlab-ci.yml"
+OVERRIDE = ROOT / "deploy" / "compose.deploy.yaml"
+RUNBOOK = ROOT / "docs" / "RUNBOOK.md"
+STT_URL = "http://vllm.dotslash.io:8890/v1"  # actual value, human 2026-11-02
+
+
+def test_image_override_file_pins_deploy_image():
+    text = OVERRIDE.read_text()
+    assert "${DEPLOY_IMAGE" in text, "override must take the image from CI"
+    assert "voxcpm2-openai" in text
+
+
+def test_ci_mirrors_notely_conventions():
+    ci = CI_FILE.read_text()
+    assert "HARBOR_TOKEN" in ci
+    assert "HARBOR_PASSWORD" not in ci, "house pattern is HARBOR_TOKEN (notely)"
+    assert "GIT_DEPTH: 0" in ci
+    assert 'DOCKER_TLS_CERTDIR: ""' in ci, "dind needs plain tcp://docker:2375"
+    assert "docker:27-dind" in ci
+    assert "compose.deploy.yaml" in ci, "CD must pull/up through the image override"
+    assert "--password-stdin" in ci
+
+
+def test_ci_builds_on_main_and_release_tags():
+    ci = CI_FILE.read_text()
+    assert "$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH" in ci
+    assert r"/^v\d+\.\d+\.\d+$/" in ci, "release tags vX.Y.Z drive builds and production CD"
+    assert "${CI_COMMIT_TAG#v}" in ci, "tagged builds are published as X.Y.Z, not vX.Y.Z"
+
+
+def test_production_deploy_is_tag_only_and_manual():
+    prod = CI_FILE.read_text().split("deploy:production:")[-1]
+    assert '$DEPLOY_TARGET == "production"' in prod
+    assert r"$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/" in prod
+    assert "when: manual" in prod
+    assert "curl -fsS http://127.0.0.1:8880/ready" in prod, "health gate after up -d"
+
+
+def test_deploy_uses_base64_ssh_key_pattern():
+    ci = CI_FILE.read_text()
+    assert "base64 -d" in ci, "DEPLOY_SSH_KEY is base64 -w0 of the key file (notely)"
+    assert "BatchMode=yes" in ci
+    assert "StrictHostKeyChecking=accept-new" in ci
+    assert "DEPLOY_HOST: vllm.dotslash.io" in ci
+    assert "DEPLOY_USER: deploy" in ci
+    assert "DEPLOY_PATH: /opt/voxcpm2-openai" in ci
+
+
+def test_runbook_documents_cd():
+    rb = RUNBOOK.read_text()
+    assert STT_URL in rb, "runbook must carry the exact STT URL"
+    assert "HARBOR_TOKEN" in rb and "HARBOR_PASSWORD" not in rb
+    assert "DEPLOY_SSH_KEY" in rb and "base64" in rb
+    assert "--follow-tags" in rb, "tag-release procedure: git tag vX.Y.Z && git push --follow-tags"

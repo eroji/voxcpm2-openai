@@ -1,0 +1,9 @@
+# CD image override — used only as the second file:
+#   docker compose -f deploy/compose.yaml -f deploy/compose.deploy.yaml pull/up -d
+# deploy/compose.yaml is the frozen reference config and pins the image tag literally
+# (:0.1.0), so CD parameterises it here instead. DEPLOY_IMAGE is exported by the CI
+# deploy jobs (tag vX.Y.Z → image X.Y.Z, main → $CI_COMMIT_SHORT_SHA); without it
+# compose fails loudly rather than silently shipping :0.1.0.
+services:
+  voxcpm2-openai:
+    image: ${DEPLOY_IMAGE:?DEPLOY_IMAGE is required}

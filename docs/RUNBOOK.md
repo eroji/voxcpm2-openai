@@ -24,13 +24,15 @@ docker push harbor.dotslash.io/dotslash/voxcpm2-openai:0.1.0
 
 On the `vllm` host use `podman build` / `podman push` with the same tags.
 
-The CI `package` job builds `harbor.dotslash.io/dotslash/voxcpm2-openai:$CI_COMMIT_SHORT_SHA`
-and pushes it. It needs two **masked** CI/CD variables (Settings → CI/CD → Variables):
+The CI `package` job builds on the default branch (image tag `$CI_COMMIT_SHORT_SHA`) and on
+`vX.Y.Z` release tags (image tag `${CI_COMMIT_TAG#v}`, i.e. `X.Y.Z`) and pushes to
+`harbor.dotslash.io/dotslash/voxcpm2-openai`. It needs two **masked** CI/CD variables
+(Settings → CI/CD → Variables) — the same names as the notely repo:
 
 | Variable | Purpose |
 |---|---|
-| `HARBOR_USER` | Harbor username for `harbor.dotslash.io` |
-| `HARBOR_PASSWORD` | Harbor password/token (masked) |
+| `HARBOR_USER` | Harbor username/robot with push rights to `dotslash/voxcpm2-openai` |
+| `HARBOR_TOKEN` | Its password or robot token, for `docker login` (masked) |
 
 **Without them** the job does not silently skip: it runs a static contract check instead
 (greps `deploy/Containerfile` for the `COPY app/ /opt/app/` and `voxcpm2-3090.yaml` lines and
@@ -65,6 +67,9 @@ Volumes and GPU (from `deploy/compose.yaml`):
 | `/opt/qwen3-tts/data/speakers:/import/qwen3-speakers:ro` | one-time lossless import of the eight Qwen3 voices |
 | `devices: nvidia.com/gpu=GPU-79ad6f3b-…` | CDI GPU 1 (RTX 3090, **host index 1**), shared with `whisper-stt` + TEI |
 | `shm_size: 8g` | engine shared memory |
+
+`STT_URL` is confirmed as `http://vllm.dotslash.io:8890/v1` (whisper-stt, human-verified
+2026-11-02) — that is the value in `deploy/compose.yaml`.
 
 Back up the data dir before every cutover and periodically:
 
@@ -213,27 +218,37 @@ survive a rollback — restore them from the backup tarball (§2) if needed.
 ## 6. Turning on CD
 
 **CD is off by default and has not been exercised on this host.** With no `DEPLOY_TARGET` set, the
-deploy jobs are never created. To enable, set CI/CD variables (masked where marked):
+deploy jobs are never created. The pattern is the proven one from the notely repo. Set these CI/CD
+variables (Settings → CI/CD → Variables):
 
 | Variable | Value | Notes |
 |---|---|---|
 | `DEPLOY_TARGET` | `staging` \| `production` | nothing deploys without it |
-| `DEPLOY_HOST` | ssh target, e.g. `root@vllm.dotslash.io` | |
-| `DEPLOY_PATH` | e.g. `/opt/voxcpm2-openai` | must contain `deploy/compose.yaml` |
-| `DEPLOY_SSH_KEY` | private key (masked) | public half in the host's `authorized_keys` |
+| `DEPLOY_HOST` | default `vllm.dotslash.io` | set in `.gitlab-ci.yml`; override only if the host moves |
+| `DEPLOY_USER` | default `deploy` | key-only account in the `docker` group, owns `$DEPLOY_PATH`; public half of `DEPLOY_SSH_KEY` in `~deploy/.ssh/authorized_keys` |
+| `DEPLOY_PATH` | default `/opt/voxcpm2-openai` | must contain `deploy/compose.yaml` **and** `deploy/compose.deploy.yaml` |
+| `DEPLOY_SSH_KEY` | private key, one line: `base64 -w0 id_ed25519` (masked, protected) | decoded to `~/.ssh/id_ed25519` in the job |
+| `HARBOR_USER` / `HARBOR_TOKEN` | same as §1 | the target does its own `docker login` over stdin, so `HARBOR_TOKEN` must be **protected** to reach tag pipelines |
 
-- `staging`: runs automatically on default-branch pipeline success.
-- `production`: requires a `vX.Y.Z` tag **and** a manual approval on the `deploy:production` job;
-  it finishes with a `curl -fsS http://127.0.0.1:8880/ready` smoke check over ssh.
+- `staging`: runs automatically on default-branch pipeline success, deploying the
+  `$CI_COMMIT_SHORT_SHA` image the `package` job just pushed.
+- `production`: releases are tags. `git tag vX.Y.Z && git push --follow-tags` builds image
+  `X.Y.Z`, then the manual `deploy:production` job (approve it in the pipeline) pins exactly that
+  image — never a later build — and finishes with a `curl -fsS http://127.0.0.1:8880/ready`
+  health gate over ssh.
+
+The image is pinned through `deploy/compose.deploy.yaml` (override:
+`image: ${DEPLOY_IMAGE:?DEPLOY_IMAGE is required}`), so the frozen reference `deploy/compose.yaml`
+keeps its literal `:0.1.0` tag; copy both files to `$DEPLOY_PATH/deploy` on the host.
 
 Caveats before enabling:
 
-- The jobs pass `DEPLOY_IMAGE=$CI_COMMIT_SHORT_SHA` into `docker compose`, but the reference
-  `deploy/compose.yaml` pins the image tag literally (`:0.1.0`). Either parameterise
-  the image line on the host copy or update the tag before trusting CD to ship a specific build.
 - The deploy jobs run `docker compose` over ssh, but the `vllm` host uses **Podman**: this only
   works if a `podman-docker` wrapper is installed there. Otherwise change the deploy commands to
-  `podman-compose -f deploy/compose.yaml pull/up -d` (a `.gitlab-ci.yml` change — new task).
+  `podman-compose -f deploy/compose.yaml -f deploy/compose.deploy.yaml pull/up -d` (a
+  `.gitlab-ci.yml` change — new task).
+- Port 8880 in the health gate assumes the §4 cutover has happened; before cutover the container
+  serves 8881.
 
 ## 7. M0 spikes
 
