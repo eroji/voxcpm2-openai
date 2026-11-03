@@ -132,9 +132,12 @@ input[type="checkbox"] { width: 14px; height: 14px; margin: 0; accent-color: var
 .vs-cand .pick[aria-pressed="true"] { background: var(--vs-fg); color: var(--vs-bg); font-weight: 700; }
 
 /* Engine */
-.vs-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); border-top: var(--vs-rule-section); }
+.vs-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-top: var(--vs-rule-section); }
+@media (max-width: 900px) { .vs-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .vs-stats { grid-template-columns: 1fr; } }
 .vs-stat { padding: var(--vs-s5) var(--vs-s6) 14px 0; border-bottom: var(--vs-rule-row); display: flex; flex-direction: column; gap: 2px; }
-.vs-stat .v { font-size: var(--vs-fs-stat); font-weight: 700; letter-spacing: -0.02em; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.vs-stat .v { font-size: var(--vs-fs-stat); font-weight: 700; letter-spacing: -0.02em; line-height: 1.15; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Keep .v short (VoxCPM2, RTX 3090, vLLM-Omni); put full names and versions in the note line. */
 .vs-code { overflow-x: auto; background: var(--vs-code-bg); }
 .vs-code pre { margin: 0; padding: var(--vs-s5) 14px; font-size: var(--vs-fs-small); white-space: pre; }
 
@@ -379,21 +382,25 @@ input[type="checkbox"] { width: 14px; height: 14px; margin: 0; accent-color: var
       <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn-secondary">Run warm-up</button><button class="btn-inverse">Restart engine</button></div>
     </div>
     <div class="vs-stats">
-      <div class="vs-stat"><span class="meta">Model</span><span class="v">VoxCPM2</span><span class="meta">2B · 48 kHz output</span></div>
-      <div class="vs-stat"><span class="meta">GPU</span><span class="v">RTX 3090</span><span class="meta">Shared with whisper-stt, TEI</span></div>
-      <div class="vs-stat"><span class="meta">VRAM in use</span><span class="v">9.3 GB</span><span class="meta">of 24 GB on the card</span></div>
+      <div class="vs-stat"><span class="meta">Model</span><span class="v" title="openbmb/VoxCPM2">VoxCPM2</span><span class="meta">openbmb/VoxCPM2 · 2B · 48 kHz</span></div>
+      <div class="vs-stat"><span class="meta">GPU</span><span class="v" title="NVIDIA GeForce RTX 3090">RTX 3090</span><span class="meta">Shared with whisper-stt, TEI</span></div>
+      <div class="vs-stat"><span class="meta">GPU memory used</span><span class="v">9.3 GB</span><span class="meta">of 24 GB, all processes on the card</span></div>
       <div class="vs-stat"><span class="meta">KV cache</span><span class="v">2 GiB</span><span class="meta">Max 2 concurrent requests</span></div>
-      <div class="vs-stat"><span class="meta">Warm RTF</span><span class="v">0.14</span><span class="meta">Non-streamed WAV, English</span></div>
+      <div class="vs-stat"><span class="meta">Warm RTF</span><span class="v">0.14</span><span class="meta">Last 20 requests, warm-up excluded</span></div>
       <div class="vs-stat"><span class="meta">First audio</span><span class="v">154 ms</span><span class="meta">Streamed PCM, warm</span></div>
       <div class="vs-stat"><span class="meta">Voices</span><span class="v">8</span><span class="meta">4 languages</span></div>
-      <div class="vs-stat"><span class="meta">Runtime</span><span class="v">vLLM-Omni</span><span class="meta">0.30.0 · single stage</span></div>
+      <div class="vs-stat"><span class="meta">Runtime</span><span class="v">vLLM-Omni</span><span class="meta">0.30.0 · vLLM 0.30.0</span></div>
     </div>
     <div class="vs-row" style="border-top:none;padding-top:16px">
       <h3 class="lbl" style="margin:0">Endpoint</h3>
       <div class="ctl vs-code"><pre>POST http://vllm.dotslash.io:8880/v1/audio/speech
-{ "model": "voxcpm2", "voice": "ashley-en",
-  "input": "…", "instructions": "calm, level",
-  "response_format": "pcm", "stream": true }</pre></div>
+{
+  "model": "voxcpm2",
+  "voice": "ashley-en",
+  "input": "…",
+  "response_format": "pcm",
+  "stream": true
+}</pre></div>
     </div>
   </section>
 </div>
