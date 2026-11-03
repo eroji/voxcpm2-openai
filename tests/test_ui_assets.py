@@ -24,7 +24,7 @@ def js(name):
     return (JS_DIR / name).read_text(encoding="utf-8")
 
 
-TABS = ["speak", "voices", "clone", "design", "languages", "engine"]
+TABS = ["speak", "voices", "clone", "design", "languages", "pronunciation", "engine"]
 
 # Element IDs from docs/CONTRACTS.md §7 (header row handled separately).
 CONTRACT_IDS = [
@@ -94,8 +94,8 @@ def test_shell_basics():
         assert f'class="vs-tab" data-tab="{tab}"' in HTML
     for tab in TABS:
         assert f'id="screen-{tab}"' in HTML
-    assert HTML.count('class="vs-tab"') == 6
-    assert HTML.count('class="vs-screen"') == 6
+    assert HTML.count('class="vs-tab"') == 7
+    assert HTML.count('class="vs-screen"') == 7
 
 
 def test_contract_ids_exist_exactly_once():
@@ -598,7 +598,8 @@ def test_starting_log_uses_grid_rows_and_parser():
 def test_languages_screen_markup():
     assert 'id="screen-languages"' in HTML
     assert '<span class="num">05</span>Languages' in HTML
-    assert '<span class="num">06</span>Engine' in HTML
+    assert '<span class="num">06</span>Pronunciation' in HTML
+    assert '<span class="num">07</span>Engine' in HTML
     for el_id in ["lang-rows", "lang-count", "add-lang", "add-lang-btn"]:
         assert f'id="{el_id}"' in HTML, el_id
     assert '<div class="vs-lang-head"' in HTML  # table head ported from the reference

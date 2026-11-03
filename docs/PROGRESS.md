@@ -299,6 +299,14 @@ spikes remain host-run. CI has not run yet: the branch is local (47+ commits ahe
   Voices are ordered by language tag then name; the library groups by language by default with
   sortable columns; delete confirm slides down without moving the row. Release v0.3.10.
 
+- **2026-11-03 —** Human decision: add a Pronunciation tab (06; Engine moves to 07), adapted from
+  qwen3-tts-openai — one respelling rule set for every language, applied to `/v1` and Speak input
+  before the `(style)` prefix (never Design/Clone), stored in `DATA_DIR/pronunciation.json`, with
+  test box and JSON import (merge/replace, dry-run preview) / export in qwen3's terms/units format.
+  Voices sorted by language is one continuous table (no group rows). Speed slider zones live in the
+  track. Tables no longer widen the page at 390 px (`.sr` header labels escaped the scroller).
+  Release v0.3.11.
+
 ## Next action
 
 1. `git push origin main` and watch the GitLab pipeline (`checks`, `javascript`, `test`, `e2e`,

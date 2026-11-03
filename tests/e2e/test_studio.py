@@ -21,7 +21,7 @@ from playwright.sync_api import expect  # missing Playwright = collection error,
 from conftest import _seed, _serve, _settings
 
 RESULTS_DIR = Path(__file__).resolve().parents[2] / "test-results"
-SCREENS = ["speak", "voices", "clone", "design", "languages", "engine"]
+SCREENS = ["speak", "voices", "clone", "design", "languages", "pronunciation", "engine"]
 _serve_app = contextlib.contextmanager(_serve)  # conftest's _serve is a bare generator
 
 
@@ -43,12 +43,14 @@ def live_langs(fake_engine, tmp_path):
 def test_shell_and_engine_status(page, live_app, open_studio):
     open_studio(page)
     assert page.title() == "Voice Studio"
-    expect(page.locator(".vs-tab")).to_have_count(6)
+    expect(page.locator(".vs-tab")).to_have_count(7)
     expect(page.locator('.vs-tab[data-tab="speak"]')).to_have_attribute("aria-current", "page")
     expect(page.locator("#engine-status")).to_have_text(re.compile("^Ready"), timeout=10000)
 
 
-@pytest.mark.parametrize("screen", ["voices", "clone", "design", "languages", "engine", "speak"])
+@pytest.mark.parametrize(
+    "screen", ["voices", "clone", "design", "languages", "pronunciation", "engine", "speak"]
+)
 def test_hash_routing(page, live_app, open_studio, screen):
     open_studio(page)
     page.click(f'.vs-tab[data-tab="{screen}"]')
@@ -749,13 +751,13 @@ def test_voice_editor_is_an_aligned_table_row(page, live_app, open_studio):
 
     def aligned() -> None:
         """Every row, edited or not, sits on the header's six-column grid."""
-        grid = page.locator(".vs-table thead tr").evaluate(xs)
+        grid = page.locator("#voices-list .vs-table thead tr").evaluate(xs)
         assert len(grid) == 6
         assert row.evaluate(xs) == grid
         assert other.evaluate(xs) == grid
 
     aligned()
-    columns = page.locator(".vs-table thead tr").evaluate(xs)
+    columns = page.locator("#voices-list .vs-table thead tr").evaluate(xs)
     # vertical centre of each cell's first line: a control's box, else its first text run
     centres = """tr => [...tr.children].map(td => {
       const c = td.querySelector('input, select, textarea, button');
@@ -772,7 +774,7 @@ def test_voice_editor_is_an_aligned_table_row(page, live_app, open_studio):
     row.get_by_role("button", name="Edit").click()
     expect(row.locator('textarea[data-field="ref_text"]')).to_be_visible()
     # fixed layout: opening the editor never moves the columns
-    assert page.locator(".vs-table thead tr").evaluate(xs) == columns
+    assert page.locator("#voices-list .vs-table thead tr").evaluate(xs) == columns
     # "slide down": every first line stays put, only the transcript cell grows downward
     page.wait_for_timeout(300)  # let the slide-open animation finish
     for was, now in zip(before, row.evaluate(centres), strict=True):
@@ -850,6 +852,8 @@ def test_screenshot_390(page, live_app, open_studio, screen):
     open_studio(mobile, screen)
     _settle(mobile, screen)
     mobile.screenshot(path=str(RESULTS_DIR / f"ui-{screen}-390.png"), full_page=True)
+    # wide tables scroll inside their wrapper; the page itself never scrolls sideways
+    assert mobile.evaluate("document.documentElement.scrollWidth") <= 390
     context.close()
 
 
@@ -869,22 +873,21 @@ def test_style_and_design_description_survive_a_reload(page, live_app, open_stud
 
 
 def test_speed_slider_zones_and_take_tempo(page, live_app, open_studio):
-    """Speed 0.85–1.15×: 0.90–1.10 natural (green), the ends yellow; off while streaming."""
+    """Speed 0.85–1.15×: green/yellow zones in the track itself; greyed out while streaming."""
     open_studio(page)
-    speed, zone = page.locator("#speed"), page.locator("#speed-zone")
+    speed = page.locator("#speed")
     expect(speed).to_be_disabled()  # streaming is the default: speed is not applied
-    expect(zone).to_have_text("Not applied while streaming")
+    assert speed.evaluate("el => getComputedStyle(el).opacity") == "0.45"
+    track = speed.evaluate("el => getComputedStyle(el).backgroundImage")
+    assert "rgb(52, 199, 89)" in track and "rgb(255, 204, 0)" in track  # zones in the track
+    assert page.locator("#screen-speak .vs-zone, #speed-zone").count() == 0  # no bar, no text
     page.click("#stream-toggle")
     expect(speed).to_be_enabled()
     expect(page.locator("#speed-out")).to_have_text("1.00×")
-    expect(zone).to_have_text("Natural")
-    expect(zone).to_have_css("color", "rgb(52, 199, 89)")  # --vs-zone-ok
-    speed.fill("1.1")
-    expect(zone).to_have_text("Natural")
+    expect(speed).to_have_attribute("aria-valuetext", "1.00 times, natural")
     speed.fill("0.85")
     expect(page.locator("#speed-out")).to_have_text("0.85×")
-    expect(zone).to_have_text("May sound processed")
-    expect(zone).to_have_css("color", "rgb(255, 204, 0)")  # --vs-zone-warn
+    expect(speed).to_have_attribute("aria-valuetext", "0.85 times, may sound processed")
     sent = []
     page.on("request", lambda r: sent.append(r.post_data_json) if "/api/speak" in r.url else None)
     page.fill("#speak-text", "Speed check line.")
@@ -893,11 +896,11 @@ def test_speed_slider_zones_and_take_tempo(page, live_app, open_studio):
     assert sent and sent[-1]["speed"] == 0.85
 
 
-def test_voices_grouped_by_language_and_sortable(page, live_app, open_studio):
+def test_voices_sorted_by_language_in_one_table(page, live_app, open_studio):
     open_studio(page, "voices")
-    groups = page.locator("#voice-rows tr.vs-group")
-    expect(groups).to_have_count(3)  # default: grouped by language, one header each
-    expect(groups.first).to_contain_text("English")
+    # default: sorted by language, then name, in one continuous table (no group rows)
+    expect(page.locator("#voice-rows tr[data-key]")).to_have_count(3)
+    assert page.locator("#voice-rows tr:not([data-key])").count() == 0
     expect(page.locator("th:has(.vs-sort[data-sort='language'])")).to_have_attribute(
         "aria-sort", "ascending"
     )
@@ -906,14 +909,11 @@ def test_voices_grouped_by_language_and_sortable(page, live_app, open_studio):
     assert rows.evaluate_all(keys) == ["ashley-en", "ashley-ja", "ashley-ko"]
     name = page.locator(".vs-sort[data-sort='name']")
     name.click()
-    expect(groups).to_have_count(0)  # another column: a flat sorted list
     name.click()  # same column again flips the direction
     expect(page.locator("th:has(.vs-sort[data-sort='name'])")).to_have_attribute(
         "aria-sort", "descending"
     )
     assert rows.evaluate_all(keys) == ["ashley-ko", "ashley-ja", "ashley-en"]
-    page.locator(".vs-sort[data-sort='language']").click()
-    expect(groups).to_have_count(3)
 
 
 def test_delete_confirm_slides_down_without_moving_the_row(page, live_app, open_studio):
@@ -933,3 +933,46 @@ def test_delete_confirm_slides_down_without_moving_the_row(page, live_app, open_
         assert abs(was - now) <= 1
     row.get_by_role("button", name="Cancel").click()
     expect(row.get_by_role("button", name="Audition")).to_be_visible()
+
+
+def test_pronunciation_rules_test_import_and_speech(page, live_app, open_studio, tmp_path):
+    """Pronunciation: add a rule, save, test it; import a terms/units file (dry-run preview)."""
+    open_studio(page, "pronunciation")
+    expect(page.locator("#pron-empty")).to_be_visible()
+    page.click("#pron-add")
+    row = page.locator("#pron-rows tr").last
+    row.get_by_label("Match, rule 1").fill("nginx")
+    row.get_by_label("Say, rule 1").fill("engine X")
+    expect(page.locator("#pron-dirty")).to_be_visible()
+    page.click("#pron-save")
+    expect(page.locator("#pron-status")).to_contain_text("Rules saved")
+    expect(page.locator("#pron-save")).to_be_disabled()
+    page.fill("#pron-test-text", "restart nginx, not nginx.conf")
+    page.click("#pron-test-btn")
+    expect(page.locator("#pron-test-out")).to_have_text("→ restart engine X, not nginx.conf")
+
+    rules = tmp_path / "rules.json"
+    rules.write_text(
+        json.dumps(
+            {
+                "terms": [{"match": "k8s", "say": "Kubernetes"}],
+                "units": [{"match": "GB", "say": "gigabytes"}],
+            }
+        )
+    )
+    page.set_input_files("#pron-file", str(rules))
+    expect(page.locator("#pron-preview")).to_have_text(
+        "2 rules in the file: 2 new, 0 changed → 3 rules."
+    )
+    page.check('input[name="pron-mode"][value="replace"]')
+    expect(page.locator("#pron-preview")).to_have_text("Replaces 1 rule with the file's 2.")
+    page.check('input[name="pron-mode"][value="merge"]')
+    page.click("#pron-import")
+    expect(page.locator("#pron-status")).to_contain_text("Rules imported")
+    expect(page.locator("#pron-rows tr")).to_have_count(3)
+    expect(page.locator("#pron-count")).to_have_text("3")
+    page.fill("#pron-test-text", "k8s with 24GB")
+    page.click("#pron-test-btn")
+    expect(page.locator("#pron-test-out")).to_have_text("→ Kubernetes with 24 gigabytes")
+    # the shared live_app: leave no rules behind for the rest of the suite
+    httpx.put(f"{live_app}/api/pronunciation", json={"rules": []})

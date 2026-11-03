@@ -20,8 +20,10 @@ from app.config import Settings
 from app.engine import EngineClient
 from app.errors import APIError
 from app.languages import LanguageStore
+from app.pronunciation import PronunciationStore
 from app.routers import (
     languages,
+    pronunciation,
     studio_clone,
     studio_design,
     studio_engine,
@@ -66,7 +68,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.takes = takes
     app.state.engine = engine
     app.state.languages = LanguageStore(settings, store)
-    app.state.speech = SpeechService(store, engine, settings)
+    app.state.pronunciation = PronunciationStore(settings)
+    app.state.speech = SpeechService(store, engine, settings, app.state.pronunciation)
     app.state.warmup = WarmupService(store, engine, settings)
 
     try:
@@ -222,6 +225,7 @@ def create_app(settings: Settings | None = None, *, engine: EngineClient | None 
     app.include_router(studio_takes.router)
     app.include_router(studio_engine.router)
     app.include_router(studio_design.router)
+    app.include_router(pronunciation.router)
 
     if settings.static_dir.exists():
         app.mount("/static", StaticFiles(directory=str(settings.static_dir)), name="static")

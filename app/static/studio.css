@@ -68,15 +68,24 @@ code, pre { font-family: var(--vs-mono); }
 .vs-value { font-size: var(--vs-fs-value); font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
 .vs-grid-params { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: var(--vs-s7); }
 input[type="range"] { accent-color: var(--vs-fg); }
-/* Speed zones under the slider: 0.90–1.10× natural (green), the ends may sound processed
- * (yellow). The inline margin lines the segments up with the thumb's travel. */
-.vs-zone { display: flex; height: 3px; margin: 0 8px; }
-.vs-zone .ok { flex: 4; background: var(--vs-zone-ok); }
-.vs-zone .warn { flex: 1; background: var(--vs-zone-warn); }
-.vs-zone-label { font-size: var(--vs-fs-label); color: var(--vs-zone-ok); }
-.vs-zone-label.is-warn { color: var(--vs-zone-warn); }
-.vs-zone-label.is-off { color: var(--vs-muted); }
-input:disabled ~ .vs-zone { opacity: .45; }
+/* Speed slider with its zones in the track: 0.90–1.10× natural (green), the ends may sound
+ * processed (yellow). The stops are inset by half the 14px thumb so they line up with the
+ * thumb's travel. Disabled (streaming) greys out via the shared :disabled rule. */
+.vs-zone-range {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 16px;
+  margin: 0 2px; /* the native sliders' side margins: same width as CFG/steps */
+  background: linear-gradient(to right,
+      var(--vs-zone-warn) calc(7px + (100% - 14px) / 6),
+      var(--vs-zone-ok) calc(7px + (100% - 14px) / 6) calc(7px + (100% - 14px) * 5 / 6),
+      var(--vs-zone-warn) calc(7px + (100% - 14px) * 5 / 6))
+    center / 100% 4px no-repeat;
+}
+.vs-zone-range::-webkit-slider-runnable-track { height: 16px; background: transparent; }
+.vs-zone-range::-moz-range-track { height: 16px; background: transparent; }
+.vs-zone-range::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; margin-top: 1px; border-radius: var(--vs-radius); background: var(--vs-fg); border: 2px solid var(--vs-bg); }
+.vs-zone-range::-moz-range-thumb { box-sizing: border-box; width: 14px; height: 14px; border-radius: var(--vs-radius); background: var(--vs-fg); border: 2px solid var(--vs-bg); }
 input[type="checkbox"] { width: 14px; height: 14px; margin: 0; accent-color: var(--vs-fg); }
 
 /* Buttons */
@@ -131,7 +140,7 @@ a.btn-link { color: inherit; text-decoration: none; } /* Download reads as a lin
 .vs-filters { display: flex; flex-wrap: wrap; gap: 0 var(--vs-s7); }
 .vs-filter { min-height: var(--vs-h-input); padding: 0; background: none; border: none; border-bottom: 2px solid transparent; color: var(--vs-muted); }
 .vs-filter[aria-pressed="true"] { color: var(--vs-fg); font-weight: 700; border-bottom-color: var(--vs-fg); }
-.vs-table-wrap { overflow-x: auto; }
+.vs-table-wrap { overflow-x: auto; position: relative; } /* contains the .sr header labels, which would widen the page */
 /* Fixed layout: column widths come from the colgroup, so opening the inline editor (or a
  * long transcript) never reflows the columns of the other rows. */
 .vs-table { width: 100%; min-width: 820px; border-collapse: collapse; table-layout: fixed; }
@@ -160,10 +169,6 @@ a.btn-link { color: inherit; text-decoration: none; } /* Download reads as a lin
 .vs-table th[aria-sort] { color: var(--vs-fg); }
 .vs-table th[aria-sort="ascending"] .vs-sort::after { content: "↑"; }
 .vs-table th[aria-sort="descending"] .vs-sort::after { content: "↓"; }
-/* Language group header (default sort): one full-width row above each language's voices */
-.vs-table tr.vs-group td { height: auto; padding: var(--vs-s6) 0 var(--vs-s2); border-bottom: var(--vs-rule-row); font-size: var(--vs-fs-label); }
-.vs-table tr.vs-group:first-child td { padding-top: var(--vs-s4); }
-.vs-table tr.vs-group .meta { margin-left: var(--vs-s2); }
 /* Inline voice editor: the first line keeps the normal row's geometry (4px padding + a 28px
  * line), so Name, Language, Source, Reference and the links never move; only the transcript
  * cell grows downward ("slides down", voices.js animates it open). */
@@ -242,6 +247,17 @@ a.btn-link { color: inherit; text-decoration: none; } /* Download reads as a lin
 .vs-stat .v { font-size: var(--vs-fs-stat); font-weight: 700; letter-spacing: -0.02em; line-height: 1.15; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .vs-code { overflow-x: auto; background: var(--vs-code-bg); }
 .vs-code pre { margin: 0; padding: var(--vs-s5) 14px; font-size: var(--vs-fs-small); white-space: pre; }
+
+/* Pronunciation */
+.vs-pron-table { min-width: 620px; }
+.vs-pron-table col.c-flag { width: 104px; }
+.vs-pron-table col.c-del { width: 84px; }
+.vs-pron-table td .vs-input { width: 100%; }
+.vs-pron-table th:nth-child(n+3):nth-child(-n+5), .vs-pron-table td.c { text-align: center; }
+.vs-file { display: inline-flex; align-items: center; cursor: pointer; }
+.vs-radios { display: flex; flex-direction: column; gap: var(--vs-s2); margin: 0; padding: 0; border: none; font-size: var(--vs-fs-small); }
+.vs-radios label { display: flex; gap: var(--vs-s3); align-items: baseline; }
+#pron-test-out { margin: 0; font-size: var(--vs-fs-small); color: var(--vs-fg-2); white-space: pre-wrap; }
 
 /* Languages */
 .vs-lang-table { min-width: 640px; }

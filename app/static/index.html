@@ -29,7 +29,8 @@
     <button class="vs-tab" data-tab="clone"><span class="num">03</span>Clone</button>
     <button class="vs-tab" data-tab="design"><span class="num">04</span>Design</button>
     <button class="vs-tab" data-tab="languages"><span class="num">05</span>Languages</button>
-    <button class="vs-tab" data-tab="engine"><span class="num">06</span>Engine</button>
+    <button class="vs-tab" data-tab="pronunciation"><span class="num">06</span>Pronunciation</button>
+    <button class="vs-tab" data-tab="engine"><span class="num">07</span>Engine</button>
   </nav>
 </header>
 
@@ -67,7 +68,7 @@
         <div class="ctl vs-grid-params">
           <div class="vs-field"><label for="cfg">Guidance (CFG)</label><output class="vs-value" for="cfg" id="cfg-out">2.0</output><input id="cfg" type="range" min="1" max="4" step="0.1" value="2"></div>
           <div class="vs-field"><label for="steps">Diffusion steps</label><output class="vs-value" for="steps" id="steps-out">10</output><input id="steps" type="range" min="4" max="30" step="1" value="10"></div>
-          <div class="vs-field"><label for="speed">Speed</label><output class="vs-value" for="speed" id="speed-out">1.00×</output><input id="speed" type="range" min="0.85" max="1.15" step="0.05" value="1" aria-describedby="speed-zone"><div class="vs-zone" aria-hidden="true"><span class="warn"></span><span class="ok"></span><span class="warn"></span></div><span class="vs-zone-label" id="speed-zone">Natural</span></div>
+          <div class="vs-field"><label for="speed">Speed</label><output class="vs-value" for="speed" id="speed-out">1.00×</output><input class="vs-zone-range" id="speed" type="range" min="0.85" max="1.15" step="0.05" value="1"></div>
           <div class="vs-field"><label for="fmt">Format<span class="hint" id="fmt-hint">Streaming uses PCM at 48 kHz</span></label><select class="vs-select" id="fmt"><option value="wav">WAV · 48 kHz</option><option value="pcm">PCM stream</option><option value="mp3">MP3</option><option value="opus">Opus</option></select></div>
         </div>
       </div>
@@ -245,7 +246,71 @@
   </div>
 </div>
 
-<!-- 06 ENGINE -->
+<!-- 06 PRONUNCIATION -->
+<div class="vs-screen" id="screen-pronunciation" hidden>
+  <div class="vs-cols">
+    <section class="vs-col-main" aria-labelledby="pron-h">
+      <div class="vs-head">
+        <h2 class="vs-h2" id="pron-h">Pronunciation <span class="count" id="pron-count"></span></h2>
+        <span style="display:inline-flex;gap:8px;align-items:center">
+          <span class="meta" id="pron-dirty" hidden>Unsaved changes</span>
+          <button class="btn-secondary" id="pron-revert" disabled>Revert</button>
+          <button class="btn-primary" id="pron-save" disabled>Save</button>
+        </span>
+      </div>
+      <p class="vs-error" id="pronunciation-error" role="alert" hidden></p>
+      <p class="vs-status" id="pron-status" role="status" hidden></p>
+      <div class="vs-toolbar">
+        <label class="sr" for="pron-filter">Filter rules</label>
+        <input class="vs-input" id="pron-filter" type="search" placeholder="Filter rules">
+        <span class="meta" id="pron-filtered"></span>
+      </div>
+      <div class="vs-table-wrap">
+        <table class="vs-table vs-pron-table">
+          <colgroup><col><col><col class="c-flag"><col class="c-flag"><col class="c-flag"><col class="c-del"></colgroup>
+          <thead><tr><th>Match</th><th>Say</th><th>Whole word</th><th>After a number</th><th>Case-sensitive</th><th><span class="sr">Remove</span></th></tr></thead>
+          <tbody id="pron-rows"></tbody>
+        </table>
+      </div>
+      <p class="meta" id="pron-empty" style="white-space:normal" hidden>No rules yet. Add one, or import a JSON file.</p>
+      <div class="vs-actions" style="border-top:none"><button class="btn-secondary" id="pron-add">Add rule</button></div>
+    </section>
+    <aside class="vs-col-side vs-steps" aria-labelledby="pron-test-h">
+      <h3 id="pron-test-h">Test</h3>
+      <label class="sr" for="pron-test-text">Text to test</label>
+      <textarea class="vs-text" id="pron-test-text" rows="3" placeholder="e.g. Running vLLM-Omni on 2 GPUs with 24GB VRAM"></textarea>
+      <div><button class="btn-secondary" id="pron-test-btn">Rewrite</button></div>
+      <p id="pron-test-out" aria-live="polite"></p>
+      <p class="meta" id="pron-test-note" style="white-space:normal" hidden>The test uses the saved rules: save your changes to try them.</p>
+
+      <h3 style="margin-top:14px">Import / export</h3>
+      <p class="meta" style="white-space:normal">A JSON file with <code>terms</code> (whole words) and <code>units</code> (only after a number), each a list of <code>{"match", "say"}</code> with an optional <code>"case_sensitive": true</code>. Export writes the same format. A plain list of rules or a qwen3-tts <code>voices.json</code> also works.</p>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <label class="btn-secondary vs-file" for="pron-file">Choose JSON file…</label>
+        <input class="sr" id="pron-file" type="file" accept=".json,application/json">
+        <span class="meta" id="pron-file-name"></span>
+      </div>
+      <fieldset class="vs-radios">
+        <legend class="sr">Import mode</legend>
+        <label><input type="radio" name="pron-mode" value="merge" checked> Merge: update rules with the same match, add new ones, keep the rest</label>
+        <label><input type="radio" name="pron-mode" value="replace"> Replace: the file's rules become the whole set</label>
+      </fieldset>
+      <p class="meta" id="pron-preview" style="white-space:normal" aria-live="polite"></p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn-primary" id="pron-import" disabled>Import</button>
+        <button class="btn-secondary" id="pron-export">Export rules</button>
+      </div>
+
+      <h3 style="margin-top:14px">How rules apply</h3>
+      <p><b>1</b>  Respellings rewrite the text before it is spoken, for every voice and language: the voice says the respelling in its own language.</p>
+      <p><b>2</b>  <b>Whole word</b> skips matches inside longer words and dotted names (nginx.conf). <b>After a number</b> is for units: “24 GB” and “24GB” both become “24 gigabytes”.</p>
+      <p><b>3</b>  The longest match wins and each part of the text is rewritten once, so rule order does not matter.</p>
+      <p><b>4</b>  Applies to Speak and the API. Takes keep the text as typed; Clone and Design are not rewritten.</p>
+    </aside>
+  </div>
+</div>
+
+<!-- 07 ENGINE -->
 <div class="vs-screen" id="screen-engine" hidden>
   <section aria-labelledby="engine-h">
     <div class="vs-head">
@@ -271,6 +336,7 @@
 <script type="module" src="/static/js/clone.js"></script>
 <script type="module" src="/static/js/design.js"></script>
 <script type="module" src="/static/js/languages.js"></script>
+<script type="module" src="/static/js/pronunciation.js"></script>
 <script type="module" src="/static/js/engine.js"></script>
 </body>
 </html>

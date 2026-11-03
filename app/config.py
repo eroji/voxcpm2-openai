@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(extra="ignore", case_sensitive=False, env_file=None)
 
     app_name: str = "voxcpm2-openai"
-    version: str = "0.3.10"
+    version: str = "0.3.11"
 
     data_dir: Path = Path("/data")
     static_dir: Path = APP_DIR / "static"

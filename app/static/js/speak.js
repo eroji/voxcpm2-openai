@@ -349,16 +349,15 @@ function syncFmt() {
 }
 
 /* Speed: 0.90–1.10× sounds natural; the 0.85/1.15 ends may sound processed (time-stretch).
- * While streaming the label says it is not applied, so the values row stays aligned. */
+ * The zones are colours in the track; screen readers get the same meaning as value text. */
 function syncSpeed() {
-  const value = +$("speed").value;
-  const off = $("speed").disabled;
+  const speed = $("speed");
+  const value = +speed.value;
   const natural = value >= 0.895 && value <= 1.105; // float-safe 0.90–1.10
-  const zone = $("speed-zone");
   $("speed-out").textContent = `${value.toFixed(2)}×`;
-  zone.textContent = off ? "Not applied while streaming" : natural ? "Natural" : "May sound processed";
-  zone.classList.toggle("is-warn", !off && !natural);
-  zone.classList.toggle("is-off", off);
+  let text = `${value.toFixed(2)} times, ${natural ? "natural" : "may sound processed"}`;
+  if (speed.disabled) text += ", not applied while streaming";
+  speed.setAttribute("aria-valuetext", text);
 }
 
 async function generate() {

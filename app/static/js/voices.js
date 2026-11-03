@@ -23,7 +23,7 @@ const NAME_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/; // same rule the server validates 
 let query = "";
 let lang = "all";
 let busy = false; // one editor round trip at a time (save or transcribe)
-// Column sort. "language" (the default) groups rows under a header per language.
+// Column sort; the default keeps each language's voices together, A–Z, in one table.
 let sortKey = "language";
 let sortDir = 1; // 1 ascending, -1 descending
 
@@ -53,15 +53,6 @@ function syncSortHeaders() {
     if (button.dataset.sort !== sortKey) th.removeAttribute("aria-sort");
     else th.setAttribute("aria-sort", sortDir > 0 ? "ascending" : "descending");
   }
-}
-
-function groupRow(code, count) {
-  const tr = el("tr", "vs-group");
-  const td = el("td");
-  td.colSpan = 6;
-  td.append(el("b", null, formatLang(code) || "No language"), " ", el("span", "meta", String(count)));
-  tr.append(td);
-  return tr;
 }
 
 function el(tag, cls, text) {
@@ -169,16 +160,7 @@ function render() {
     tbody.append(tr);
   } else {
     syncSortHeaders();
-    let group = null;
-    const sorted = sortVoices(list);
-    for (const v of sorted) {
-      const code = SORT_VALUE.language(v);
-      if (sortKey === "language" && code !== group) {
-        group = code;
-        tbody.append(groupRow(code, sorted.filter(x => SORT_VALUE.language(x) === code).length));
-      }
-      tbody.append(voiceRow(v));
-    }
+    for (const v of sortVoices(list)) tbody.append(voiceRow(v));
   }
 }
 

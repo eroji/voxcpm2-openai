@@ -14,6 +14,7 @@ from app.config import Settings
 from app.engine import EngineClient, StreamHandle, SynthParams
 from app.errors import APIError, BadRequest, EngineError, EngineNotReady
 from app.models import SpeechRequest
+from app.pronunciation import PronunciationStore
 from app.store import VoiceStore
 
 logger = logging.getLogger(__name__)
@@ -253,10 +254,17 @@ async def ffmpeg_stream(
 
 
 class SpeechService:
-    def __init__(self, store: VoiceStore, engine: EngineClient, settings: Settings) -> None:
+    def __init__(
+        self,
+        store: VoiceStore,
+        engine: EngineClient,
+        settings: Settings,
+        pronunciation: PronunciationStore | None = None,
+    ) -> None:
         self.store = store
         self.engine = engine
         self.settings = settings
+        self.pronunciation = pronunciation
 
     def _resolve_adhoc(self, request: SpeechRequest) -> ResolvedVoice:
         ref_audio = (request.ref_audio or "").strip()
@@ -327,6 +335,8 @@ class SpeechService:
 
     def _params(self, request: SpeechRequest, voice: ResolvedVoice, *, stream: bool) -> SynthParams:
         text = request.input
+        if self.pronunciation is not None:
+            text = self.pronunciation.apply(text)  # respellings first: never inside (style)
         if request.instructions and request.instructions.strip():
             # VoxCPM2 controllable cloning/design syntax (SPEC §12 S1): (control)text.
             text = f"({request.instructions.strip()}){text}"

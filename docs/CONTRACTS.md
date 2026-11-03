@@ -13,7 +13,8 @@ task needs a change, it reports `BLOCKED` and the lead amends this file in a new
 | `app/audio.py` | `read_audio(bytes)→(float32 mono, rate)`, `wav_bytes`, `pcm_s16le`, `pcm_s16le_to_float`, `duration_s`, `resample`, `transcode(samples, rate, fmt, target_rate=, speed=)`, `trim_silence`, `peak_normalize`, `rms_envelope(samples, 72)`, `to_wav_data_uri`, `decode_data_uri`, `is_data_uri`, `is_http_url`, `mime_for`. |
 | `app/store.py` | `VoiceStore(settings)` and `TakeStore(settings)`. See §4. |
 | `app/engine.py` | `EngineClient` see §5. |
-| `app/speech.py` | `SpeechService(store, engine, settings)`; `synthesize(req)->SpeechResult`, `stream(req)->StreamingSpeech`, `resolve(req)->ResolvedVoice`. |
+| `app/speech.py` | `SpeechService(store, engine, settings, pronunciation=None)`; `synthesize(req)->SpeechResult`, `stream(req)->StreamingSpeech`, `resolve(req)->ResolvedVoice`. The input is respelled by the `PronunciationStore` before the `(style)` prefix is added. |
+| `app/pronunciation.py` | `PronRule`, `apply_pronunciation(text, rules)`, `parse_rule_file`, `merge_rules`, `export_rules`, `PronunciationStore(settings)` backed by `DATA_DIR/pronunciation.json`. Adapted from qwen3-tts-openai; same file format. |
 | `app/warmup.py` | `WarmupService(store, engine, settings)`; attributes `warm: bool`, `last_error: str|None`; `run()->bool`, `run_forever()`. |
 | `app/main.py` | `create_app(settings=None, *, engine=None)`; lifespan builds `app.state.{settings,store,takes,engine,speech,warmup}`. Pass `engine=` in tests. Static at `/static`, `/` serves `static/index.html`. Basic-auth middleware for `/`, `/api/*`, `/static/*` when `STUDIO_AUTH` set. Validation errors → 400 OpenAI shape. |
 | `app/auth.py` | `require_v1` dependency (Bearer when `API_KEYS` set). `/v1` router must include it. |
@@ -52,13 +53,22 @@ task needs a change, it reports `BLOCKED` and the lead amends this file in a new
 | GET | `/api/engine` | `EngineStatus` |
 | POST | `/api/engine/warmup` | `{"warm": true}` |
 | POST | `/api/engine/restart` | `{"restarted": true, "warm": true}` |
+| GET | `/api/pronunciation` | `{"rules":[PronRule]}` |
+| PUT | `/api/pronunciation` | `{"rules":[PronRule]}` (body `{"rules":[...]}`; empty `match` → 400 `invalid_pronunciation`) |
+| POST | `/api/pronunciation/import` | `{"dry_run","mode","summary":{added,updated,removed,total,in_file},"rules"}` (body `{"mode":"merge"\|"replace","rules":<file JSON>,"dry_run":bool}`) |
+| GET | `/api/pronunciation/export` | `{"_comment","terms":[{match,say,...}],"units":[...]}` (the format import reads) |
+| POST | `/api/pronunciation/test` | `{"text": rewritten}` (body `{"text"}`) |
+
+`PronRule`: `match, replace, whole_word, case_sensitive, after_number`. Rules apply to every
+synthesis request (`/v1/audio/speech`, `/api/speak`, streams), never to Design or Clone, whose
+transcript must match the audio. Takes keep the text as typed.
 
 `VoiceSummary` includes `key` (the lowercase lookup key) **and** `name` (display). UI clients must
 use `key` in `/api/voices/{key}` URLs and as the `voice` field; `name` is for display only
 (SPEC §5 `voice_name_lower` vs `name`).
 
 `TakeInfo` JSON: `id, voice, text, language, kind, duration_s, rtf, first_audio_ms, created_at,
-format, audio_url, wave_url`. URL paths are relative (`/api/takes/<id>/audio`); add
+format, speed, audio_url, wave_url` (`speed` is the playback tempo; the stored WAV is unstretched). URL paths are relative (`/api/takes/<id>/audio`); add
 `?format=<fmt>` to play/download a take in another container.
 
 `VoiceSummary`: `key, name, language, source, ref_duration_s, ref_text, created_at`.
