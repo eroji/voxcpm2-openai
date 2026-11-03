@@ -1,3 +1,2 @@
 #!/command/with-contenv sh
-exec vllm serve "$MODEL_PATH" --omni --deploy-config "$DEPLOY_CONFIG" \
-    --served-model-name openbmb/VoxCPM2 --host 127.0.0.1 --port "$ENGINE_PORT"
+cd /opt/app && exec python3 -m app.engine_runner

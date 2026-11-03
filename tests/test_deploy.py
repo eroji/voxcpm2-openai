@@ -35,19 +35,38 @@ def _folded() -> str:
 def test_engine_is_longrun_with_documented_command():
     run = (S6 / "engine" / "run").read_text()
     assert (S6 / "engine" / "type").read_text().strip() == "longrun"
+    assert run.startswith("#!/command/with-contenv sh")
+    # the command lives in app/engine_runner.py so its output can be tee'd to the engine log
+    assert "exec" in run and "app.engine_runner" in run, run
+    assert "vllm" not in run, run
+    assert os.access(S6 / "engine" / "run", os.X_OK)
+
+
+def test_engine_runner_builds_the_documented_command():
+    src = (ROOT / "app" / "engine_runner.py").read_text()
     for needle in (
         "vllm serve",
         "--omni",
         "--deploy-config",
-        "--served-model-name openbmb/VoxCPM2",
-        "--host 127.0.0.1",
-        '"$ENGINE_PORT"',
-        '"$MODEL_PATH"',
-        '"$DEPLOY_CONFIG"',
+        "--served-model-name",
+        "127.0.0.1",
+        "$ENGINE_PORT",
     ):
-        assert needle in run, needle
-    assert "0.0.0.0" not in run  # engine stays loopback-only (R-001)
-    assert os.access(S6 / "engine" / "run", os.X_OK)
+        assert needle in src, needle
+    assert "0.0.0.0" not in src  # engine stays loopback-only (R-001)
+
+
+def test_engine_finish_backs_off_then_stays_down():
+    finish = S6 / "engine" / "finish"
+    assert finish.exists(), "engine service has no finish step: s6 restarts immediately"
+    assert os.access(finish, os.X_OK)
+    text = finish.read_text()
+    assert text.startswith("#!/command/with-contenv sh")
+    # ui/STARTING.md:38 — back off 30 s, 60 s, 120 s, then stay down until a manual restart
+    for needle in ("sleep 30", "sleep 60", "sleep 120", "/run/service/engine/down"):
+        assert needle in text, needle
+    assert "/run/engine-failures" in text and "/run/engine-last-exit" in text
+    assert re.search(r"0 \| 143", text), "planned stops must not count as failures"
 
 
 def test_app_is_longrun_on_public_bind():

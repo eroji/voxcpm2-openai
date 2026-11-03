@@ -1,0 +1,21 @@
+#!/command/with-contenv sh
+# Engine restart backoff (ui/STARTING.md:38): 30 s, 60 s, 120 s, then stay down.
+# s6 passes $1 = exit code (256 when killed by a signal) and $2 = 128+signum in that case.
+code=$1
+[ "$code" = "256" ] && code=${2:-0}
+
+case $code in
+  0 | 143) exit 0 ;;  # planned stop (s6-svc -r / SIGTERM): restart now, no backoff
+esac
+
+n=$(cat /run/engine-failures 2>/dev/null || echo 0)
+n=$((n + 1))
+echo "$n" > /run/engine-failures
+date +%s > /run/engine-last-exit
+
+case $n in
+  1) sleep 30 ;;
+  2) sleep 60 ;;
+  3) sleep 120; touch /run/service/engine/down ;;
+  *) touch /run/service/engine/down ;;
+esac
