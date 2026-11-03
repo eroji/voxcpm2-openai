@@ -142,6 +142,7 @@ def test_core_exports():
         "showError",
         "clearError",
         "formatLang",
+        "loadLanguages",
     ]:
         assert re.search(rf"export (async )?(function {name}\b|const {name}\b)", CORE), name
     assert "innerHTML" not in CORE
@@ -582,3 +583,56 @@ def test_starting_log_uses_grid_rows_and_parser():
         "r.classList.toggle('open')",
     ]:
         assert fragment in STARTING, fragment
+
+
+# --- M3-T15: inward select chevron + all 30 languages ---------------------------
+
+
+def test_select_chevron_is_inset_to_match_text_padding():
+    rule = re.search(r"\.vs-select \{([^}]*)\}", CSS).group(1)
+    for decl in [
+        "appearance: none",
+        "-webkit-appearance: none",
+        "background-image: url(",
+        "background-repeat: no-repeat",
+        "background-position: right var(--vs-s3) center",
+        "background-size: 10px 6px",
+    ]:
+        assert decl in rule, decl
+    assert "%23EDEDED" in rule  # the # of the stroke colour must be percent-encoded
+    padding = re.search(r"padding: ([^;}]*)", rule).group(1)
+    assert "calc(var(--vs-s3) + 16px)" in padding  # right: chevron inset + gap
+    assert padding.rstrip().endswith("var(--vs-s3)")  # left stays at the 8 px text margin
+
+
+def test_core_languages_come_from_the_api():
+    assert '"/api/languages"' in CORE
+    assert "languages: []" in CORE  # state field filled by loadLanguages
+    # a four-name map is allowed only as a documented pre-load fallback
+    i = CORE.index("LANG_FALLBACK")
+    assert "fallback" in CORE[max(0, i - 220) : i].lower()
+
+
+def test_screens_populate_language_selects_from_state():
+    for name in ["clone.js", "design.js", "speak.js", "voices.js"]:
+        assert re.search(r"\bloadLanguages\b", js(name)), name
+    for name in ["clone.js", "design.js"]:
+        assert "state.languages" in js(name), name
+    assert "state.languages" in CORE
+    # no hardcoded 4-language list may remain in the screens
+    for name in ["clone.js", "design.js", "voices.js"]:
+        assert not re.search(r"\bLANGS\s*=\s*\[", js(name)), name
+
+
+def test_design_hides_presets_for_languages_without_translations():
+    design = js("design.js")
+    assert "box.hidden = true" in design
+    assert "box.hidden = false" in design
+    assert "No sample phrases for this language yet — type a line." in design
+
+
+def test_speak_hides_the_preset_row_without_translations():
+    speak = js("speak.js")
+    # the whole labelled row goes, the textarea stays editable
+    assert 'closest(".vs-row").hidden = !items' in speak
+    assert "presets[lang]" in speak

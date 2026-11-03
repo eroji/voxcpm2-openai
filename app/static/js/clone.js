@@ -6,6 +6,7 @@ import {
   api,
   state,
   loadVoices,
+  loadLanguages,
   refreshEngine,
   play,
   showError,
@@ -28,6 +29,22 @@ const SAMPLE = {
 const $ = id => document.getElementById(id);
 let file = null; // File picked for reference audio, or null
 let saving = false; // in-flight Save: blocks double-submit
+
+/* All 30 model-card languages (SPEC §8); the current choice survives re-renders. */
+function renderLangs() {
+  if (!state.languages.length) return;
+  const sel = $("clone-lang");
+  const current = sel.value || "en";
+  sel.replaceChildren(
+    ...state.languages.map(l => {
+      const option = document.createElement("option");
+      option.value = l.code;
+      option.textContent = l.name;
+      return option;
+    })
+  );
+  sel.value = state.languages.some(l => l.code === current) ? current : "en";
+}
 
 /* Read duration from an audio file's metadata. Rejects non-finite durations. */
 function probeDuration(f) {
@@ -248,9 +265,11 @@ registerScreen("clone", {
     $("consent").addEventListener("change", updateSave);
     $("save-voice").addEventListener("click", onSave);
     $("test-line").addEventListener("click", onTest);
+    loadLanguages().then(renderLangs).catch(() => {}); // markup keeps the 4 common languages if the API fails
     updateSave();
   },
   async show() {
+    loadLanguages().then(renderLangs).catch(() => {});
     try {
       // fresh names for duplicate validation + engine flags for gating; never throws
       await Promise.allSettled([refreshEngine(), loadVoices()]);

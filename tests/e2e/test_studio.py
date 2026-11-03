@@ -180,6 +180,49 @@ def test_design_presets_follow_language(page, live_app, open_studio):
     expect(page.locator("#design-sample")).to_have_attribute("lang", "en")
 
 
+def test_design_language_select_offers_all_thirty(page, live_app, open_studio):
+    """M3-T15: all 30 model-card languages; presets only where translations exist."""
+    open_studio(page, "design")
+    expect(page.locator("#design-lang option")).to_have_count(30)
+    expect(page.locator("#design-lang")).to_have_value("ja")  # reference order: Japanese first
+    expect(page.locator("#design-presets .btn-tag")).to_have_count(6)
+
+    page.fill("#design-sample", "a typed line")
+    page.select_option("#design-lang", "de")
+    expect(page.locator("#design-presets")).to_be_hidden()
+    expect(page.locator("#screen-design")).to_contain_text(
+        "No sample phrases for this language yet"
+    )
+    expect(page.locator("#design-sample")).to_have_value("a typed line")  # no fake translation
+    expect(page.locator("#design-sample")).to_be_editable()
+
+    page.select_option("#design-lang", "ja")
+    expect(page.locator("#design-presets")).to_be_visible()
+    expect(page.locator("#design-presets .btn-tag")).to_have_count(6)
+    # switching back restores the chips and keeps the typed text (no preset selected)
+    expect(page.locator("#design-sample")).to_have_value("a typed line")
+
+
+def test_clone_language_select_offers_all_thirty(page, live_app, open_studio):
+    open_studio(page, "clone")
+    expect(page.locator("#clone-lang option")).to_have_count(30)
+    expect(page.locator("#clone-lang")).to_have_value("en")  # English selected by default
+    page.select_option("#clone-lang", "de")
+    page.click('.vs-tab[data-tab="speak"]')
+    page.click('.vs-tab[data-tab="clone"]')  # show() re-renders: the choice must survive
+    expect(page.locator("#clone-lang")).to_have_value("de")
+
+
+def test_select_chevron_is_inset(page, live_app, open_studio):
+    """M3-T15: the chevron sits at the same 8 px as the left text padding."""
+    open_studio(page, "clone")
+    style = page.locator("#clone-lang").evaluate(
+        "el => [getComputedStyle(el).appearance, getComputedStyle(el).backgroundPosition].join('|')"
+    )
+    assert style.split("|")[0] == "none"
+    assert "8px" in style.split("|")[1]
+
+
 def test_speak_empty_library(page, live_app_empty):
     """SPEC §8 empty library: notice instead of chips, Generate aria-disabled, no API call."""
     page.goto(f"{live_app_empty}/")

@@ -5,6 +5,7 @@ import {
   api,
   state,
   loadVoices,
+  loadLanguages,
   play,
   showError,
   clearError,
@@ -13,7 +14,6 @@ import {
   registerScreen,
 } from "./core.js";
 
-const LANGS = ["en", "ja", "ko", "zh"];
 const NAME_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/; // same rule the server validates (CONTRACTS §4)
 
 let query = "";
@@ -113,12 +113,15 @@ function openEditor(tr) {
   const langSelect = el("select", "vs-select");
   langSelect.setAttribute("aria-label", "Language");
   langSelect.dataset.field = "language";
-  for (const code of LANGS) {
+  const current = String(v.language || "en").toLowerCase();
+  const codes = state.languages.map(l => l.code);
+  if (!codes.includes(current)) codes.push(current); // unknown codes stay readable and survive a save
+  for (const code of codes) {
     const option = el("option", null, formatLang(code));
     option.value = code;
     langSelect.append(option);
   }
-  langSelect.value = String(v.language || "en").toLowerCase();
+  langSelect.value = current;
 
   const txInput = el("input", "vs-input");
   txInput.type = "text";
@@ -183,6 +186,7 @@ async function confirmDelete(tr) {
 
 registerScreen("voices", {
   init() {
+    loadLanguages().catch(() => {}); // language names for the table + editor (state.languages)
     document.getElementById("voice-search").addEventListener("input", e => {
       query = e.target.value.toLowerCase();
       render();

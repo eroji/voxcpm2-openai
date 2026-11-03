@@ -50,7 +50,7 @@ code, pre { font-family: var(--vs-mono); }
 .vs-text { width: 100%; border: none; border-bottom: var(--vs-rule-input); background: transparent; padding: var(--vs-s2) 0 var(--vs-s4); resize: vertical; }
 .vs-text.lg { font-size: var(--vs-fs-input-lg); line-height: 1.4; letter-spacing: -0.01em; }
 .vs-input { width: 100%; border: none; border-bottom: var(--vs-rule-input); background: transparent; padding: var(--vs-s1) 0; min-height: var(--vs-h-input); }
-.vs-select { border: 1px solid var(--vs-fg); background: var(--vs-bg); padding: var(--vs-s2) var(--vs-s3); min-height: var(--vs-h-input); }
+.vs-select { border: 1px solid var(--vs-fg); background-color: var(--vs-bg); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23EDEDED' stroke-width='1.5'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right var(--vs-s3) center; background-size: 10px 6px; appearance: none; -webkit-appearance: none; padding: var(--vs-s2) calc(var(--vs-s3) + 16px) var(--vs-s2) var(--vs-s3); min-height: var(--vs-h-input); }
 .vs-field { display: flex; flex-direction: column; gap: var(--vs-s1); }
 .vs-field > label { font-size: var(--vs-fs-label); color: var(--vs-muted); }
 .vs-field > label .hint { display: block; font-weight: 400; }

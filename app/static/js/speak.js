@@ -3,6 +3,7 @@ import {
   api,
   state,
   loadVoices,
+  loadLanguages,
   registerScreen,
   selectVoice,
   renderWave,
@@ -25,8 +26,7 @@ let presetId = "question";
 let presetLang = null;
 
 function voiceLang() {
-  const lang = String(state.voices.find(v => v.key === state.selectedVoice)?.language || "en").toLowerCase();
-  return presets && presets[lang] ? lang : "en";
+  return String(state.voices.find(v => v.key === state.selectedVoice)?.language || "en").toLowerCase();
 }
 
 function syncPresets() {
@@ -35,7 +35,10 @@ function syncPresets() {
   if (lang === presetLang) return;
   presetLang = lang;
   $("speak-lang-name").textContent = formatLang(lang);
-  const items = presets[lang] || presets.en;
+  const items = presets[lang];
+  // presets.json covers en/ja/ko/zh only: other voices get no chips, the text stays editable
+  $("speak-presets").closest(".vs-row").hidden = !items;
+  if (!items) return;
   const box = $("speak-presets");
   box.replaceChildren();
   for (const p of items) {
@@ -337,6 +340,11 @@ async function init() {
     .catch(() => {
       /* presets are a convenience: the text box stays free-form without them */
     });
+  loadLanguages()
+    .then(() => {
+      $("speak-lang-name").textContent = formatLang(voiceLang()); // full names for preset-less languages
+    })
+    .catch(() => {});
 
   $("generate").addEventListener("click", generate);
   $("speak-text").addEventListener("keydown", e => {
