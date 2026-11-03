@@ -6,10 +6,20 @@ import asyncio
 
 from fastapi import APIRouter, Request
 
-from app.errors import EngineNotReady
+from app.errors import EngineError, EngineNotReady
 from app.models import EngineStatus
 
 router = APIRouter(prefix="/api", tags=["engine"])
+
+# One restart at a time: two clicks must not interleave reset / restart / warm-up (M2-T16).
+_restart_lock = asyncio.Lock()
+
+
+def _mark_failed(request: Request, message: str, step: int) -> None:
+    """Show why the attempt died instead of leaving the page on 'starting' forever."""
+    startup = getattr(request.app.state, "startup", None)
+    if startup is not None:
+        startup.mark_failed(message, step)
 
 
 @router.get("/engine")
@@ -43,15 +53,33 @@ async def engine_status(request: Request) -> EngineStatus:
 async def engine_warmup(request: Request) -> dict[str, bool]:
     warmup = request.app.state.warmup
     if not await warmup.run():
-        raise EngineNotReady(warmup.last_error or "engine warm-up failed")
+        message = warmup.last_error or "engine warm-up failed"
+        _mark_failed(request, message, step=3)
+        raise EngineNotReady(message)
     return {"warm": True}
+
+
+@router.get("/engine/startup")
+async def engine_startup(request: Request) -> dict:
+    # Always available (startup gate exception): snapshot reads the log + stats off-loop.
+    return await asyncio.to_thread(request.app.state.startup.snapshot)
 
 
 @router.post("/engine/restart")
 async def engine_restart(request: Request) -> dict[str, bool]:
     warmup = request.app.state.warmup
-    warmup.warm = False
-    await request.app.state.engine.restart()  # EngineError -> 502 via handler
-    if not await warmup.run():
-        raise EngineNotReady(warmup.last_error or "engine warm-up failed")
+    startup = getattr(request.app.state, "startup", None)
+    async with _restart_lock:
+        warmup.warm = False  # before the reset: never show "ready" mid-restart
+        if startup is not None:
+            startup.reset()  # page carries on polling from step 2 (ui/STARTING.md)
+        try:
+            await request.app.state.engine.restart()  # EngineError -> 502 via handler
+        except EngineError as exc:
+            _mark_failed(request, str(exc), step=2)
+            raise
+        if not await warmup.run():
+            message = warmup.last_error or "engine warm-up failed"
+            _mark_failed(request, message, step=3)
+            raise EngineNotReady(message)
     return {"restarted": True, "warm": True}

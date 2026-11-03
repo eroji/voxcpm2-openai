@@ -30,6 +30,7 @@ from app.routers import (
     v1,
 )
 from app.speech import SpeechService
+from app.startup import StartupTracker
 from app.store import TakeStore, VoiceStore
 from app.warmup import WarmupService
 
@@ -81,6 +82,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             logger.warning("Qwen3 import failed: %s", exc)
 
     task = asyncio.create_task(app.state.warmup.run_forever(), name="warmup")
+    app.state.startup = StartupTracker(settings, store, engine, app.state.warmup)
+    app.state.startup.mark_container_started(len(store.list()))
 
     def _warmup_done(done: asyncio.Task) -> None:
         if done.cancelled():
@@ -120,6 +123,39 @@ def create_app(settings: Settings | None = None, *, engine: EngineClient | None 
     app.state.settings = settings
     app.state.injected_engine = engine
     app.state.warmup = None
+    app.state.startup = None
+
+    # Registered before studio_basic_auth so auth still runs first: the gate must
+    # never leak startup state past the Studio credentials (ui/STARTING.md).
+    @app.middleware("http")
+    async def startup_gate(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        startup = app.state.startup
+        path = request.url.path
+        # Gated only until the app has *ever* been warm: a health blip after that must not
+        # lock the Studio out (ui/STARTING.md serves the page, not an outage).
+        if (
+            settings.startup_page
+            and startup is not None
+            and not startup.ever_ready
+            and path.startswith("/api/")
+            and path.rstrip("/") not in ("/api/engine/startup", "/api/engine/restart")
+        ):
+            message = (
+                "The voice engine failed to start. Restart it from the startup page."
+                if startup.state == "failed"
+                else "The voice engine is starting. Try again in a few seconds."
+            )
+            error = APIError(
+                503,
+                message,
+                type="service_unavailable",
+                code="startup_in_progress",
+                headers={"Retry-After": "5"},
+            )
+            return JSONResponse(error.body(), status_code=503, headers=error.headers)
+        return await call_next(request)
 
     @app.middleware("http")
     async def studio_basic_auth(
@@ -185,8 +221,14 @@ def create_app(settings: Settings | None = None, *, engine: EngineClient | None 
         app.mount("/static", StaticFiles(directory=str(settings.static_dir)), name="static")
 
         @app.get("/", include_in_schema=False)
-        async def index() -> FileResponse:
-            return FileResponse(settings.static_dir / "index.html")
+        async def index(request: Request) -> FileResponse:
+            startup = request.app.state.startup
+            page = "index.html"
+            if settings.startup_page and startup is not None and not startup.ever_ready:
+                page = "starting.html"
+            # no-store: the page reloads itself with location.replace('/') once /ready is
+            # 200, and a cached starting.html would turn that into a redirect loop.
+            return FileResponse(settings.static_dir / page, headers={"Cache-Control": "no-store"})
 
     return app
 

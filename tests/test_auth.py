@@ -18,6 +18,7 @@ def _settings(settings: Settings, **fields: Any) -> Settings:
         engine_url=settings.engine_url,
         static_dir=settings.static_dir,
         asset_dir=settings.asset_dir,
+        startup_page=False,
         **fields,
     )
 

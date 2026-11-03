@@ -38,6 +38,7 @@ def settings(tmp_path: Path, fake_engine: FakeEngine) -> Settings:
         api_keys="",
         studio_auth="",
         take_retention=50,
+        startup_page=False,
     )
 
 

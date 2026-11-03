@@ -93,6 +93,25 @@ async def test_stream(fake_engine: Any) -> None:
     await engine.aclose()
 
 
+async def test_record_false_keeps_the_metrics_window_empty(fake_engine: Any) -> None:
+    """synth/open_stream(record=False) must not touch the RTF / first-audio deques."""
+    engine = EngineClient(fake_engine.url)
+    await engine.start()
+    await engine.synth(SynthParams(text="warm-up"), record=False)
+    handle = await engine.open_stream(
+        SynthParams(text="warm-up", fmt="pcm", stream=True), record=False
+    )
+    assert [chunk async for chunk in handle.chunks]
+    await handle.aclose()
+    stats = engine.stats()
+    assert stats.rtf is None
+    assert stats.first_audio_ms is None
+
+    await engine.synth(SynthParams(text="a real request"))  # the default still records
+    assert engine.stats().rtf is not None
+    await engine.aclose()
+
+
 async def test_queue_full(fake_engine: Any) -> None:
     engine = EngineClient(fake_engine.url, concurrency=1, max_queue=0)
     await engine.start()

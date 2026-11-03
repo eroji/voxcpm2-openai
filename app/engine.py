@@ -28,6 +28,7 @@ from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import httpx
@@ -185,7 +186,7 @@ class EngineClient:
                 return False
             await asyncio.sleep(0.5)
 
-    async def synth(self, params: SynthParams) -> SynthResult:
+    async def synth(self, params: SynthParams, *, record: bool = True) -> SynthResult:
         async with self._slot():
             await self._ensure_ready()
             started = time.perf_counter()
@@ -198,7 +199,7 @@ class EngineClient:
         dur = duration_s(samples, rate)
         rtf = wall / dur if dur > 0 else None
         # First-audio latency is meaningful for streaming only (SPEC §4).
-        self._record(rtf, None)
+        self._record(rtf if record else None, None)
         return SynthResult(
             audio=resp.content,
             content_type=resp.headers.get("content-type", mime_for("wav")),
@@ -207,12 +208,13 @@ class EngineClient:
             first_audio_ms=None,
         )
 
-    async def open_stream(self, params: SynthParams) -> StreamHandle:
+    async def open_stream(self, params: SynthParams, *, record: bool = True) -> StreamHandle:
         """Admit the request (queue/readiness) *before* returning, then open the stream.
 
         Admission raises ``QueueFull``/``EngineNotReady`` here — never after the
         router has already sent ``200`` (SPEC §4/§6). The slot is held by the
         returned handle and released exactly once when its chunks finish.
+        ``record=False`` keeps the request out of the RTF / first-audio window (warm-up).
         """
         await self._acquire()
         started = time.perf_counter()  # includes the engine's pre-header latency
@@ -261,7 +263,8 @@ class EngineClient:
                     raise EngineError(f"engine stream failed: {exc}") from exc
                 wall = time.perf_counter() - started
                 dur = total / 2 / ENGINE_SAMPLE_RATE
-                self._record(wall / dur if dur > 0 else None, first_ms)
+                if record:
+                    self._record(wall / dur if dur > 0 else None, first_ms)
             finally:
                 await aclose()
 
@@ -272,13 +275,26 @@ class EngineClient:
 
         ``s6-svc -r`` returns immediately, so callers (the restart route) must
         never warm the old process: mark down, restart, then poll /health for
-        up to 120 s (SPEC §4/§7).
+        up to 120 s (SPEC §4/§7). The ``finish`` script's backoff state is cleared
+        first and the service is brought back up, or a manual restart would sit in
+        the 120 s hold-down with the service marked down (M2-T17).
         """
         self._ready = False
+        self._clear_failure_markers()
+        await self._s6("-u")  # already-up is not an error here; -r below is authoritative
+        code, stderr = await self._s6("-r")
+        if code != 0:
+            detail = stderr.decode("utf-8", "replace").strip()[:300] if stderr else ""
+            raise EngineError(f"s6-svc -r failed: {detail or code}")
+        await asyncio.sleep(0.5)  # give s6 a moment to bring the service back up
+        if not await self.wait_ready(120):
+            raise EngineError("engine did not become healthy after restart")
+
+    async def _s6(self, flag: str) -> tuple[int, bytes]:
         try:
             proc = await asyncio.create_subprocess_exec(
                 "s6-svc",
-                "-r",
+                flag,
                 f"{self.service_dir}/{self.s6_service}",
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.PIPE,
@@ -291,12 +307,18 @@ class EngineClient:
             proc.kill()
             await proc.wait()  # reap, no zombie
             raise EngineError("engine restart timed out after 30 s") from None
-        if proc.returncode != 0:
-            detail = stderr.decode("utf-8", "replace").strip()[:300] if stderr else ""
-            raise EngineError(f"s6-svc -r failed: {detail or proc.returncode}")
-        await asyncio.sleep(0.5)  # give s6 a moment to bring the service back up
-        if not await self.wait_ready(120):
-            raise EngineError("engine did not become healthy after restart")
+        return int(proc.returncode or 0), stderr
+
+    def _clear_failure_markers(self) -> None:
+        """Drop the s6 backoff state: a manual restart starts the counter over."""
+        run_dir = Path(self.service_dir).parent
+        for path in (
+            Path(self.service_dir) / self.s6_service / "down",
+            run_dir / "engine-failures",
+            run_dir / "engine-last-exit",
+        ):
+            with contextlib.suppress(OSError):
+                path.unlink()
 
     def stats(self) -> EngineStats:
         gpu, used, total = self._gpu_info()

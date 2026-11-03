@@ -9,6 +9,7 @@ import time
 from typing import Any
 
 import pytest
+from app import warmup as warmup_module
 from app.config import Settings
 from app.engine import EngineClient, SynthParams
 from app.errors import EngineError
@@ -146,6 +147,45 @@ async def test_restart_raises_when_engine_stays_down(monkeypatch: pytest.MonkeyP
     await engine.aclose()
 
 
+async def test_restart_clears_the_s6_backoff_state(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A manual restart must undo the finish script's hold-down, or s6 stays down."""
+    service_dir = tmp_path / "run" / "service"
+    engine = EngineClient("http://127.0.0.1:1", service_dir=str(service_dir))
+    calls: list[tuple[str, ...]] = []
+
+    class _Proc:
+        returncode = 0
+
+        async def communicate(self) -> tuple[bytes, bytes]:
+            return b"", b""
+
+    async def fake_exec(*args: Any, **kwargs: Any) -> _Proc:
+        calls.append(args[1:3])
+        return _Proc()
+
+    async def ready(max_wait: float) -> bool:
+        return True
+
+    down = service_dir / "engine" / "down"
+    down.parent.mkdir(parents=True)
+    down.touch()
+    for name, body in (("engine-failures", "3"), ("engine-last-exit", "1700000000")):
+        (tmp_path / "run" / name).write_text(body, encoding="utf-8")
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+    monkeypatch.setattr(engine, "wait_ready", ready)
+    await engine.restart()
+
+    target = str(service_dir / "engine")
+    assert calls == [("-u", target), ("-r", target)]  # up first, then restart
+    assert not down.exists()
+    assert not (tmp_path / "run" / "engine-failures").exists()
+    assert not (tmp_path / "run" / "engine-last-exit").exists()
+    await engine.aclose()
+
+
 async def _until(predicate: Any, limit_s: float = 8.0) -> None:
     deadline = time.monotonic() + limit_s
     while not predicate():
@@ -165,6 +205,7 @@ async def test_run_forever_clears_warm_and_rewarms_after_recovery(
         return engine._ready
 
     monkeypatch.setattr(engine, "health", fake_health)
+    monkeypatch.setattr(warmup_module, "_POLL_S", 0.05)
     warmup = WarmupService(library, engine, settings)
     assert await warmup.run() is True
     assert warmup.warm is True
@@ -184,6 +225,82 @@ async def test_run_forever_clears_warm_and_rewarms_after_recovery(
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await task
+    await engine.aclose()
+
+
+class _MissEngine:
+    """``ready`` reads False for the first ``down`` polls, then True again."""
+
+    def __init__(self, down: int) -> None:
+        self._down = down
+
+    @property
+    def ready(self) -> bool:
+        if self._down > 0:
+            self._down -= 1
+            return False
+        return True
+
+
+async def _supervised(warmup: WarmupService, seconds: float) -> None:
+    task = asyncio.create_task(warmup.run_forever())
+    await asyncio.sleep(seconds)
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+
+
+async def test_health_blip_does_not_clear_warm(
+    store: VoiceStore, settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One failed /health is a blip: warm (and with it /ready) must stay put."""
+    monkeypatch.setattr(warmup_module, "_POLL_S", 0.01)
+    engine = _MissEngine(2)
+    warmup = WarmupService(store, engine, settings)
+    warmup.warm = True
+    runs: list[bool] = []
+
+    async def fake_run(self: WarmupService) -> bool:
+        runs.append(True)
+        return True
+
+    monkeypatch.setattr(WarmupService, "run", fake_run)
+    await _supervised(warmup, 0.4)
+    assert warmup.warm is True
+    assert runs == []
+
+
+async def test_three_health_misses_clear_warm_and_rewarm(
+    store: VoiceStore, settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(warmup_module, "_POLL_S", 0.01)
+    engine = _MissEngine(3)
+    warmup = WarmupService(store, engine, settings)
+    warmup.warm = True
+
+    async def fake_run(self: WarmupService) -> bool:
+        warmup.warm = True
+        warmup.ever_warm = True
+        return True
+
+    monkeypatch.setattr(WarmupService, "run", fake_run)
+    await _supervised(warmup, 0.4)
+    assert warmup.ever_warm is True  # the gate stays open through the re-warm
+    assert warmup.warm is True
+
+
+async def test_warm_up_leaves_the_rtf_window_alone(
+    fake_engine: Any, library: VoiceStore, settings: Settings
+) -> None:
+    """The Engine screen's RTF / first-audio averages are real requests only."""
+    engine = EngineClient(fake_engine.url)
+    warmup = WarmupService(library, engine, settings)
+    assert await warmup.run() is True
+    stats = engine.stats()
+    assert stats.rtf is None
+    assert stats.first_audio_ms is None
+    await engine.synth(SynthParams(text="a real request"))
+    assert engine.stats().rtf is not None
     await engine.aclose()
 
 
@@ -222,8 +339,8 @@ async def test_stream_failure_after_wav_keeps_not_warm(
     engine = EngineClient(fake_engine.url)
     open_stream_calls: list[bool] = []
 
-    async def failing_open_stream(params: SynthParams) -> Any:
-        open_stream_calls.append(params.stream)
+    async def failing_open_stream(params: SynthParams, **kwargs: Any) -> Any:
+        open_stream_calls.append((params.stream, kwargs.get("record")))
         raise EngineError("stream refused")
 
     monkeypatch.setattr(engine, "open_stream", failing_open_stream)
@@ -236,7 +353,7 @@ async def test_stream_failure_after_wav_keeps_not_warm(
     assert warmup.last_error
     assert fake_engine.state["calls"] == 1  # the WAV synth ran first
     assert fake_engine.state["last"]["stream"] is False
-    assert open_stream_calls == [True]  # second request was the stream
+    assert open_stream_calls == [(True, False)]  # the stream, excluded from the RTF window
 
 
 async def test_run_forever_not_ready_retries_until_cancelled(

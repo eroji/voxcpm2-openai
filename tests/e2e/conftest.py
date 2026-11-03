@@ -57,6 +57,7 @@ def _wait_engine_ready(base_url: str, timeout: float = 30.0) -> None:
 
 def _settings(data_dir, fake_engine: FakeEngine, **overrides) -> Settings:
     base = {
+        "startup_page": False,
         "data_dir": data_dir,
         "import_dir": data_dir / "import",  # does not exist → the Qwen3 importer stays off
         "engine_url": fake_engine.url,

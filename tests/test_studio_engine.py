@@ -47,6 +47,7 @@ def test_engine_status_flags_flip_with_envs(
     monkeypatch.setenv("STT_URL", "http://127.0.0.1:9/v1")
     monkeypatch.setenv("API_KEYS", "sk-test")
     settings = Settings(
+        startup_page=False,
         data_dir=tmp_path / "data",
         import_dir=tmp_path / "import",
         engine_url=fake_engine.url,

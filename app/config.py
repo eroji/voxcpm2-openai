@@ -51,6 +51,8 @@ class Settings(BaseSettings):
     allow_remote_ref_audio: bool = False
 
     log_level: str = "INFO"
+    startup_page: bool = True
+    startup_fail_after_s: float = 600.0
     request_timeout_s: float = Field(default=300.0)
 
     @cached_property

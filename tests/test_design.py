@@ -120,7 +120,7 @@ def test_retry_once_without_instructions(
     engine = client.app.state.engine
     real_synth = engine.synth
 
-    async def synth(params):
+    async def synth(params, **kwargs):
         if params.instructions is not None:
             raise EngineError("engine does not support instructions")
         return await real_synth(params)
