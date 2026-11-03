@@ -86,6 +86,16 @@ def test_voxcpm_stays_on_uv():
     assert "pip install voxcpm" not in cf  # plain pip would downgrade NCCL
 
 
+def test_inherited_qwen3_supervisor_is_neutralized():
+    text = (ROOT / "deploy" / "Containerfile").read_text()
+    assert "S6_STAGE2_HOOK=/bin/true" in text, (
+        "base stage-2 hook generates Qwen3 engines at runtime"
+    )
+    assert 'ENTRYPOINT ["/init"]' in text, "only s6-overlay should be the main program"
+    assert "/opt/app/supervisor/start.sh" not in text, "must not invoke the Qwen3 supervisor"
+    assert "RUN rm -rf /opt/app" in text, "old Qwen3 app/supervisor must be removed"
+
+
 def test_runtime_installs_limited_to_allowed_packages():
     installs = [
         ln.strip()
@@ -156,7 +166,7 @@ REFERENCE_SHA256 = {
     "deploy/voxcpm2-3090.yaml": (
         "3ddc3cabf84d86154b66365e18938d3f1f4d8d732d613396b2b97a387734f194"
     ),
-    "deploy/compose.yaml": "b1e0d5cc7cb153facf6a4af49e811c17d41ecfe716d0604e47a01ec27b329c0b",
+    "deploy/compose.yaml": "de2d4ea52024e86ab0b385d632ed18292a38b933035bc07a30adcabef56edb43",
 }
 
 

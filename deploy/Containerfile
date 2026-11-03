@@ -19,13 +19,17 @@ RUN python3 -c "import vllm; assert vllm.__version__.startswith('0.30'), vllm.__
  && pip show nvidia-nccl-cu13 | grep -q '^Version: 2.30.7' \
  && python3 -c "from voxcpm.core import VoxCPM" 2>/dev/null
 
-# trust_remote_code writes to the HF modules cache; keep it off the read-only /models mount
+# trust_remote_code writes to the HF modules cache; keep it off the read-only /models mount.
+# Neutralize the inherited qwen3-tts stage-2 hook (it generates Qwen3 engine services at
+# runtime) and fail stage 2 normally.
 ENV HF_HOME=/var/cache/hf \
     HF_HUB_OFFLINE=1 \
     DATA_DIR=/data \
     MODEL_PATH=/models/openbmb/VoxCPM2 \
     ENGINE_PORT=8102 \
-    DEPLOY_CONFIG=/opt/app/deploy/voxcpm2-3090.yaml
+    DEPLOY_CONFIG=/opt/app/deploy/voxcpm2-3090.yaml \
+    S6_STAGE2_HOOK=/bin/true \
+    S6_BEHAVIOUR_IF_STAGE2_FAILS=1
 
 # App-only runtime deps (match pyproject.toml). Install with --no-deps and list their runtime
 # deps explicitly: a dependency resolver could still pull a newer pydantic/numpy transitively and
@@ -42,6 +46,10 @@ RUN python3 -c "import fastapi, uvicorn, httpx, numpy, soundfile, safetensors, p
 # runtime. Install ffmpeg with the distro package manager only if the base lacks it.
 RUN (command -v ffmpeg >/dev/null || (apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*)) \
  && ffmpeg -version >/dev/null && curl --version >/dev/null
+
+# Drop the inherited Qwen3 app/supervisor entirely; keeping it would let start.sh and
+# engines.default.json start Qwen3-TTS next to our VoxCPM2 engine.
+RUN rm -rf /opt/app
 
 # App (OpenAI API + Studio API + static UI), engine deploy config, and s6-overlay v3
 # service definitions: engine = vllm serve on 127.0.0.1:$ENGINE_PORT,
@@ -65,5 +73,7 @@ RUN stale=$(grep -RlE 'qwen3|vllm serve|uvicorn' /etc/s6-overlay/s6-rc.d --inclu
       | grep -vE '^/etc/s6-overlay/s6-rc.d/(engine|app)/run$' || true); \
     [ -z "$stale" ] || { echo "stale s6 services: $stale"; exit 1; }
 
-# Never let an inherited base command start a second app.
+# The base image's ENTRYPOINT ran its Qwen3 supervisor as the s6 main program.
+# Run /init alone so only our s6 services start.
+ENTRYPOINT ["/init"]
 CMD []

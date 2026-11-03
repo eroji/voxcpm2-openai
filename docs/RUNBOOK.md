@@ -54,7 +54,10 @@ mkdir -p /opt/voxcpm2-openai/deploy/data
 cd /opt/voxcpm2-openai/deploy
 export DEPLOY_IMAGE=harbor.dotslash.io/dotslash/voxcpm2-openai:v0.1.0
 podman-compose -f compose.yaml -f compose.deploy.yaml up -d
-podman logs -f voxcpm2-openai        # engine load takes minutes; healthcheck start_period is 300s
+podman logs -f voxcpm2-openai        # expect [engine], never [base]; load takes minutes
+# If [base]/Qwen3 appears, the image still carries the old qwen3 supervisor: rebuild from this
+# repo (the Containerfile now overrides ENTRYPOINT and neutralizes S6_STAGE2_HOOK). You can also
+# delete a stale /opt/voxcpm2-openai/deploy/data/engines.json left by the old supervisor.
 curl -fsS http://127.0.0.1:8881/ready && echo READY
 ```
 
@@ -74,6 +77,11 @@ Volumes and GPU (from `deploy/compose.yaml`):
 
 `STT_URL` is confirmed as `http://vllm.dotslash.io:8890/v1` (whisper-stt, human-verified
 2026-11-02) — that is the value in `deploy/compose.yaml`.
+
+Hugging Face downloads are off by default (`HF_HUB_OFFLINE=1`, weights are local). To allow
+authenticated cache downloads, export `HF_TOKEN` in the host environment and start with
+`HF_HUB_OFFLINE=0`; compose passes both through (`HF_TOKEN: "${HF_TOKEN:-}"`). Never put the token
+in the compose file or repo.
 
 Back up the data dir before every cutover and periodically:
 
