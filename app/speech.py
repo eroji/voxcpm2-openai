@@ -12,12 +12,25 @@ from dataclasses import dataclass
 from app import audio as audio_utils
 from app.config import Settings
 from app.engine import ENGINE_SAMPLE_RATE, EngineClient, StreamHandle, SynthParams
-from app.errors import APIError, BadRequest, EngineError
+from app.errors import APIError, BadRequest, EngineError, EngineNotReady
 from app.models import SpeechRequest
 from app.store import VoiceStore
 
 logger = logging.getLogger(__name__)
 _speed_stream_logged = False
+
+# SPEC §8 empty-library guard: the exact copy the Studio shows.
+NO_VOICES_MESSAGE = "No voices exist yet. Create one in the Studio (Clone or Design) first."
+
+
+def require_warm(warmup: object) -> None:
+    """SPEC §4: nothing may reach the engine before ``/ready`` goes green.
+
+    Gating in the router keeps cold requests out of the RTF / first-audio window as
+    well as out of the audio path: they get 503 + ``Retry-After`` instead.
+    """
+    if not getattr(warmup, "warm", False):
+        raise EngineNotReady()
 
 
 @dataclass(slots=True)
@@ -289,11 +302,16 @@ class SpeechService:
         try:
             voice = self.store.get(request.voice)
         except APIError as exc:
+            voices = self.store.list()
+            if not voices:
+                # SPEC §8: an empty library is a setup problem, not an unknown voice.
+                # Ad-hoc ref_audio above still works with nothing stored.
+                raise BadRequest(NO_VOICES_MESSAGE, code="no_voices") from exc
             # Any lookup failure — a display name like "Ashley EN" fails the key
             # pattern with BadRequest before the file check — is a 400 listing the
             # valid keys (SPEC §6); /api/voices/{name} keeps its 404 because it
             # uses the store directly.
-            names = ", ".join(v.key for v in self.store.list())
+            names = ", ".join(v.key for v in voices)
             raise BadRequest(
                 f"Unknown voice '{request.voice}'. Valid voices: {names}",
                 param="voice",
@@ -323,9 +341,9 @@ class SpeechService:
             stream=stream,
         )
 
-    async def synthesize(self, request: SpeechRequest) -> SpeechResult:
+    async def synthesize(self, request: SpeechRequest, *, record: bool = True) -> SpeechResult:
         voice = await asyncio.to_thread(self.resolve, request)
-        result = await self.engine.synth(self._params(request, voice, stream=False))
+        result = await self.engine.synth(self._params(request, voice, stream=False), record=record)
         try:
             samples, sample_rate = await asyncio.to_thread(audio_utils.read_audio, result.audio)
             target_rate = request.sample_rate or self.settings.sample_rate
@@ -353,7 +371,7 @@ class SpeechService:
             key=voice.key,
         )
 
-    async def stream(self, request: SpeechRequest) -> StreamingSpeech:
+    async def stream(self, request: SpeechRequest, *, record: bool = True) -> StreamingSpeech:
         global _speed_stream_logged
         if request.speed != 1.0 and not _speed_stream_logged:
             logger.warning("speed is ignored for streamed responses (SPEC §6)")
@@ -361,7 +379,9 @@ class SpeechService:
 
         voice = await asyncio.to_thread(self.resolve, request)
         target_rate = request.sample_rate or self.settings.sample_rate
-        handle = await self.engine.open_stream(self._params(request, voice, stream=True))
+        handle = await self.engine.open_stream(
+            self._params(request, voice, stream=True), record=record
+        )
         fmt = request.response_format
         try:
             if fmt == "pcm" and target_rate == ENGINE_SAMPLE_RATE:

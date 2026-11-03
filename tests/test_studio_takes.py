@@ -11,6 +11,10 @@ import numpy as np
 import pytest
 import soundfile as sf
 from app import audio
+from app.main import create_app
+from fastapi.testclient import TestClient
+
+NO_VOICES = "No voices exist yet. Create one in the Studio (Clone or Design) first."
 
 
 def _speak(client: Any, **fields: Any) -> Any:
@@ -343,3 +347,68 @@ def test_take_audio_format_falls_back_to_stored_format(client: Any, library: Any
     legacy = _speak(client).json()
     assert legacy["format"] == "wav"
     assert client.get(legacy["audio_url"]).headers["content-type"].startswith("audio/wav")
+
+
+# --- M1-T18: empty library + warm-only routing (SPEC §4/§8) -------------------------------
+
+
+def test_speak_empty_library_is_no_voices_400(client: Any) -> None:
+    resp = _speak(client)
+    assert resp.status_code == 400
+    error = resp.json()["error"]
+    assert error["code"] == "no_voices"
+    assert error["message"] == NO_VOICES
+
+
+def test_preview_with_ref_audio_needs_no_stored_voice(client: Any) -> None:
+    # SPEC §8: the empty-library guard is for stored voices only; Test-a-line still works.
+    resp = client.post(
+        "/api/speak?save=false",
+        json={
+            "model": "voxcpm2",
+            "voice": "test-line",
+            "input": "checking the line",
+            "ref_audio": _data_uri(),
+            "ref_text": "Thanks for waiting.",
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("audio/wav")
+
+
+def _unwarm_client(settings: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
+    from app.warmup import WarmupService
+
+    async def failing_run(self: WarmupService) -> bool:
+        self.warm = False
+        self.last_error = "warm-up failed"
+        return False
+
+    monkeypatch.setattr(WarmupService, "run", failing_run)
+    return TestClient(create_app(settings))
+
+
+def test_speak_before_ready_is_503_with_retry_after(settings: Any, monkeypatch: Any) -> None:
+    with _unwarm_client(settings, monkeypatch) as c:
+        assert c.get("/ready").status_code == 503
+        resp = _speak(c)
+        assert resp.status_code == 503
+        assert resp.headers["Retry-After"] == "5"
+        assert resp.json()["error"]["code"] == "engine_not_ready"
+        assert c.app.state.engine.stats().rtf is None  # SPEC §4: not a sample
+
+
+def test_preview_before_ready_is_503(settings: Any, monkeypatch: Any) -> None:
+    # save=false is warm-only too: the Studio shows "warming up", not a stale take.
+    with _unwarm_client(settings, monkeypatch) as c:
+        resp = c.post(
+            "/api/speak?save=false",
+            json={
+                "model": "voxcpm2",
+                "voice": "test-line",
+                "input": "checking the line",
+                "ref_audio": _data_uri(),
+            },
+        )
+        assert resp.status_code == 503
+        assert resp.json()["error"]["code"] == "engine_not_ready"

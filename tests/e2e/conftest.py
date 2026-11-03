@@ -59,7 +59,6 @@ def _settings(data_dir, fake_engine: FakeEngine, **overrides) -> Settings:
     base = {
         "startup_page": False,
         "data_dir": data_dir,
-        "import_dir": data_dir / "import",  # does not exist → the Qwen3 importer stays off
         "engine_url": fake_engine.url,
         "static_dir": REPO_ROOT / "app" / "static",
         "asset_dir": REPO_ROOT / "app" / "assets",

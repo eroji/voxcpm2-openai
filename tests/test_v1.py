@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 import numpy as np
 import pytest
 from app.audio import to_wav_data_uri
@@ -13,6 +15,7 @@ from fastapi.testclient import TestClient
 from tests.test_engine import _serve, _status_app
 
 BODY = {"model": "tts-1", "voice": "ashley-en", "input": "hello"}
+NO_VOICES = "No voices exist yet. Create one in the Studio (Clone or Design) first."
 
 _TONE = (0.2 * np.sin(2 * np.pi * 220 * np.linspace(0, 0.2, 9600, endpoint=False))).astype(
     np.float32
@@ -26,6 +29,32 @@ def assert_openai_error(response, status: int) -> dict:
     assert set(error) == {"message", "type", "param", "code"}
     assert isinstance(error["message"], str) and error["message"]
     return error
+
+
+def _wait_warm(client, timeout: float = 5.0) -> bool:
+    """Apps built outside the `client` fixture must wait for warm-up too (M1-T18)."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if client.get("/ready").status_code == 200:
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def _force_warm(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Open the warm gate without a working synthesis, for tests about something else.
+
+    Setting ``warmup.warm`` from the test would race with the real warm-up attempt,
+    which clears it again when it fails.
+    """
+    from app.warmup import WarmupService
+
+    async def run(self: WarmupService) -> bool:
+        self.warm = self.ever_warm = True
+        self.last_error = None
+        return True
+
+    monkeypatch.setattr(WarmupService, "run", run)
 
 
 def test_speech_wav_ok(client, library):
@@ -167,13 +196,13 @@ def test_streaming_still_works(client, library):
 def test_api_keys_gate(settings, library):
     secured = Settings(
         data_dir=settings.data_dir,
-        import_dir=settings.import_dir,
         engine_url=settings.engine_url,
         static_dir=settings.static_dir,
         asset_dir=settings.asset_dir,
         api_keys="k1",
     )
     with TestClient(create_app(secured)) as c:
+        assert _wait_warm(c), "warm-up never finished: /v1 is warm-only"
         assert_openai_error(c.post("/v1/audio/speech", json=BODY), 401)
         auth = {"Authorization": "Bearer k1"}
         assert c.post("/v1/audio/speech", json=BODY, headers=auth).status_code == 200
@@ -181,9 +210,10 @@ def test_api_keys_gate(settings, library):
         assert c.get("/v1/models", headers=auth).status_code == 200
 
 
-def test_upstream_429_becomes_429_with_retry_after(settings, library):
+def test_upstream_429_becomes_429_with_retry_after(settings, library, monkeypatch):
     url, server, thread = _serve(_status_app(429, retry_after="7"))
     try:
+        _force_warm(monkeypatch)  # this engine can never warm up: test the mapping, not the gate
         with TestClient(create_app(settings, engine=EngineClient(url))) as c:
             r = c.post("/v1/audio/speech", json=BODY)
             error = assert_openai_error(r, 429)
@@ -194,9 +224,10 @@ def test_upstream_429_becomes_429_with_retry_after(settings, library):
         thread.join(timeout=5)
 
 
-def test_upstream_503_becomes_503_engine_not_ready(settings, library):
+def test_upstream_503_becomes_503_engine_not_ready(settings, library, monkeypatch):
     url, server, thread = _serve(_status_app(503))
     try:
+        _force_warm(monkeypatch)  # see the 429 test
         with TestClient(create_app(settings, engine=EngineClient(url))) as c:
             r = c.post("/v1/audio/speech", json=BODY)
             error = assert_openai_error(r, 503)
@@ -220,3 +251,41 @@ def test_long_voice_label_neutralized(client, library):
     r = client.post("/v1/audio/speech", json={**BODY, "voice": "v" * 1000, "ref_audio": REF_URI})
     assert r.status_code == 200
     assert r.headers["X-Voice"] == "ad-hoc"
+
+
+# --- M1-T18: empty library + warm-only routing (SPEC §4/§8) -------------------------------
+
+
+def test_empty_library_is_no_voices_400(client):
+    """Nothing stored is a setup problem, not an unknown voice (SPEC §8 exact copy)."""
+    r = client.post("/v1/audio/speech", json=BODY)
+    error = assert_openai_error(r, 400)
+    assert error["code"] == "no_voices"
+    assert error["message"] == NO_VOICES
+
+
+def test_empty_library_ad_hoc_ref_audio_still_works(client):
+    """A preview with inline reference audio needs no stored voice."""
+    r = client.post("/v1/audio/speech", json={**BODY, "voice": "label", "ref_audio": REF_URI})
+    assert r.status_code == 200
+    assert r.headers["X-Voice"] == "label"
+    assert r.content[:4] == b"RIFF"
+
+
+def test_before_ready_v1_is_503_and_never_reaches_the_engine(settings, library, monkeypatch):
+    from app.warmup import WarmupService
+
+    async def failing_run(self: WarmupService) -> bool:
+        self.warm = False
+        self.last_error = "warm-up failed"
+        return False
+
+    monkeypatch.setattr(WarmupService, "run", failing_run)
+    with TestClient(create_app(settings)) as c:
+        assert c.get("/ready").status_code == 503
+        r = c.post("/v1/audio/speech", json=BODY)
+        error = assert_openai_error(r, 503)
+        assert error["code"] == "engine_not_ready"
+        assert r.headers["Retry-After"] == "5"
+        # SPEC §4: a request that started before /ready went green is not a sample.
+        assert c.app.state.engine.stats().rtf is None

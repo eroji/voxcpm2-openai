@@ -27,6 +27,7 @@ from app import audio
 from app.engine import ENGINE_SAMPLE_RATE
 from app.errors import APIError, BadRequest
 from app.models import SaveAsVoice, SpeechRequest, TakeInfo, VoiceSummary, safe_header_value
+from app.speech import require_warm
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["takes"])
@@ -52,11 +53,14 @@ async def speak(request: Request, payload: SpeechRequest, save: bool = True) -> 
             param="input",
             code="input_too_long",
         )
+    warmup = request.app.state.warmup
+    # SPEC §4: pre-ready requests are 503 and never reach the metrics window.
+    require_warm(warmup)
     if payload.stream:
         return await _speak_stream(request, payload, save)
     if not save:
         # Q-023 preview: honor response_format, write nothing, no X-Take-Id.
-        result = await request.app.state.speech.synthesize(payload)
+        result = await request.app.state.speech.synthesize(payload, record=warmup.warm)
         return Response(
             result.audio,
             media_type=result.media_type,
@@ -76,7 +80,8 @@ async def speak(request: Request, payload: SpeechRequest, save: bool = True) -> 
                 "sample_rate": ENGINE_SAMPLE_RATE,
                 "speed": 1.0,
             }
-        )
+        ),
+        record=warmup.warm,
     )
     samples, rate = audio.read_audio(result.audio)
     language = await asyncio.to_thread(
@@ -99,7 +104,7 @@ async def speak(request: Request, payload: SpeechRequest, save: bool = True) -> 
 async def _speak_stream(request: Request, payload: SpeechRequest, save: bool = True) -> Response:
     state = request.app.state
     # Admission happens here: QueueFull/EngineNotReady still reach the error handler.
-    streaming = await state.speech.stream(payload)
+    streaming = await state.speech.stream(payload, record=state.warmup.warm)
     headers = {
         "X-Voice": safe_header_value(streaming.key or streaming.voice),
         "X-Sample-Rate": str(streaming.sample_rate),

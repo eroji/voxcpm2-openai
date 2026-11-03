@@ -16,6 +16,7 @@ import struct
 import time
 from typing import Any
 
+import numpy as np
 import pytest
 from app import audio as audio_utils
 from app.audio import read_audio
@@ -335,4 +336,35 @@ async def test_synthesize_normal_path_unchanged(
     assert result.sample_rate == settings.sample_rate
     assert abs(result.duration_s - 0.6) < 0.1
     assert result.voice == "ashley-en"
+    await engine.aclose()
+
+
+# --- M1-T18: empty-library guard (SPEC §8) -----------------------------------------------
+
+
+async def test_resolve_empty_store_is_no_voices(
+    fake_engine: Any, settings: Settings, store: VoiceStore
+) -> None:
+    """Nothing stored is a setup problem, not an unknown voice — the Studio copy wins."""
+    service, engine = _service(store, settings, fake_engine.url)
+    with pytest.raises(BadRequest) as exc:
+        service.resolve(SpeechRequest(model="voxcpm2", input="hi", voice="ashley-en"))
+    assert exc.value.status_code == 400
+    assert exc.value.code == "no_voices"
+    assert exc.value.message == (
+        "No voices exist yet. Create one in the Studio (Clone or Design) first."
+    )
+    await engine.aclose()
+
+
+async def test_resolve_adhoc_ref_audio_needs_no_stored_voice(
+    fake_engine: Any, settings: Settings, store: VoiceStore
+) -> None:
+    service, engine = _service(store, settings, fake_engine.url)
+    ref = audio_utils.to_wav_data_uri(np.zeros(2400, dtype=np.float32), 24000)
+    voice = service.resolve(
+        SpeechRequest(model="voxcpm2", input="hi", voice="label", ref_audio=ref)
+    )
+    assert voice.ref_audio == ref
+    assert voice.key is None
     await engine.aclose()

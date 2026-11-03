@@ -11,7 +11,7 @@ from starlette.background import BackgroundTask
 from app.auth import require_v1
 from app.errors import BadRequest
 from app.models import ModelCard, ModelList, SpeechRequest, safe_header_value
-from app.speech import SpeechResult, StreamingSpeech
+from app.speech import SpeechResult, StreamingSpeech, require_warm
 
 router = APIRouter(prefix="/v1", tags=["openai"], dependencies=[Depends(require_v1)])
 
@@ -47,9 +47,12 @@ async def audio_speech(request: Request, payload: SpeechRequest) -> Response:
             code="input_too_long",
         )
     speech = request.app.state.speech
+    warmup = request.app.state.warmup
+    # SPEC §4: pre-ready requests are 503 and never reach the metrics window.
+    require_warm(warmup)
     if payload.stream:
         # Admission happens here: QueueFull/EngineNotReady raise before any header is sent.
-        streaming: StreamingSpeech = await speech.stream(payload)
+        streaming: StreamingSpeech = await speech.stream(payload, record=warmup.warm)
 
         async def chunks() -> AsyncIterator[bytes]:
             try:
@@ -70,7 +73,7 @@ async def audio_speech(request: Request, payload: SpeechRequest) -> Response:
             background=BackgroundTask(streaming.aclose),
         )
 
-    seq = await speech.synthesize(payload)
+    seq = await speech.synthesize(payload, record=warmup.warm)
     headers = {
         "X-Voice": _voice_header(seq),
         "X-Sample-Rate": str(seq.sample_rate),

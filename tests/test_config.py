@@ -12,7 +12,7 @@ from app.main import create_app
 def _settings(tmp_path: Path, **fields: object) -> Settings:
     # Pin auth fields empty so ambient env cannot leak into the test.
     values: dict[str, object] = {"api_keys": "", "studio_auth": "", **fields}
-    return Settings(data_dir=tmp_path / "data", import_dir=tmp_path / "import", **values)
+    return Settings(data_dir=tmp_path / "data", **values)
 
 
 @pytest.mark.parametrize("bad", ["admin", ":pass", "user:", ":", "  "])

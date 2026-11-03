@@ -14,7 +14,6 @@ from fastapi.testclient import TestClient
 def _settings(settings: Settings, **fields: Any) -> Settings:
     return Settings(
         data_dir=settings.data_dir,
-        import_dir=settings.import_dir,
         engine_url=settings.engine_url,
         static_dir=settings.static_dir,
         asset_dir=settings.asset_dir,
