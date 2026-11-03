@@ -202,6 +202,8 @@ spikes remain host-run. CI has not run yet: the branch is local (47+ commits ahe
 
 - **2026-11-02 —** Human scope change: only `vX.Y.Z` tags build (no branch/commit pipelines);
   deploy is opt-in from those tags. Images are tagged `vX.Y.Z` and `latest`.
+- **2026-11-02 —** `deploy/compose.yaml` now pins the current release image `:v0.1.0` (human
+  request); only the image tag may change there, `voxcpm2-3090.yaml` stays frozen.
 - **2026-11-02 —** First tag build failed before `docker build`: `HARBOR_USER` was empty (CI
   variables are likely marked protected while the tag is unprotected). The login step now fails
   with that explanation instead of a raw docker error. Checks/tests/e2e

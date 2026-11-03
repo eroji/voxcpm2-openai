@@ -4,8 +4,8 @@ This repository builds one container that serves **VoxCPM2 via vLLM-Omni** behin
 OpenAI-compatible `/v1/audio/speech` API plus the **Voice Studio** web UI.
 
 **Authority:** `SPEC.md` and everything under `ui/` are the specification and are
-**read-only**. `deploy/*.yaml` are validated reference configs; `deploy/voxcpm2-3090.yaml` and
-`deploy/compose.yaml` must not change. Never edit spec/UI/reference files to make code pass.
+**read-only**. `deploy/voxcpm2-3090.yaml` is a validated reference config and must not change;
+`deploy/compose.yaml` may only be updated to the current release image tag. Never edit spec/UI/reference files to make code pass.
 If code and spec disagree, the spec wins and the discrepancy is escalated as a `Q-###`.
 
 Read in this order before any task: `SPEC.md` → `docs/PLAN.md` → `docs/CONTRACTS.md` →
@@ -102,7 +102,8 @@ outside `owns:`, stop and report `BLOCKED: needs <path> (owned by <ID>)`.
   Change requests go to the lead; they are new tasks, not silent edits.
 - Tests travel with the module they test. A task owns its test files; nobody edits another task's
   tests to make them pass.
-- Never touch: `SPEC.md`, `ui/**`, `deploy/voxcpm2-3090.yaml`, `deploy/compose.yaml`.
+- Never touch: `SPEC.md`, `ui/**`, `deploy/voxcpm2-3090.yaml`. `deploy/compose.yaml` changes are
+  limited to the release image tag.
 - No new dependency without a lead decision recorded in `docs/PROGRESS.md` decisions log.
 
 ## 5. Progress and milestones

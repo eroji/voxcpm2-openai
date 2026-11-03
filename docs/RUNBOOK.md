@@ -37,22 +37,23 @@ The CI `build` job runs **only on `vX.Y.Z` tags**. It pushes two tags to
 | `HARBOR_USER` | Harbor username/robot with push rights to `dotslash/voxcpm2-openai` |
 | `HARBOR_TOKEN` | Its password or robot token, for `docker login` (masked) |
 
-**Without them** the job does not silently skip: it runs a static contract check instead
-(greps `deploy/Containerfile` for the `COPY app/ /opt/app/` and `voxcpm2-3090.yaml` lines and
-asserts `deploy/s6/engine` and `deploy/s6/app` exist). The pipeline stays green but **no image is
-built or pushed** — set the variables to get real packaging. The job needs a docker-capable
-runner (Q-015); if the runner lacks docker, restrict the job to `when: manual` and build on the
-host with the commands above.
+**Without them** the `build` job fails before `docker build` with an explicit message naming
+`HARBOR_USER`/`HARBOR_TOKEN`. Because the variables are instance-wide and marked **Protected**,
+the release tag must also be protected (`Settings → Repository → Protected tags → v*`) or the
+variables must be unprotected. The job needs a docker-capable runner (Q-015).
 
 ## 2. Run on 8881 (A/B next to qwen3-tts)
 
-`deploy/compose.yaml` is the reference config; do not edit it in the repo. On the host:
+`deploy/compose.yaml` pins the current release image (`:v0.1.0`). For any other release, use the
+image override with an explicit `DEPLOY_IMAGE`:
 
 ```bash
 mkdir -p /opt/voxcpm2-openai/deploy/data
-# copy deploy/compose.yaml and deploy/voxcpm2-3090.yaml from the repo into /opt/voxcpm2-openai/deploy
+# copy deploy/compose.yaml, deploy/compose.deploy.yaml and deploy/voxcpm2-3090.yaml
+# from the repo into /opt/voxcpm2-openai/deploy
 cd /opt/voxcpm2-openai/deploy
-podman-compose -f compose.yaml up -d
+export DEPLOY_IMAGE=harbor.dotslash.io/dotslash/voxcpm2-openai:v0.1.0
+podman-compose -f compose.yaml -f compose.deploy.yaml up -d
 podman logs -f voxcpm2-openai        # engine load takes minutes; healthcheck start_period is 300s
 curl -fsS http://127.0.0.1:8881/ready && echo READY
 ```
@@ -193,8 +194,10 @@ Only after §3 is fully green and the data dir is backed up (SPEC §11):
 podman stop qwen3-tts-openai
 
 # 2. move the new service to 8880: in /opt/voxcpm2-openai/deploy/compose.yaml change
-#    ports:  "8881:8000"  ->  "8880:8000"
-cd /opt/voxcpm2-openai/deploy && podman-compose -f compose.yaml up -d
+#    ports:  "8881:8000"  ->  "8880:8000"  (host copy only)
+cd /opt/voxcpm2-openai/deploy
+export DEPLOY_IMAGE=harbor.dotslash.io/dotslash/voxcpm2-openai:v0.1.0
+podman-compose -f compose.yaml -f compose.deploy.yaml up -d
 curl -fsS http://127.0.0.1:8880/ready && echo READY
 
 # 3. point the LiteLLM `tts` alias at http://vllm.dotslash.io:8880/v1 and reload LiteLLM
@@ -209,7 +212,7 @@ LiteLLM.
 ```bash
 # 1. point the LiteLLM `tts` alias back to the qwen3 target and reload LiteLLM
 # 2. stop the new service and restart the old one
-cd /opt/voxcpm2-openai/deploy && podman-compose -f compose.yaml down
+cd /opt/voxcpm2-openai/deploy && podman-compose -f compose.yaml -f compose.deploy.yaml down
 podman start qwen3-tts-openai
 curl -fsS http://127.0.0.1:8880/health && echo BACK
 ```
