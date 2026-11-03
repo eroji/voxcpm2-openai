@@ -13,6 +13,11 @@
 # Releases are tags: `git tag v0.1.0 && git push --follow-tags` builds/pushes :0.1.0 and
 # allows the manual production deploy. A main push builds/pushes :<short-sha> only.
 
+workflow:
+  rules:
+    - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
 stages: [build, deploy]
 
 variables:
