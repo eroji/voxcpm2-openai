@@ -202,7 +202,8 @@ def test_production_deploy_is_tag_only_and_manual():
     assert '$DEPLOY_TARGET == "production"' in prod
     assert r"$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/" in prod
     assert "when: manual" in prod
-    assert "curl -fsS http://127.0.0.1:8880/ready" in prod, "health gate after up -d"
+    assert "HEALTH_URL: http://127.0.0.1:8880/ready" in prod, "production readiness target"
+    assert "curl -fsS $HEALTH_URL" in prod, "health gate after up -d"
 
 
 def test_deploy_uses_base64_ssh_key_pattern():

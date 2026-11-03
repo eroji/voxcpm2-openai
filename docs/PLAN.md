@@ -49,7 +49,7 @@ plain HTML/CSS/ES modules (no build step), pytest + pytest-asyncio, ruff, mypy, 
 | M2 | Voice store + Studio API | voices CRUD/import/clone/transcribe/takes/engine status; data survives restart; backups written | `test` |
 | M3 | UI | All five screens wired, hash routing, waveforms, tokens and layout match `ui/studio.html`; keyboard-only pass | `e2e`, `ui-parity` |
 | M4 | Design flow | description → 1–4 candidates → select → save → voice usable by name | `test`, `e2e` |
-| M5 | Delivery + cutover | CI green, container builds, runbook/rollback documented, acceptance suite exists | `build`, `package` |
+| M5 | Delivery + cutover | CI image build, runbook/rollback documented, acceptance suite exists | CI `build` |
 
 M0 is **BLOCKED-EXTERNAL** in this environment: no VoxCPM2 engine is reachable and the local GPU
 is not the `vllm` 3090 host. Scripts + `NOTES.md` are delivered; the milestone cannot be marked
@@ -109,7 +109,7 @@ Citations are `SPEC.md` section/line. IDs are append-only.
 | R-046 | Spikes S1–S6 with findings in `NOTES.md`; adjust design on failure | §12 L260–269 |
 | R-047 | Acceptance criteria: WAV 48 kHz RTF ≤0.2, streamed first chunk ≤300 ms, 8 voices, warm start, clone+design flows, LiteLLM/Open WebUI/Hermes/Wyoming, VRAM ≤10 GB, concurrency, UI parity + keyboard | §13 L271–282 |
 | R-048 | Milestones M0–M5 | §14 L284–291 |
-| R-049 | Mandatory CI: install, format/lint, typecheck, unit+integration+coverage, e2e, build, container package; parallel matrix, interruptible; `scripts/verify.sh` parity | delivery brief |
+| R-049 | **Human decision 2026-11-02:** CI builds/pushes the container image only; all quality gates (format/lint/types/tests+coverage/e2e/build/package contract) live in `scripts/verify.sh` | delivery brief |
 | R-050 | CD opt-in only: deploy jobs excluded unless `DEPLOY_TARGET=staging|production`; production tag + manual approval; not enabled now | delivery brief |
 | R-051 | No secrets in repo or CI logs | delivery brief, §10 |
 

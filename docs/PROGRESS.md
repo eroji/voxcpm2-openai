@@ -200,6 +200,10 @@ spikes remain host-run. CI has not run yet: the branch is local (47+ commits ahe
 - **2026-11-02 —** Studio synthesis moved to `/api/speak?save=false`; Test-a-line works with
   `API_KEYS` set and Studio Format controls the preview/take playback container.
 
+- **2026-11-02 —** Human scope change: CI is image build + optional deploy only. Checks/tests/e2e
+  are not repeated in CI; `scripts/verify.sh` is the quality gate. Image tags: short SHA on `main`,
+  `X.Y.Z` on `vX.Y.Z` tags.
+
 ## Next action
 
 1. `git push origin main` and watch the GitLab pipeline (`checks`, `javascript`, `test`, `e2e`,

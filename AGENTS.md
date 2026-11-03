@@ -116,8 +116,8 @@ outside `owns:`, stop and report `BLOCKED: needs <path> (owned by <ID>)`.
 - `NOTES.md` — spike findings S1–S6 (M0). Append-only.
 
 Update `PROGRESS.md` and `MILESTONES.md` after every wave and before every commit. A milestone
-closes only when: tasks done, `scripts/verify.sh` green locally, CI pipeline green, and no
-unresolved BLOCKER.
+closes only when: tasks done, `scripts/verify.sh` green locally, the CI image build is green, and
+no unresolved BLOCKER.
 
 ## 6. Commands
 
@@ -142,15 +142,17 @@ unresolved BLOCKER.
   both at 1280 px and 390 px, compare layout/tokens/waveforms for the M3 review. This is the only
   accepted UI-parity evidence besides code diff.
 - **Code search:** `grep`/`glob` first; read before writing.
-- **GitLab:** repo remote is `git@gitlab.dotslash.io:jimmy/voxcpm2-openai.git`; CI lives in
+- **GitLab:** repo remote is `git@gitlab.dotslash.io:jimmy/voxcpm2-openai.git`; CI (image build) lives in
   `.gitlab-ci.yml`. No GitLab MCP server is configured — do not invent one. Use `git` locally and
   report the pipeline URL after pushing; lead pushes only.
 - **No secrets** in repo, briefs, logs, or CI output. Secrets arrive as CI variables / compose env.
 
 ## 8. Verification floor
 
-- `scripts/verify.sh` is the single local gate: format check, lint, typecheck, unit+integration
-  tests with coverage, e2e. CI runs the same commands.
+- `scripts/verify.sh` is the single quality gate: format check, lint, typecheck, unit+integration
+  tests with coverage, e2e, JS syntax, package build and Containerfile/s6 contract checks.
+- CI is intentionally minimal (human decision 2026-11-02): it only builds and pushes the container
+  image (plus opt-in deploy). Quality gates are local, not repeated in CI.
 - Every non-trivial branch (parsing, money/security path, audio conversion, queueing) leaves at
   least one runnable test that fails if the logic breaks.
 - The word "done" requires pasted command output. No exceptions.

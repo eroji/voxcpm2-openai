@@ -5,8 +5,8 @@ Source of truth: `SPEC.md` §11–13, `deploy/compose.yaml`, `deploy/Containerfi
 Target host is `vllm` (Podman + CDI GPU). **Never put real secrets in this file** — all values
 below are placeholders.
 
-Before pushing anything: `scripts/verify.sh` is the local gate that mirrors the CI pipeline
-(format, lint, types, tests + coverage, e2e). Run it first; CI runs the same commands.
+Before pushing anything: `scripts/verify.sh` is the quality gate (format, lint, types, tests +
+coverage, e2e, JS syntax, build, package contract). CI only builds/pushes the image.
 
 ```bash
 scripts/verify.sh          # full gate
@@ -24,7 +24,7 @@ docker push harbor.dotslash.io/dotslash/voxcpm2-openai:0.1.0
 
 On the `vllm` host use `podman build` / `podman push` with the same tags.
 
-The CI `package` job builds on the default branch (image tag `$CI_COMMIT_SHORT_SHA`) and on
+The CI `build` job builds on the default branch (image tag `$CI_COMMIT_SHORT_SHA`) and on
 `vX.Y.Z` release tags (image tag `${CI_COMMIT_TAG#v}`, i.e. `X.Y.Z`) and pushes to
 `harbor.dotslash.io/dotslash/voxcpm2-openai`. It needs two **masked** CI/CD variables
 (Settings → CI/CD → Variables) — the same names as the notely repo:
@@ -175,7 +175,7 @@ Remaining hardware checks — proven on the `vllm` host, **not** by the fake-eng
 | Warm RTF ≤ 0.2 + VRAM ≤ 10 GB + card sharing | RTF probe and `nvidia-smi` above | `test_hardware_rtf_and_vram` (Q-001 / M0) |
 | External clients (LiteLLM, Open WebUI, Hermes, Wyoming) | §4 cutover | `test_acceptance_external_clients_unchanged` |
 | Eight voices spot-checked by ear | human listener | `test_acceptance_voice_spot_check` |
-| Container build | CI `package` job | `test_acceptance_container_builds` |
+| Container build | CI `build` job / `scripts/verify.sh` package contract | `test_acceptance_container_builds` |
 | UI parity + keyboard | Playwright e2e | `test_acceptance_ui_parity_and_keyboard` |
 
 Also verify by hand per SPEC §13: clone flow (upload → transcribe → save → usable by name on
@@ -231,7 +231,7 @@ variables (Settings → CI/CD → Variables):
 | `HARBOR_USER` / `HARBOR_TOKEN` | same as §1 | the target does its own `docker login` over stdin, so `HARBOR_TOKEN` must be **protected** to reach tag pipelines |
 
 - `staging`: runs automatically on default-branch pipeline success, deploying the
-  `$CI_COMMIT_SHORT_SHA` image the `package` job just pushed.
+  `$CI_COMMIT_SHORT_SHA` image the `build` job just pushed.
 - `production`: releases are tags. `git tag vX.Y.Z && git push --follow-tags` builds image
   `X.Y.Z`, then the manual `deploy:production` job (approve it in the pipeline) pins exactly that
   image — never a later build — and finishes with a `curl -fsS http://127.0.0.1:8880/ready`

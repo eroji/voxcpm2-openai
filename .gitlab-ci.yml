@@ -1,207 +1,120 @@
-# GitLab CI — mandatory checks. CD is opt-in only (DEPLOY_TARGET=staging|production).
+# CI is intentionally minimal: build and publish the container image. Deploy is opt-in.
+# All code quality gates (format, lint, types, unit/integration, e2e, package checks) run
+# locally via scripts/verify.sh; they are not repeated in CI on purpose.
 #
-# House pattern (proven in the notely repo): releases are tags. A push to main builds
-# harbor.dotslash.io/dotslash/voxcpm2-openai:$CI_COMMIT_SHORT_SHA; a `vX.Y.Z` tag builds and
-# publishes X.Y.Z and is the only thing production deploys, pinned to that exact image via
-# deploy/compose.deploy.yaml — never :latest, so a build after the tag can never land here.
+# Required CI variables (Settings > CI/CD > Variables; masked):
+#   HARBOR_USER   Harbor user/robot with push rights to dotslash/voxcpm2-openai.
+#   HARBOR_TOKEN  Its password or robot token, used for `docker login`.
+# Optional CD variables (off unless DEPLOY_TARGET is set):
+#   DEPLOY_TARGET=staging|production, DEPLOY_SSH_KEY (base64 -w0 of an ed25519 key),
+#   DEPLOY_HOST (default vllm.dotslash.io), DEPLOY_USER (default deploy),
+#   DEPLOY_PATH (default /opt/voxcpm2-openai).
 #
-# CI variables the human must create (Settings → CI/CD → Variables, all masked;
-# DEPLOY_SSH_KEY and HARBOR_TOKEN also protected):
-#   HARBOR_USER     Harbor robot/user with push rights to dotslash/voxcpm2-openai.
-#   HARBOR_TOKEN    Its password or robot token, for `docker login`.
-#   DEPLOY_SSH_KEY  Private key (ed25519) base64-ed to one line: base64 -w0 id_ed25519.
-#   DEPLOY_TARGET   staging | production — nothing deploys without it.
-# See docs/RUNBOOK.md §6.
+# Releases are tags: `git tag v0.1.0 && git push --follow-tags` builds/pushes :0.1.0 and
+# allows the manual production deploy. A main push builds/pushes :<short-sha> only.
 
-stages: [checks, test, e2e, build, package, deploy]
+stages: [build, deploy]
 
 variables:
-  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
-  PYTHONDONTWRITEBYTECODE: "1"
-
-default:
-  image: python:3.12-slim
-  interruptible: true
-  cache:
-    key:
-      files: [pyproject.toml]
-    paths: [.cache/pip]
-  before_script:
-    - apt-get update -qq && apt-get install -y -qq --no-install-recommends ffmpeg >/dev/null
-    - python -m pip install -q --upgrade pip
-    - python -m pip install -q -e '.[dev]'
-    - export PYTHON=python
-
-checks:
-  stage: checks
-  parallel:
-    matrix:
-      - CHECK: [format, lint, types]
-  script:
-    - |
-      case "$CHECK" in
-        format) python -m ruff format --check app tests scripts ;;
-        lint)   python -m ruff check app tests scripts ;;
-        types)  python -m mypy app ;;
-      esac
-
-test:
-  stage: test
-  script:
-    - python -m pytest tests --ignore=tests/e2e
-        --cov=app --cov-report=term-missing --cov-report=xml:coverage.xml --cov-fail-under=65
-  coverage: '/^TOTAL.*\s(\d+(?:\.\d+)?)%$/'
-  artifacts:
-    when: always
-    expire_in: 1 week
-    paths: [coverage.xml]
-    reports:
-      coverage_report:
-        coverage_format: cobertura
-        path: coverage.xml
-
-e2e:
-  stage: e2e
-  script:
-    - python -m playwright install --with-deps chromium
-    - python -m pytest tests/e2e -q
-  artifacts:
-    when: always
-    expire_in: 1 week
-    paths: [test-results/]
-
-javascript:
-  stage: checks
-  image: node:22-alpine
-  before_script: []  # alpine: no apt-get; node needs no install
-  script:
-    - for f in app/static/js/*.js; do node --check "$f"; done
-    - echo "all static modules parse"
+  HARBOR_IMAGE: "harbor.dotslash.io/dotslash/voxcpm2-openai"
 
 build:
   stage: build
-  script:
-    - python -m build
-  artifacts:
-    expire_in: 1 week
-    paths: [dist/]
-
-# Container packaging split so a missing credential is a skipped job, never a green package.
-# package:check always validates the static contract; the real build/push runs only with
-# HARBOR_USER/HARBOR_TOKEN as masked CI variables (R-051: never echoed to logs).
-package:check:
-  stage: package
-  before_script: []  # static greps only; no pip install needed
-  script:
-    - grep -q 'COPY app/ /opt/app/' deploy/Containerfile
-    - grep -q 'voxcpm2-3090.yaml' deploy/Containerfile
-    - test -d deploy/s6/engine && test -d deploy/s6/app
-
-package:
-  stage: package
   image: docker:27
   services: [docker:27-dind]
-  needs: [package:check]
+  interruptible: true
   variables:
-    # Full clone so tags are present in the checkout; the default shallow fetch
-    # has none (notely pattern).
+    # Tags are needed for the release tag; dind listens on plain tcp://docker:2375 when
+    # the cert dir is empty (matches the runner's tls_verify=false).
     GIT_DEPTH: 0
-    # Empty certdir: dind then serves plain tcp://docker:2375, which is what the
-    # runner's tls_verify=false tells the CLI to dial. With the default /certs
-    # every docker command fails with "Cannot connect to the Docker daemon".
     DOCKER_TLS_CERTDIR: ""
   rules:
-    # Main builds so a broken build is known before the release that would use
-    # it; a vX.Y.Z tag builds the image the release deploys. Only with creds.
-    - if: '$HARBOR_USER && $HARBOR_TOKEN && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
-    - if: '$HARBOR_USER && $HARBOR_TOKEN && $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/'
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
   before_script:
-    - apk add --no-cache bash
     - echo "$HARBOR_TOKEN" | docker login harbor.dotslash.io -u "$HARBOR_USER" --password-stdin
   script:
-    # vX.Y.Z tag → image X.Y.Z; anything else → short SHA. This exact tag is
-    # what the deploy jobs pin.
-    - if [ -n "$CI_COMMIT_TAG" ]; then export IMAGE_TAG="${CI_COMMIT_TAG#v}"; else export IMAGE_TAG="$CI_COMMIT_SHORT_SHA"; fi
-    - docker build -f deploy/Containerfile -t "harbor.dotslash.io/dotslash/voxcpm2-openai:$IMAGE_TAG" .
-    - docker push "harbor.dotslash.io/dotslash/voxcpm2-openai:$IMAGE_TAG"
+    - |
+      if [ -n "${CI_COMMIT_TAG:-}" ]; then TAG="${CI_COMMIT_TAG#v}"; else TAG="$CI_COMMIT_SHORT_SHA"; fi
+      echo "Building $HARBOR_IMAGE:$TAG"
+      docker build -f deploy/Containerfile -t "$HARBOR_IMAGE:$TAG" .
+      docker push "$HARBOR_IMAGE:$TAG"
+      echo "DEPLOY_IMAGE=$HARBOR_IMAGE:$TAG" > build.env
+  artifacts:
+    expire_in: 1 week
+    reports:
+      dotenv: build.env
 
-# ---------------------------------------------------------------- CD (opt-in)
-# Nothing below runs unless DEPLOY_TARGET is set. Production additionally requires a tag and
-# a manual approval. See docs/RUNBOOK.md §"Turning on CD".
-# DEPLOY_IMAGE is exported on the target into `docker compose -f deploy/compose.yaml
-# -f deploy/compose.deploy.yaml`, whose override is the only thing that parameterises the image
-# (the frozen reference compose.yaml pins :0.1.0 and must not change).
+# ------------------------------------------------------------------ CD (opt-in)
+# Nothing below runs unless DEPLOY_TARGET is set. Staging follows main; production needs a
+# vX.Y.Z tag plus a manual approval. The image is pinned to the tag that built it.
 deploy:staging:
   stage: deploy
   image: alpine:3.20
-  before_script: []  # alpine: no apt-get; the script installs what it needs
   interruptible: false
-  needs: [package:check, { job: package, optional: true }]
+  needs: [build]
+  environment:
+    name: staging
+    url: http://vllm.dotslash.io:8881
   variables:
     DEPLOY_HOST: vllm.dotslash.io
     DEPLOY_USER: deploy
     DEPLOY_PATH: /opt/voxcpm2-openai
+    HEALTH_URL: http://127.0.0.1:8881/ready
   rules:
     - if: '$DEPLOY_TARGET == "staging" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
       when: on_success
     - when: never
-  script:
+  before_script:
     - apk add --no-cache openssh-client
     - mkdir -p ~/.ssh
-    # GitLab variables are single-line, so DEPLOY_SSH_KEY is base64 -w0 of the key
-    # file; tr strips newlines that survived the copy (notely pattern).
     - printf '%s' "$DEPLOY_SSH_KEY" | tr -dc 'A-Za-z0-9+/=' | base64 -d > ~/.ssh/id_ed25519
     - chmod 600 ~/.ssh/id_ed25519
-    - if [ -n "$CI_COMMIT_TAG" ]; then export IMAGE_TAG="${CI_COMMIT_TAG#v}"; else export IMAGE_TAG="$CI_COMMIT_SHORT_SHA"; fi
-    # The runner's `docker login` does not authenticate the target, and compose pulls
-    # there, so the target gets its own credential — over stdin, never in argv.
-    - printf '%s' "$HARBOR_TOKEN" > /tmp/harbor_token && chmod 600 /tmp/harbor_token
-    - "ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
-      $DEPLOY_USER@$DEPLOY_HOST \
-      \"docker login harbor.dotslash.io -u '$HARBOR_USER' --password-stdin\" \
-      < /tmp/harbor_token"
-    - "ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
-      $DEPLOY_USER@$DEPLOY_HOST \
-      \"cd $DEPLOY_PATH && export DEPLOY_IMAGE=harbor.dotslash.io/dotslash/voxcpm2-openai:$IMAGE_TAG \
-      && docker compose -f deploy/compose.yaml -f deploy/compose.deploy.yaml pull \
-      && docker compose -f deploy/compose.yaml -f deploy/compose.deploy.yaml up -d --remove-orphans\""
+  script:
+    - |
+      printf '%s' "$HARBOR_TOKEN" > /tmp/harbor_token && chmod 600 /tmp/harbor_token
+      ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
+        "$DEPLOY_USER@$DEPLOY_HOST" \
+        "docker login harbor.dotslash.io -u '$HARBOR_USER' --password-stdin" < /tmp/harbor_token
+      ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
+        "$DEPLOY_USER@$DEPLOY_HOST" \
+        "cd $DEPLOY_PATH && export DEPLOY_IMAGE='$DEPLOY_IMAGE' \
+        && docker compose -f deploy/compose.yaml -f deploy/compose.deploy.yaml pull \
+        && docker compose -f deploy/compose.yaml -f deploy/compose.deploy.yaml up -d --remove-orphans \
+        && curl -fsS $HEALTH_URL"
 
 deploy:production:
   stage: deploy
   image: alpine:3.20
-  before_script: []  # alpine: no apt-get; the script installs what it needs
   interruptible: false
-  needs: [package:check, { job: package, optional: true }]
+  needs: [build]
+  environment:
+    name: production
+    url: http://vllm.dotslash.io:8880
   variables:
     DEPLOY_HOST: vllm.dotslash.io
     DEPLOY_USER: deploy
     DEPLOY_PATH: /opt/voxcpm2-openai
+    HEALTH_URL: http://127.0.0.1:8880/ready
   rules:
-    # Releases only: `git tag vX.Y.Z && git push --follow-tags`, then approve here.
     - if: '$DEPLOY_TARGET == "production" && $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/'
       when: manual
       allow_failure: false
     - when: never
-  environment:
-    name: production
-    url: http://vllm.dotslash.io:8880
-  script:
+  before_script:
     - apk add --no-cache openssh-client
     - mkdir -p ~/.ssh
     - printf '%s' "$DEPLOY_SSH_KEY" | tr -dc 'A-Za-z0-9+/=' | base64 -d > ~/.ssh/id_ed25519
     - chmod 600 ~/.ssh/id_ed25519
-    - export IMAGE_TAG="${CI_COMMIT_TAG#v}"
-    - printf '%s' "$HARBOR_TOKEN" > /tmp/harbor_token && chmod 600 /tmp/harbor_token
-    - "ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
-      $DEPLOY_USER@$DEPLOY_HOST \
-      \"docker login harbor.dotslash.io -u '$HARBOR_USER' --password-stdin\" \
-      < /tmp/harbor_token"
-    - "ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
-      $DEPLOY_USER@$DEPLOY_HOST \
-      \"cd $DEPLOY_PATH && export DEPLOY_IMAGE=harbor.dotslash.io/dotslash/voxcpm2-openai:$IMAGE_TAG \
-      && docker compose -f deploy/compose.yaml -f deploy/compose.deploy.yaml pull \
-      && docker compose -f deploy/compose.yaml -f deploy/compose.deploy.yaml up -d --remove-orphans\""
-    # Health gate: the app's /ready is warm-up + engine gated (contracts §1). Port 8880
-    # is the post-cutover port (RUNBOOK §4).
-    - ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes -o StrictHostKeyChecking=accept-new
-      "$DEPLOY_USER@$DEPLOY_HOST" "curl -fsS http://127.0.0.1:8880/ready"
+  script:
+    - |
+      printf '%s' "$HARBOR_TOKEN" > /tmp/harbor_token && chmod 600 /tmp/harbor_token
+      ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
+        "$DEPLOY_USER@$DEPLOY_HOST" \
+        "docker login harbor.dotslash.io -u '$HARBOR_USER' --password-stdin" < /tmp/harbor_token
+      ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
+        "$DEPLOY_USER@$DEPLOY_HOST" \
+        "cd $DEPLOY_PATH && export DEPLOY_IMAGE='$DEPLOY_IMAGE' \
+        && docker compose -f deploy/compose.yaml -f deploy/compose.deploy.yaml pull \
+        && docker compose -f deploy/compose.yaml -f deploy/compose.deploy.yaml up -d --remove-orphans \
+        && curl -fsS $HEALTH_URL"
