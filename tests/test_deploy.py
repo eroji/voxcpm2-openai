@@ -86,6 +86,12 @@ def test_voxcpm_stays_on_uv():
     assert "pip install voxcpm" not in cf  # plain pip would downgrade NCCL
 
 
+def test_compose_keeps_hf_offline_by_default_but_allows_token():
+    compose = (ROOT / "deploy" / "compose.yaml").read_text()
+    assert 'HF_HUB_OFFLINE: "${HF_HUB_OFFLINE:-1}"' in compose
+    assert 'HF_TOKEN: "${HF_TOKEN:-}"' in compose
+
+
 def test_inherited_qwen3_supervisor_is_neutralized():
     text = (ROOT / "deploy" / "Containerfile").read_text()
     assert "S6_STAGE2_HOOK=/bin/true" in text, (
