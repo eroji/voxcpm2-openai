@@ -255,6 +255,8 @@ spikes remain host-run. CI has not run yet: the branch is local (47+ commits ahe
   pod with `podman-compose --force-recreate --pull`, waits for `/ready`. Host was updated to
   `v0.3.0` and is healthy. `JUMP_SSH_KEY` (or `DEPLOY_SSH_KEY`) must hold the jumpbox key.
 
+- **2026-11-03 —** Release v0.3.1: automatic tag deploy to vllm via jumpbox, .env image tag.
+
 ## Next action
 
 1. `git push origin main` and watch the GitLab pipeline (`checks`, `javascript`, `test`, `e2e`,
