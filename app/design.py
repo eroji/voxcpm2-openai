@@ -50,6 +50,8 @@ class DesignService:
             )
             result = await self.engine.synth(params)
             samples, rate = audio_utils.read_audio(result.audio)
+            # Candidates are often quieter than Speak output; normalize previews to -1 dBFS.
+            samples = audio_utils.peak_normalize(samples, peak_db=-1.0)
             take = self.takes.create(
                 samples,
                 rate,

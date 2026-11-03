@@ -166,6 +166,18 @@ def create_app(settings: Settings | None = None, *, engine: EngineClient | None 
                 )
         return await call_next(request)
 
+    @app.middleware("http")
+    async def static_revalidation(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        response = await call_next(request)
+        path = request.url.path
+        if (path == "/" or path.startswith("/static/")) and "cache-control" not in response.headers:
+            # Static assets carry no content hash; force revalidation so a redeploy is not
+            # masked by browser-cached JS/CSS. Explicit headers from the route win.
+            response.headers["Cache-Control"] = "no-cache, must-revalidate"
+        return response
+
     @app.exception_handler(APIError)
     async def api_error_handler(request: Request, exc: APIError) -> JSONResponse:
         return JSONResponse(exc.body(), status_code=exc.status_code, headers=exc.headers)

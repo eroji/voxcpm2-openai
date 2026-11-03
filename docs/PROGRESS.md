@@ -269,6 +269,10 @@ spikes remain host-run. CI has not run yet: the branch is local (47+ commits ahe
   first `timeupdate`; `attachPlayer` now only changes state on play/pause/stop. Speak and Design
   share it; Download/editor alignment fixed.
 
+- **2026-11-03 —** Static assets now revalidate (`no-cache`) so a redeploy cannot be masked by
+  cached JS/CSS; design previews normalized to -1 dBFS; candidate count ordered 1–4. Release
+  v0.3.5.
+
 ## Next action
 
 1. `git push origin main` and watch the GitLab pipeline (`checks`, `javascript`, `test`, `e2e`,

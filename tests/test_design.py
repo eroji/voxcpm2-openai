@@ -6,6 +6,7 @@ import asyncio
 
 import numpy as np
 import pytest
+from app import audio as audio_utils
 from app.config import Settings
 from app.engine import EngineClient
 from app.models import SpeechRequest
@@ -47,6 +48,8 @@ def test_three_candidates(client: TestClient, settings: Settings, fake_engine) -
     assert len(design_takes) == 3
     assert {t["design_seed"] for t in design_takes} == set(seeds)
     for take in design_takes:
+        samples, _ = audio_utils.read_audio_file(TakeStore(settings).audio_path(take["id"]))
+        assert float(np.max(np.abs(samples))) == pytest.approx(10 ** (-1 / 20), abs=0.01)
         assert take["voice"] == "design"
         assert take["text"] == SAMPLE
         assert take["design_prompt"] == DESCRIPTION
