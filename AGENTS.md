@@ -5,7 +5,8 @@ OpenAI-compatible `/v1/audio/speech` API plus the **Voice Studio** web UI.
 
 **Authority:** `SPEC.md` and everything under `ui/` are the specification and are
 **read-only**. `deploy/voxcpm2-3090.yaml` is a validated reference config and must not change;
-`deploy/compose.yaml` may only be updated to the current release image tag. Never edit spec/UI/reference files to make code pass.
+`deploy/compose.yaml` may change only for spec-mandated deployment updates (release image tag,
+required mounts). Never edit spec/UI/reference files to make code pass.
 If code and spec disagree, the spec wins and the discrepancy is escalated as a `Q-###`.
 
 Read in this order before any task: `SPEC.md` → `docs/PLAN.md` → `docs/CONTRACTS.md` →
@@ -103,7 +104,7 @@ outside `owns:`, stop and report `BLOCKED: needs <path> (owned by <ID>)`.
 - Tests travel with the module they test. A task owns its test files; nobody edits another task's
   tests to make them pass.
 - Never touch: `SPEC.md`, `ui/**`, `deploy/voxcpm2-3090.yaml`. `deploy/compose.yaml` changes are
-  limited to the release image tag.
+  limited to the release image tag and spec-mandated mounts.
 - No new dependency without a lead decision recorded in `docs/PROGRESS.md` decisions log.
 
 ## 5. Progress and milestones

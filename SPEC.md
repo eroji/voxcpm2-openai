@@ -70,7 +70,7 @@ One container, two supervised processes (same pattern as `qwen3-tts-openai`, whi
 - Readiness: poll `http://127.0.0.1:$ENGINE_PORT/health`. When healthy, the app runs a **warm-up**: one short synthesis with inline reference audio (use the first library voice, or bundled audio if the library is empty), plus one streamed request. Only after warm-up does `/ready` return 200.
 - `/api/engine/warmup` re-runs the warm-up on demand. `/api/engine/restart` restarts the s6 engine service and re-runs warm-up.
 - Concurrency: the engine accepts 2 sequences. The app runs at most 2 engine requests at once with an asyncio semaphore and queues the rest (bounded queue of 16, then HTTP 429 with `Retry-After`).
-- Engine metrics for the Engine screen: VRAM via `nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader,nounits -i 0` inside the container (the card is device 0 there); RTF and first-audio latency as rolling averages of the last 20 requests, measured by the app.
+- Engine metrics for the Engine screen: VRAM via `nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader,nounits -i 0` inside the container (the card is device 0 there); RTF and first-audio latency as rolling averages of the last 20 requests, measured by the app. Exclude warm-up requests and any request that started before `/ready` went green; otherwise the cold first request (~14.5 s) skews RTF to ~2.3.
 
 ## 5. Data model and storage
 
@@ -85,9 +85,9 @@ Everything under `DATA_DIR=/data`:
   settings.json                 defaults (cfg, steps, format, stream, take retention)
 ```
 
-### Voice file format (keep compatible with the existing Qwen3 speaker files)
+### Voice file format
 
-The existing files in `/opt/qwen3-tts/data/speakers/*.safetensors` already hold the original reference audio and transcript, so import is lossless. Same format for new voices:
+Same layout as the Qwen3 shim's speaker files (no import from Qwen3; voices are created fresh in the Studio):
 
 - Tensor `audio`: float32, mono, at `metadata.sample_rate`.
 - String metadata (all values are strings, a safetensors constraint):
@@ -101,9 +101,9 @@ The existing files in `/opt/qwen3-tts/data/speakers/*.safetensors` already hold 
 | `created_at` | `1791831655` | unix seconds |
 | `consent` | `uploaded-via-studio` / `own-generated-voice` | required; see section 10 |
 | `embedding_source` | `audio` | keep `audio`; vLLM-Omni rejects `direct` (Qwen3-only) for VoxCPM2 |
-| `mime_type`, `original_filename`, `file_size` | | carried over on import |
-| `language` | `en` / `ja` / `ko` / `zh` | **new**; infer from name suffix on import (`-en`, `-ja`, `-kr`→`ko`, `-zh`) |
-| `source` | `uploaded` / `designed` | **new**; from `consent` on import |
+| `mime_type`, `original_filename`, `file_size` | | from the uploaded clip (clone only) |
+| `language` | `en` / `ja` / `ko` / `zh` | chosen in Clone / Design |
+| `source` | `uploaded` / `designed` | |
 | `design_prompt`, `design_seed` | | **new**, designed voices only |
 
 Reading a voice (reference code):
@@ -116,9 +116,6 @@ audio = f.get_tensor("audio").numpy()      # float32 mono
 sr = int(meta["sample_rate"]); ref_text = meta["ref_text"]
 ```
 
-### Import from Qwen3
-
-On first start, if `/import/qwen3-speakers` is mounted and `/data/voices` is empty, copy every `*.safetensors` file into `/data/voices/<voice_name_lower>.safetensors`, adding `language` and `source`. Existing voices: `ashley-en`, `ashley-ja`, `ashley-kr`, `ashley-zh`, `alison-en`, `bennett-en`, `jack-en`, `mia-en`. Also expose `POST /api/voices/import` to re-run it (skip names that already exist unless `overwrite=true`).
 
 ## 6. OpenAI-compatible API (`/v1`)
 
@@ -165,7 +162,6 @@ All JSON unless noted. Protected by `STUDIO_AUTH` when set (section 10).
 | PATCH | `/api/voices/{name}` | rename, edit `ref_text`, edit `language` (backup first) |
 | DELETE | `/api/voices/{name}` | delete (backup first) |
 | POST | `/api/voices/clone` | multipart: `file` (wav/flac/mp3, 3–30 s, ≤20 MB), `name`, `language`, `ref_text`, `consent=true` (required). Normalize: mono, trim leading/trailing silence, peak-normalize to -1 dBFS, store float32 at the original rate (resample to 48 kHz if above) |
-| POST | `/api/voices/import` | re-run the Qwen3 import (section 5) |
 | POST | `/api/transcribe` | multipart `file` → `{"text"}` via `STT_URL` (OpenAI `/audio/transcriptions` shape); used by "Auto-transcribe" |
 | POST | `/api/speak` | Studio synthesis: same fields as `/v1/audio/speech`, saves a take, returns take metadata and an audio URL. If `stream=true`, return the stream and save the take when it ends |
 | GET | `/api/takes` | takes for the session list (newest first; keep last 50 by default) |
@@ -194,7 +190,9 @@ The visual reference is `ui/studio.html` with `ui/tokens.css`. Open it in a brow
 ### 01 Speak
 
 - Voice chips from `/api/voices`; single select; remembers the last voice (localStorage).
+- **Empty library guard:** with no voices, replace the chips with a notice ("No voices in the library yet", one line of explanation, Clone from audio / Design a voice buttons), show "Add a voice to enable Generate" beside the Generate button, set `aria-disabled="true"` on it (clicking moves focus to the notice's first button instead of submitting), and show "No takes yet" in the Takes column. Text, presets and parameters stay editable. Server side, `/api/speak` and `/v1/audio/speech` with an empty library return 400 `{"error": {"code": "no_voices", "message": "No voices exist yet. Create one in the Studio (Clone or Design) first."}}`. Reference: `ui/studio.html?empty`.
 - Text (13 px, same size as style control), style control (optional), parameters: CFG, diffusion steps, format. Hide CFG / steps if spike S4 shows they can't be passed through.
+- **Test phrases** row under Text: six preset chips (Greeting, Status update, Numbers & dates, Question, Long passage, Tongue twister) from `ui/presets.json`, in the **selected voice's language** (from the voice's `language`). Clicking a chip replaces the Text box content and marks the chip pressed. Switching to a voice in another language keeps the same preset and swaps in that language's version. Default selection: Question. Serve the presets from the app (static file or `GET /api/presets`).
 - Stream toggle and Generate button. Ctrl/Cmd+Enter in the text box generates.
 - While generating: the Generate button reads "Generating…" and is disabled; with streaming, playback starts when the first chunk arrives (Web Audio, s16le PCM at 48 kHz).
 - Takes column: newest first. Each take shows voice, stats (duration · RTF · first-audio ms), time, text clamped to 2 lines, play button, smooth waveform, Download and Save as voice. The newest take's waveform uses the accent; older ones are grey.
@@ -205,8 +203,8 @@ The visual reference is `ui/studio.html` with `ui/tokens.css`. Open it in a brow
 - Table: Name, Language, Source (outlined square = uploaded, filled square = designed, plus the word), Reference length, Transcript (one line, ellipsis), actions Audition / Edit / Delete.
 - Search (name and transcript) and language filters (All, English, Japanese, Korean, Chinese).
 - Edit opens an inline row editor (name, language, transcript). Delete asks to confirm in place ("Delete ashley-en? This can't be undone from the UI." with Delete / Cancel); a backup is still written.
-- Header buttons go to Clone and Design.
-- Empty state: "No voices yet. Clone one from a recording or design one from a description." with both buttons.
+- Header buttons (Clone from audio, Design a voice) go to Clone and Design, and appear **only when the library has voices**.
+- Empty library: hide the header buttons, the search/filter toolbar and the table, and show one empty state instead: "No voices yet", one line of explanation, the same two buttons with the same labels (Clone from audio, Design a voice). Never show both sets of buttons. Reference: `ui/studio.html?empty`.
 
 ### 03 Clone
 
@@ -219,12 +217,13 @@ The visual reference is `ui/studio.html` with `ui/tokens.css`. Open it in a brow
 ### 04 Design
 
 - Description (15 px), descriptor tags that append to the description, language, number of candidates, sample line (becomes the saved transcript).
+- The sample line has the same six preset chips under it, in the **Design language** selected above; changing the language re-renders the chips (and swaps the text if a preset is selected).
 - Generate candidates → list with play, waveform, seed, Select. One selection at a time; the selected candidate gets a 3 px accent top rule and accent waveform.
 - Name field and Save as voice (disabled until a candidate is selected and the name is valid).
 
 ### 05 Engine
 
-- Stat grid from `/api/engine`, refreshed every 5 s while visible: Model, GPU (name only), VRAM in use, KV cache, Warm RTF, First audio, Voices, Runtime.
+- Stat grid from `/api/engine`, refreshed every 5 s while visible, fixed at 4 columns (2 below 900 px, 1 below 520 px). Each tile has a short one-line value and the detail in the note: Model `VoxCPM2` (note `openbmb/VoxCPM2 · 2B · 48 kHz`), GPU `RTX 3090` (strip the `NVIDIA GeForce ` prefix; full name in `title`), GPU memory used (whole card, note "of 24 GB, all processes on the card"), KV cache, Warm RTF, First audio, Voices, Runtime `vLLM-Omni` (note `0.30.0 · vLLM 0.30.0`). Values never wrap: `white-space: nowrap` with ellipsis.
 - Run warm-up, Restart engine (confirm in place).
 - Endpoint example: the real base URL plus a sample request.
 
@@ -272,7 +271,7 @@ Each spike is a short script against a running engine (the test container `voxcp
 
 - `POST /v1/audio/speech` with `{"model":"tts-1","voice":"ashley-en","input":"...","response_format":"wav"}` returns 48 kHz WAV; warm RTF ≤ 0.2 on the shared 3090.
 - Streamed PCM first chunk ≤ 300 ms after warm-up.
-- All eight imported voices synthesize correctly in their language; spot-check by ear against the Qwen3 versions.
+- Voices re-created in the Studio (e.g. ashley-en/ja/kr/zh) synthesize correctly in their language; spot-check by ear against the Qwen3 versions.
 - First request after container start takes no longer than a warm request (warm-up done before `/ready`).
 - Clone flow: upload → auto-transcribe → save → voice appears in Speak and in `/v1/audio/voices`, usable by name over `/v1`.
 - Design flow: description → 3 candidates → select → save → voice works by name.
@@ -285,7 +284,7 @@ Each spike is a short script against a running engine (the test container `voxcp
 
 1. **M0 Spikes:** S1–S6, findings in `NOTES.md`.
 2. **M1 Engine + `/v1`:** container, s6 services, warm-up, voice resolution, formats, streaming, queueing. Acceptance criteria for `/v1` pass.
-3. **M2 Voice store + import + Studio API:** voices CRUD, clone, transcribe, takes, engine status.
+3. **M2 Voice store + Studio API:** voices CRUD, clone, transcribe, takes, engine status.
 4. **M3 UI:** all five screens wired to the API.
 5. **M4 Design flow:** candidates and save (depends on S2).
 6. **M5 Cutover:** section 11.
@@ -295,7 +294,13 @@ Each spike is a short script against a running engine (the test container `voxcp
 ```
 SPEC.md                      this file
 ui/tokens.css                design tokens
-ui/studio.html               static, clickable reference of all five screens + wavePath()
+ui/studio.html               static, clickable reference of all five screens + wavePath() (add ?empty for the empty library)
+ui/presets.json              test phrases for Speak and Design, en/ja/ko/zh
+ui/icons/                    app icon (red square, five bars, off-white peak): favicon.svg, favicon.ico (16/32/48),
+                             favicon-16.png, favicon-32.png, apple-touch-icon.png (180), icon-192.png, icon-512.png;
+                             concepts/ holds the other explored directions (reference only)
+ui/starting.html             engine startup page (see ui/STARTING.md)
+ui/STARTING.md               backend contract for the startup page
 deploy/voxcpm2-3090.yaml     validated vLLM-Omni deploy config
 deploy/Containerfile         reference build (base image, voxcpm via uv, env)
 deploy/compose.yaml          reference compose (CDI GPU, volumes, ports)

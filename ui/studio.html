@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Voice Studio</title>
 <link rel="stylesheet" href="tokens.css">
+<link rel="icon" href="icons/favicon.ico" sizes="any">
+<link rel="icon" type="image/svg+xml" href="icons/favicon.svg">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <!--
   Visual reference for the Voice Studio UI. Static data, no backend calls.
   Port the structure and classes to the real app; replace sample data with API data.
@@ -66,10 +69,21 @@ input[type="checkbox"] { width: 14px; height: 14px; margin: 0; accent-color: var
 
 /* Buttons */
 .btn-primary { min-height: var(--vs-h-primary); padding: 0 var(--vs-s7); background: var(--vs-accent); color: var(--vs-on-accent); border: none; font-weight: 700; font-size: var(--vs-fs-body); }
+.btn-primary[aria-disabled="true"] { background: var(--vs-rule-faint); color: var(--vs-muted); cursor: not-allowed; }
+.vs-novoice { display: flex; flex-direction: column; gap: var(--vs-s3); padding: 2px 0 4px; }
+.vs-novoice .t { display: inline-flex; align-items: center; gap: var(--vs-s3); font-weight: 700; }
+.vs-novoice .t::before { content: ""; width: 8px; height: 8px; background: var(--vs-accent); }
+.vs-novoice p { margin: 0; font-size: var(--vs-fs-small); color: var(--vs-fg-2); }
 .btn-secondary { min-height: var(--vs-h-input); padding: 0 var(--vs-s7); background: var(--vs-bg); border: 1px solid var(--vs-fg); font-weight: 500; }
 .btn-inverse { min-height: var(--vs-h-input); padding: 0 var(--vs-s7); background: var(--vs-fg); color: var(--vs-bg); border: 1px solid var(--vs-fg); font-weight: 500; }
 .btn-link { min-height: var(--vs-h-link); padding: 0; background: none; border: none; border-bottom: 1px solid var(--vs-fg); font-size: var(--vs-fs-label); }
 .btn-tag { min-height: 24px; padding: 0 var(--vs-s3); background: var(--vs-bg); border: 1px solid var(--vs-rule); font-size: var(--vs-fs-small); }
+.btn-tag[aria-pressed="true"] { background: var(--vs-fg); color: var(--vs-bg); border-color: var(--vs-fg); font-weight: 700; }
+.vs-presets { display: flex; flex-wrap: wrap; gap: 6px; align-content: flex-start; }
+.vs-empty { border-top: var(--vs-rule-section); padding-top: 28px; display: flex; flex-direction: column; gap: var(--vs-s5); max-width: 560px; }
+.vs-empty .t { margin: 0; font-size: 15px; font-weight: 700; letter-spacing: -0.01em; }
+.vs-empty p { margin: 0; color: var(--vs-fg-2); }
+[hidden] { display: none !important; }
 .btn-play { flex: none; width: var(--vs-play); height: var(--vs-play); padding: 0; border: 1px solid var(--vs-fg); background: var(--vs-bg); display: inline-flex; align-items: center; justify-content: center; }
 .btn-play.lg { width: 30px; height: 30px; }
 
@@ -185,10 +199,20 @@ input[type="checkbox"] { width: 14px; height: 14px; margin: 0; accent-color: var
           <button class="vs-chip" aria-pressed="false">jack-en <span class="lang">EN</span></button>
           <button class="vs-chip" aria-pressed="false">mia-en <span class="lang">EN</span></button>
         </div>
+        <!-- Shown instead of the chips when the library is empty -->
+        <div class="ctl vs-novoice" id="speak-novoice" role="status" hidden>
+          <span class="t">No voices in the library yet</span>
+          <p>Synthesis needs a voice. Clone one from a recording or design one from a description, then come back here.</p>
+          <span style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn-secondary" data-goto="clone" style="min-height:28px">Clone from audio</button><button class="btn-inverse" data-goto="design" style="min-height:28px;font-weight:700">Design a voice</button></span>
+        </div>
       </div>
       <div class="vs-row">
         <label class="lbl" for="speak-text">Text</label>
-        <div class="ctl"><textarea class="vs-text" id="speak-text" rows="4">Heads up: the certificate on the jumpbox expires in nine days. Want me to renew it now?</textarea></div>
+        <div class="ctl"><textarea class="vs-text" id="speak-text" rows="4" lang="en">Heads up: the certificate on the jumpbox expires in nine days. Want me to renew it now?</textarea></div>
+      </div>
+      <div class="vs-row">
+        <span class="lbl" id="speak-presets-lbl">Test phrases<span class="hint"><span id="speak-lang-name">English</span>, follows the voice</span></span>
+        <div class="ctl vs-presets" role="group" aria-labelledby="speak-presets-lbl" id="speak-presets"></div>
       </div>
       <div class="vs-row">
         <label class="lbl" for="speak-style">Style control<span class="hint">Optional</span></label>
@@ -204,12 +228,16 @@ input[type="checkbox"] { width: 14px; height: 14px; margin: 0; accent-color: var
       </div>
       <div class="vs-actions">
         <button class="vs-toggle" id="stream-toggle" aria-pressed="true"><span class="box" aria-hidden="true"></span>Stream audio</button>
-        <button class="btn-primary">Generate</button>
+        <span style="display:inline-flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <span class="meta" id="gen-hint" hidden>Add a voice to enable Generate</span>
+          <button class="btn-primary" id="generate" aria-describedby="gen-hint">Generate</button>
+        </span>
       </div>
     </section>
 
     <section class="vs-col-side" aria-labelledby="takes-h">
       <div class="vs-head"><h2 class="vs-h2" id="takes-h">Takes</h2><span class="meta">This session</span></div>
+      <p class="meta" id="takes-empty" hidden style="white-space:normal;margin:0;padding:12px 0;border-top:var(--vs-rule-row)">No takes yet. Once you have a voice, everything you generate shows up here with playback, download and Save as voice.</p>
       <article class="vs-take">
         <div class="top"><span class="who"><b>ashley-en</b><span class="meta">5.60 s · RTF 0.14 · 154 ms</span></span><span class="meta">20:14</span></div>
         <p>Heads up: the certificate on the jumpbox expires in nine days. Want me to renew it now?</p>
@@ -246,11 +274,21 @@ input[type="checkbox"] { width: 14px; height: 14px; margin: 0; accent-color: var
   <section aria-labelledby="voices-h">
     <div class="vs-head">
       <h2 class="vs-h2" id="voices-h">Library <span class="count">8</span></h2>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <!-- Header actions show only when the library has voices; the empty state carries them otherwise. Never both. -->
+      <div style="display:flex;gap:8px;flex-wrap:wrap" id="voices-actions">
         <button class="btn-secondary" data-goto="clone">Clone from audio</button>
         <button class="btn-primary" data-goto="design">Design a voice</button>
       </div>
     </div>
+    <div class="vs-empty" id="voices-empty" hidden>
+      <p class="t">No voices yet</p>
+      <p>Add one from a recording of a real speaker, or describe a voice and let VoxCPM2 create it.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;padding-top:4px">
+        <button class="btn-secondary" data-goto="clone">Clone from audio</button>
+        <button class="btn-primary" data-goto="design">Design a voice</button>
+      </div>
+    </div>
+    <div id="voices-list">
     <div class="vs-toolbar">
       <label class="sr" for="voice-search">Search voices</label>
       <input class="vs-input" id="voice-search" type="search" placeholder="Search">
@@ -276,6 +314,7 @@ input[type="checkbox"] { width: 14px; height: 14px; margin: 0; accent-color: var
           <tr data-lang="EN"><td class="name">mia-en</td><td>English</td><td><span class="src">Uploaded</span></td><td>[length]</td><td class="tx">[stored transcript]</td><td class="act"><button class="btn-link">Audition</button><button class="btn-link">Edit</button><button class="btn-link">Delete</button></td></tr>
         </tbody>
       </table>
+    </div>
     </div>
   </section>
 </div>
@@ -317,7 +356,6 @@ input[type="checkbox"] { width: 14px; height: 14px; margin: 0; accent-color: var
       <h3 id="clone-tips">How cloning works</h3>
       <p><b>1</b>  The clip and transcript are stored with the voice and sent as <code>ref_audio</code> and <code>ref_text</code> on every request. Callers pass only the voice name.</p>
       <p><b>2</b>  An accurate transcript gives the highest similarity. Without one, VoxCPM2 falls back to reference-only cloning.</p>
-      <p><b>3</b>  Existing Qwen3 voices import directly: their stored audio and transcript carry over.</p>
     </aside>
   </div>
 </div>
@@ -339,13 +377,16 @@ input[type="checkbox"] { width: 14px; height: 14px; margin: 0; accent-color: var
       <div class="vs-row">
         <span class="lbl">Options</span>
         <div class="ctl vs-grid-params">
-          <div class="vs-field"><label for="design-lang">Language</label><select class="vs-select" id="design-lang"><option>Japanese</option><option>English</option><option>Korean</option><option>Chinese</option></select></div>
+          <div class="vs-field"><label for="design-lang">Language</label><select class="vs-select" id="design-lang"><option value="ja">Japanese</option><option value="en">English</option><option value="ko">Korean</option><option value="zh">Chinese</option></select></div>
           <div class="vs-field"><label for="design-n">Candidates</label><select class="vs-select" id="design-n"><option>3</option><option>2</option><option>4</option></select></div>
         </div>
       </div>
       <div class="vs-row">
         <label class="lbl" for="design-sample">Sample line<span class="hint">Saved as the reference transcript</span></label>
-        <div class="ctl"><textarea class="vs-text" id="design-sample" rows="2" lang="ja" style="font-size:14px">承知しました。次の会議は二時半からで、会議室はもう予約済みです。</textarea></div>
+        <div class="ctl" style="display:flex;flex-direction:column;gap:10px">
+          <textarea class="vs-text" id="design-sample" rows="2" lang="ja" style="font-size:14px">承知しました。次の会議は二時半からで、会議室はもう予約済みです。</textarea>
+          <div class="vs-presets" role="group" aria-label="Sample line presets" id="design-presets"></div>
+        </div>
       </div>
       <div class="vs-actions" style="justify-content:flex-end"><button class="btn-primary">Generate candidates</button></div>
     </section>
@@ -472,6 +513,60 @@ document.getElementById('candidates').addEventListener('click', e => {
     c.querySelector('.vs-wave').classList.toggle('is-current', on);
   });
 });
+/* Phrase presets (same data as ui/presets.json). Speak follows the selected voice's language;
+   Design follows the Design language select. Picking a preset replaces the text box content. */
+const PRESETS = {"en": [{"id": "greeting", "label": "Greeting", "text": "Good morning. You have three meetings today, and the first one starts at nine thirty."}, {"id": "status", "label": "Status update", "text": "The backup finished without errors. Three old snapshots were pruned, and the pool is at sixty-two percent."}, {"id": "numbers", "label": "Numbers & dates", "text": "Your total comes to $1,284.50, due on March 3rd, 2027. The reference number is 4417-B."}, {"id": "question", "label": "Question", "text": "Heads up: the certificate on the jumpbox expires in nine days. Want me to renew it now?"}, {"id": "long", "label": "Long passage", "text": "It was late in the evening when the rain finally stopped. The streets were quiet, the air smelled of wet stone, and somewhere down the block a radio was playing an old song."}, {"id": "twister", "label": "Tongue twister", "text": "She sells seashells by the seashore, and the shells she sells are surely seashells."}], "ja": [{"id": "greeting", "label": "Greeting", "text": "おはようございます。今日は会議が三つあり、最初の会議は九時半からです。"}, {"id": "status", "label": "Status update", "text": "バックアップはエラーなく完了しました。古いスナップショットを三つ削除し、プールの使用率は六十二パーセントです。"}, {"id": "numbers", "label": "Numbers & dates", "text": "合計は12,840円で、支払期限は2027年3月3日です。参照番号は4417-Bです。"}, {"id": "question", "label": "Question", "text": "踏み台サーバーの証明書があと九日で期限切れになります。今すぐ更新しますか？"}, {"id": "long", "label": "Long passage", "text": "夕方遅く、ようやく雨がやみました。通りは静かで、濡れた石の匂いがして、どこか遠くで古い歌がラジオから流れていました。"}, {"id": "twister", "label": "Tongue twister", "text": "生麦生米生卵。隣の客はよく柿食う客だ。"}], "ko": [{"id": "greeting", "label": "Greeting", "text": "좋은 아침입니다. 오늘 회의가 세 개 있고, 첫 회의는 아홉 시 반에 시작합니다."}, {"id": "status", "label": "Status update", "text": "백업이 오류 없이 완료되었습니다. 오래된 스냅샷 세 개를 정리했고, 풀 사용률은 62퍼센트입니다."}, {"id": "numbers", "label": "Numbers & dates", "text": "총 금액은 128,450원이고, 납부 기한은 2027년 3월 3일입니다. 참조 번호는 4417-B입니다."}, {"id": "question", "label": "Question", "text": "점프박스 인증서가 9일 후에 만료됩니다. 지금 갱신할까요?"}, {"id": "long", "label": "Long passage", "text": "저녁 늦게야 비가 그쳤습니다. 거리는 조용했고, 젖은 돌 냄새가 났으며, 어디선가 라디오에서 오래된 노래가 흘러나왔습니다."}, {"id": "twister", "label": "Tongue twister", "text": "간장 공장 공장장은 강 공장장이고, 된장 공장 공장장은 장 공장장이다."}], "zh": [{"id": "greeting", "label": "Greeting", "text": "早上好。你今天有三个会议，第一个会议九点半开始。"}, {"id": "status", "label": "Status update", "text": "备份已顺利完成，没有错误。已清理三个旧快照，存储池使用率为百分之六十二。"}, {"id": "numbers", "label": "Numbers & dates", "text": "总金额为1,284.50元，付款截止日期是2027年3月3日，参考编号4417-B。"}, {"id": "question", "label": "Question", "text": "跳板机的证书将在九天后过期。要我现在续订吗？"}, {"id": "long", "label": "Long passage", "text": "直到傍晚，雨才终于停了。街道很安静，空气里带着湿石头的气味，远处的收音机正放着一首老歌。"}, {"id": "twister", "label": "Tongue twister", "text": "四是四，十是十，十四是十四，四十是四十。"}]};
+const LANG_NAMES = { en: 'English', ja: 'Japanese', ko: 'Korean', zh: 'Chinese' };
+const CHIP_LANG = { EN: 'en', JA: 'ja', KO: 'ko', ZH: 'zh' };
+function renderPresets(boxId, lang, textareaId, selectedId) {
+  const box = document.getElementById(boxId), ta = document.getElementById(textareaId);
+  box.innerHTML = '';
+  (PRESETS[lang] || PRESETS.en).forEach(p => {
+    const b = document.createElement('button');
+    b.className = 'btn-tag'; b.type = 'button'; b.textContent = p.label;
+    b.setAttribute('aria-pressed', p.id === selectedId ? 'true' : 'false');
+    b.addEventListener('click', () => {
+      box.querySelectorAll('.btn-tag').forEach(x => x.setAttribute('aria-pressed', x === b ? 'true' : 'false'));
+      box.dataset.selected = p.id; ta.value = p.text; ta.lang = lang;
+    });
+    box.appendChild(b);
+  });
+  const sel = (PRESETS[lang] || []).find(p => p.id === selectedId);
+  if (sel) { ta.value = sel.text; ta.lang = lang; }
+}
+function speakLang() {
+  const chip = document.querySelector('#voice-chips .vs-chip[aria-pressed="true"] .lang');
+  return CHIP_LANG[chip ? chip.textContent.trim() : 'EN'] || 'en';
+}
+function refreshSpeakPresets() {
+  const lang = speakLang(), box = document.getElementById('speak-presets');
+  document.getElementById('speak-lang-name').textContent = LANG_NAMES[lang];
+  renderPresets('speak-presets', lang, 'speak-text', box.dataset.selected || 'question');
+}
+document.getElementById('voice-chips').addEventListener('click', () => setTimeout(refreshSpeakPresets));
+refreshSpeakPresets();
+const designLangSel = document.getElementById('design-lang');
+designLangSel.addEventListener('change', () => renderPresets('design-presets', designLangSel.value, 'design-sample', document.getElementById('design-presets').dataset.selected));
+renderPresets('design-presets', 'ja', 'design-sample', null);
+
+/* Voices empty state. Preview with ?empty */
+function setLibraryEmpty(empty) {
+  document.getElementById('voices-empty').hidden = !empty;
+  document.getElementById('voices-list').hidden = empty;
+  document.getElementById('voices-actions').hidden = empty;
+  // Speak guard: no chips, explain, offer Clone/Design, and block Generate
+  document.getElementById('voice-chips').hidden = empty;
+  document.getElementById('speak-novoice').hidden = !empty;
+  document.getElementById('gen-hint').hidden = !empty;
+  document.getElementById('generate').setAttribute('aria-disabled', empty ? 'true' : 'false');
+  document.getElementById('takes-empty').hidden = !empty;
+  document.querySelectorAll('.vs-take').forEach(t => t.hidden = empty);
+}
+document.getElementById('generate').addEventListener('click', e => {
+  if (e.currentTarget.getAttribute('aria-disabled') === 'true') { e.preventDefault(); document.querySelector('#speak-novoice .btn-secondary').focus(); }
+});
+setLibraryEmpty(new URLSearchParams(location.search).has('empty'));
+
 const st = document.getElementById('stream-toggle');
 st.addEventListener('click', () => st.setAttribute('aria-pressed', st.getAttribute('aria-pressed') !== 'true'));
 for (const id of ['cfg', 'steps']) {
