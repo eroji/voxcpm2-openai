@@ -54,10 +54,11 @@ mkdir -p /opt/voxcpm2-openai/deploy/data
 cd /opt/voxcpm2-openai/deploy
 export DEPLOY_IMAGE=harbor.dotslash.io/dotslash/voxcpm2-openai:v0.1.1
 podman-compose -f compose.yaml -f compose.deploy.yaml up -d
-podman logs -f voxcpm2-openai        # expect [engine], never [base]; load takes minutes
-# If [base]/Qwen3 appears, the image still carries the old qwen3 supervisor: rebuild from this
-# repo (the Containerfile now overrides ENTRYPOINT and neutralizes S6_STAGE2_HOOK). You can also
-# delete a stale /opt/voxcpm2-openai/deploy/data/engines.json left by the old supervisor.
+podman logs -f voxcpm2-openai        # expect "service engine: starting" + VoxCPM2; load takes minutes
+# If [base]/Qwen3-TTS appears, the image still carries the old qwen3 supervisor: rebuild from this
+# repo (the Containerfile removes /opt/app, overrides ENTRYPOINT and neutralizes S6_STAGE2_HOOK).
+# Our s6 run scripts use with-contenv, so ENGINE_PORT/MODEL_PATH must reach the daemon; a
+# "--port ''" error means an old image. A stale data/engines.json is ignored.
 curl -fsS http://127.0.0.1:8881/ready && echo READY
 ```
 
