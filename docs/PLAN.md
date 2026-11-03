@@ -110,7 +110,7 @@ Citations are `SPEC.md` section/line. IDs are append-only.
 | R-047 | Acceptance criteria: WAV 48 kHz RTF ≤0.2, streamed first chunk ≤300 ms, 8 voices, warm start, clone+design flows, LiteLLM/Open WebUI/Hermes/Wyoming, VRAM ≤10 GB, concurrency, UI parity + keyboard | §13 L271–282 |
 | R-048 | Milestones M0–M5 | §14 L284–291 |
 | R-049 | **Human decision 2026-11-02:** CI builds/pushes the container image only; all quality gates (format/lint/types/tests+coverage/e2e/build/package contract) live in `scripts/verify.sh` | delivery brief |
-| R-050 | **Human 2026-11-03:** tag-triggered deploy to `vllm` directly with `DEPLOY_SSH_KEY` (runner → root@vllm), image tag in `/opt/voxcpm2-openai/.env`, podman-compose recreate; branch pushes never deploy | delivery brief |
+| R-050 | **Human 2026-11-03:** tag-triggered deploy to `vllm` directly with `DEPLOY_SSH_KEY` (runner → deploy@vllm), image tag in `/opt/voxcpm2-openai/.env`, podman-compose recreate; branch pushes never deploy | delivery brief |
 | R-051 | No secrets in repo or CI logs | delivery brief, §10 |
 | R-052 | Startup page at `/` until warm, with 4-step progress, live log, failure mapping | `ui/STARTING.md` |
 | R-053 | `/api/engine/startup` contract + `/api` 503 gate with startup/restart exceptions | `ui/STARTING.md` |

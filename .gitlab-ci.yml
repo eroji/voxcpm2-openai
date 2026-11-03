@@ -57,52 +57,40 @@ build:
       dotenv: build.env
 
 # ------------------------------------------------------------------ deploy
-# One automatic deploy per vX.Y.Z tag, after the image build. The runner reaches vllm directly
-# with DEPLOY_SSH_KEY (rootful podman). The image tag lives in /opt/voxcpm2-openai/.env.
+# Same shape as the notely deploy job: ssh directly to $DEPLOY_USER@$DEPLOY_HOST with
+# DEPLOY_SSH_KEY, log in to Harbor over stdin, update the image tag, recreate with podman.
 deploy:
   stage: deploy
-  image: alpine:3.20
+  image: alpine:latest
   timeout: 20 minutes
   needs: [build]
-  environment:
-    name: vllm
-    url: http://vllm.dotslash.io:8881
+  environment: production
   variables:
     DEPLOY_HOST: vllm.dotslash.io
-    DEPLOY_USER: root
+    DEPLOY_USER: deploy
     DEPLOY_PATH: /opt/voxcpm2-openai
     HEALTH_URL: http://127.0.0.1:8881/ready
   rules:
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
-      when: on_success
     - when: never
   before_script:
     - apk add --no-cache openssh-client
-    - |
-      if [ -z "${DEPLOY_SSH_KEY:-}" ]; then
-        echo "DEPLOY_SSH_KEY must be set: base64 -w0 of the key authorized on vllm."
-        exit 1
-      fi
-      mkdir -p ~/.ssh
-      printf '%s' "$DEPLOY_SSH_KEY" | tr -dc 'A-Za-z0-9+/=' | base64 -d > ~/.ssh/id_ed25519
-      chmod 600 ~/.ssh/id_ed25519
+    - mkdir -p ~/.ssh
+    - printf '%s' "$DEPLOY_SSH_KEY" | tr -dc 'A-Za-z0-9+/=' | base64 -d > ~/.ssh/id_ed25519
+    - chmod 600 ~/.ssh/id_ed25519
   script:
-    - IMAGE="$HARBOR_IMAGE:$CI_COMMIT_TAG"
+    - export IMAGE_TAG="$CI_COMMIT_TAG"
     - printf '%s' "$HARBOR_TOKEN" > /tmp/harbor_token && chmod 600 /tmp/harbor_token
     - |
       ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
         "$DEPLOY_USER@$DEPLOY_HOST" \
-        "podman login harbor.dotslash.io -u $HARBOR_USER --password-stdin" < /tmp/harbor_token
+        "sudo -n podman login harbor.dotslash.io -u '$HARBOR_USER' --password-stdin" < /tmp/harbor_token
     - |
       ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
         "$DEPLOY_USER@$DEPLOY_HOST" \
-        "mkdir -p $DEPLOY_PATH && cat > $DEPLOY_PATH/compose.yaml" < deploy/compose.yaml
-    - |
-      ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
-        "$DEPLOY_USER@$DEPLOY_HOST" 'bash -s -- "$IMAGE" "$HEALTH_URL"' <<'REMOTE'
+        "bash -s -- '$HARBOR_IMAGE:$IMAGE_TAG' '$HEALTH_URL'" <<'REMOTE'
       set -euo pipefail
-      IMAGE="$1"
-      HEALTH="$2"
+      IMAGE="$1"; HEALTH="$2"
       cd /opt/voxcpm2-openai
       touch .env
       grep -v '^VOXCPM2_IMAGE=' .env > .env.tmp || true
@@ -110,11 +98,12 @@ deploy:
       mv .env.tmp .env
       chmod 600 .env
       export VOXCPM2_IMAGE="$IMAGE"
-      podman-compose -f compose.yaml up -d --force-recreate --remove-orphans --pull
+      sudo -n podman-compose -f compose.yaml pull
+      sudo -n podman-compose -f compose.yaml up -d --force-recreate --remove-orphans
       for i in $(seq 1 60); do
         if curl -fsS "$HEALTH" >/dev/null; then echo READY; exit 0; fi
         sleep 10
       done
-      podman logs --tail 120 voxcpm2-openai || true
+      sudo -n podman logs --tail 120 voxcpm2-openai || true
       exit 1
       REMOTE

@@ -19,9 +19,9 @@ Locally (or on any machine with a registry login):
 
 ```bash
 docker build -f deploy/Containerfile \
-  -t harbor.dotslash.io/dotslash/voxcpm2-openai:v0.3.2 \
+  -t harbor.dotslash.io/dotslash/voxcpm2-openai:v0.3.3 \
   -t harbor.dotslash.io/dotslash/voxcpm2-openai:latest .
-docker push harbor.dotslash.io/dotslash/voxcpm2-openai:v0.3.2
+docker push harbor.dotslash.io/dotslash/voxcpm2-openai:v0.3.3
 docker push harbor.dotslash.io/dotslash/voxcpm2-openai:latest
 ```
 
@@ -50,7 +50,7 @@ The host layout is `/opt/voxcpm2-openai/{compose.yaml,.env,data}`. The image tag
 manual equivalent:
 
 ```bash
-IMAGE=harbor.dotslash.io/dotslash/voxcpm2-openai:v0.3.2
+IMAGE=harbor.dotslash.io/dotslash/voxcpm2-openai:v0.3.3
 ssh jumpbox "sudo -n ssh vllm 'cat > /opt/voxcpm2-openai/compose.yaml'" < deploy/compose.yaml
 ssh jumpbox "sudo -n ssh vllm \"
   cd /opt/voxcpm2-openai
@@ -220,7 +220,7 @@ Keep `/opt/qwen3-tts` untouched for a week. Voices created on voxcpm2-openai liv
 A `vX.Y.Z` tag pipeline builds the image, then the `deploy` job ships it directly to `vllm`:
 
 ```
-runner --(DEPLOY_SSH_KEY)--> root@vllm.dotslash.io
+runner --(DEPLOY_SSH_KEY)--> deploy@vllm.dotslash.io
 ```
 
 The job logs the target into Harbor over stdin, copies `deploy/compose.yaml` to
@@ -233,8 +233,8 @@ Required **protected** CI variables (Settings → CI/CD → Variables):
 
 | Variable | Value |
 |---|---|
-| `DEPLOY_SSH_KEY` | base64 -w0 of the private key whose public half is in `root@vllm:~/.ssh/authorized_keys` |
-| `HARBOR_USER` / `HARBOR_TOKEN` | Harbor credentials; the job logs `root@vllm` in over stdin |
+| `DEPLOY_SSH_KEY` | base64 -w0 of the private key whose public half is in `deploy@vllm:~/.ssh/authorized_keys` |
+| `HARBOR_USER` / `HARBOR_TOKEN` | Harbor credentials; the job logs `deploy@vllm` in over stdin |
 | `DEPLOY_HOST` | `vllm.dotslash.io` (default in the job) |
 | `DEPLOY_PATH` | `/opt/voxcpm2-openai` (default in the job) |
 

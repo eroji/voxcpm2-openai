@@ -250,15 +250,18 @@ spikes remain host-run. CI has not run yet: the branch is local (47+ commits ahe
 - **2026-11-03 —** Release v0.3.0: languages management, stream format/rate fix, design control
   syntax, session-scoped takes, player/editor UX.
 
-- **2026-11-03 —** Deploy is automatic on `vX.Y.Z` tags: runner → root@vllm (direct),
+- **2026-11-03 —** Deploy is automatic on `vX.Y.Z` tags: runner → root@vllm (direct, deploy user),
   writes `VOXCPM2_IMAGE` to `/opt/voxcpm2-openai/.env`, copies `deploy/compose.yaml`, recreates the
   pod with `podman-compose --force-recreate --pull`, waits for `/ready`. Host was updated to
-  `v0.3.0` and is healthy. `DEPLOY_SSH_KEY` must be authorized for `root@vllm`.
+  `v0.3.0` and is healthy. `DEPLOY_SSH_KEY` must be authorized for `deploy@vllm` (key + scoped podman sudo configured).
 
 - **2026-11-03 —** Release v0.3.1: automatic tag deploy to vllm via jumpbox, .env image tag.
 
 - **2026-11-03 —** Deploy corrected to direct `root@vllm` with `DEPLOY_SSH_KEY` (jumpbox removed);
   release v0.3.2.
+
+- **2026-11-03 —** Deploy job now mirrors notely: `deploy@vllm.dotslash.io` with `DEPLOY_SSH_KEY`,
+  Harbor login, `.env` update, `sudo -n podman-compose` recreate; release v0.3.3.
 
 ## Next action
 

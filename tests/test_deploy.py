@@ -281,13 +281,13 @@ def test_ci_builds_only_on_release_tags():
 def test_deploy_uses_jumpbox_and_podman():
     deploy = CI_FILE.read_text().split("\ndeploy:")[-1]
     assert r"$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/" in deploy
-    assert "when: on_success" in deploy, "tag releases deploy automatically"
+    assert "when: never" in deploy
     assert "DEPLOY_HOST: vllm.dotslash.io" in deploy
-    assert "DEPLOY_USER: root" in deploy
-    assert "sudo" not in deploy
+    assert "DEPLOY_USER: deploy" in deploy
+    assert "sudo -n podman" in deploy, "deploy runs rootful podman through scoped sudo"
     assert "jumpbox" not in deploy
-    assert "podman login" in deploy and "--password-stdin" in deploy
-    assert "podman-compose -f compose.yaml up -d --force-recreate" in deploy
+    assert "sudo -n podman login" in deploy and "--password-stdin" in deploy
+    assert "sudo -n podman-compose -f compose.yaml up -d --force-recreate" in deploy
     assert "VOXCPM2_IMAGE=%s" in deploy and ".env" in deploy
     assert "HEALTH_URL: http://127.0.0.1:8881/ready" in deploy
     assert "docker compose" not in deploy
