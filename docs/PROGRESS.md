@@ -1,6 +1,6 @@
 # Progress
 
-**Current wave:** 9 — delivery complete (local); CI pending push
+**Current wave:** 10 — final; pushed to GitLab, CI running
 **Resume:** `scripts/verify.sh` then `/status`; next human action is `git push` to run GitLab CI
 
 ## Task table
@@ -139,9 +139,9 @@
   ignored auth.
 - MAJOR → M3-T10: disabled controls looked enabled; streaming/clone-save paths had no browser test;
   only two 390 px screenshots.
-- Open decisions for the human: Q-023 (Test-a-line disabled when `API_KEYS` set) and Q-024 (Studio
-  Format control disabled; non-WAV formats are `/v1`-only). Both are implemented as documented
-  fallbacks, not blockers.
+- Human decisions 2026-11-02: Q-023 resolved (Studio previews use `/api/speak?save=false` under
+  Studio auth); Q-024 resolved (Format drives preview + take playback); `STT_URL` set to
+  `http://vllm.dotslash.io:8890/v1`; push approved; CI/CD aligned with the `notely` house pattern.
 
 ## Final local verification (2026-11-02)
 
@@ -150,9 +150,9 @@ scripts/verify.sh
   format check     54 files already formatted
   lint             All checks passed
   typecheck        Success: no issues found in 21 source files
-  unit+integration 271 passed, 5 skipped in 38.53s
-  coverage         95.20% (gate 65%)
-  e2e              24 passed (real Chromium 156)
+  unit+integration 284 passed, 5 skipped in 39.82s
+  coverage         95.25% (gate 65%)
+  e2e              26 passed (real Chromium)
   python build     sdist + wheel built
   package contract Containerfile + s6 checks passed
 ==> OK
@@ -194,10 +194,16 @@ spikes remain host-run. CI has not run yet: the branch is local (47+ commits ahe
 - **2026-11-02 —** Warm-up reference when the library is empty is a bundled 1.5 s tone
   (`app/assets/warmup.wav`), clearly a placeholder for non-speech warm-up only (Q-014).
 
+- **2026-11-02 —** Push approved; CI/CD aligned with `notely` (`HARBOR_TOKEN`, `GIT_DEPTH: 0`,
+  `DOCKER_TLS_CERTDIR: ""`, tag releases, base64 SSH key, target-side docker login). CD remains
+  opt-in via `DEPLOY_TARGET`.
+- **2026-11-02 —** Studio synthesis moved to `/api/speak?save=false`; Test-a-line works with
+  `API_KEYS` set and Studio Format controls the preview/take playback container.
+
 ## Next action
 
 1. `git push origin main` and watch the GitLab pipeline (`checks`, `javascript`, `test`, `e2e`,
    `build`, `package:check`; `package` runs when `HARBOR_USER`/`HARBOR_PASSWORD` are set).
 2. Run M0 spikes on the `vllm` host (`scripts/spikes/README.md`) and append results to `NOTES.md`.
-3. Human decisions: Q-023, Q-024, Q-015 (runner docker/Harbor), Q-005 (`STT_URL`), Q-014 (real
-   warm-up clip).
+3. Remaining human inputs: Q-015 (runner docker/Harbor creds for `package`/CD), Q-014 (real
+   warm-up clip). `STT_URL` is now documented as `http://vllm.dotslash.io:8890/v1`.

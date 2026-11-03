@@ -43,9 +43,9 @@ task needs a change, it reports `BLOCKED` and the lead amends this file in a new
 | POST | `/api/voices/clone` | `VoiceSummary` (multipart, see §6) |
 | POST | `/api/voices/import` | `{"imported":[],"skipped":[],"failed":[]}` |
 | POST | `/api/transcribe` | `{"text": str}` (multipart `file`) |
-| POST | `/api/speak` | `TakeInfo`; `stream=true` → audio + `X-Take-Id` |
+| POST | `/api/speak` | `save=true` (default): `TakeInfo`; `stream=true` → audio + `X-Take-Id`. `save=false`: audio bytes in `response_format`, no take (Studio preview / Test a line) |
 | GET | `/api/takes?kind=studio` | `{"takes":[TakeInfo]}`; default `studio`, `all` includes design candidates |
-| GET | `/api/takes/{id}/audio` | WAV bytes |
+| GET | `/api/takes/{id}/audio?format=wav|pcm|mp3|opus|flac` | audio bytes in that format (default the take's stored format, `wav`) |
 | GET | `/api/takes/{id}/wave` | `{"amps":[72 floats 0..1]}` |
 | POST | `/api/takes/{id}/save-as-voice` | `VoiceSummary` (body `{name,language}`) |
 | DELETE | `/api/takes/{id}` | `{"deleted": id}` |
@@ -60,7 +60,8 @@ use `key` in `/api/voices/{key}` URLs and as the `voice` field; `name` is for di
 (SPEC §5 `voice_name_lower` vs `name`).
 
 `TakeInfo` JSON: `id, voice, text, language, kind, duration_s, rtf, first_audio_ms, created_at,
-audio_url, wave_url`. URL paths are relative (`/api/takes/<id>/audio`).
+format, audio_url, wave_url`. URL paths are relative (`/api/takes/<id>/audio`); add
+`?format=<fmt>` to play/download a take in another container.
 
 `VoiceSummary`: `key, name, language, source, ref_duration_s, ref_text, created_at`.
 
@@ -203,6 +204,11 @@ export function formatLang(code);                          // en→English, ja�
   stream completes.
 - `Q-007` design candidates are takes with `kind="design"`, `extra={"design_prompt": ...,
   "design_seed": ...}`.
-- `Q-009` "Test a line" uses `/v1/audio/speech` with `ref_audio`; no dedicated route.
+- `Q-009` "Test a line" uses `POST /api/speak?save=false` with `ref_audio` (Studio Basic auth);
+  no take, no `/v1` bearer key. (`/v1` remains available for external callers.)
+- `Q-023` Studio previews/test lines never require `API_KEYS`; `api_keys_required` on
+  `EngineStatus` is informational only.
+- `Q-024` Studio Format drives the preview response and take playback via
+  `/api/takes/{id}/audio?format=`; stored takes remain 48 kHz WAV.
 - `Q-016` capacity is 2 active + 16 queued; requests 19–20 get 429.
 - `Q-020` remote `ref_audio` URLs are rejected unless `ALLOW_REMOTE_REF_AUDIO=1`.

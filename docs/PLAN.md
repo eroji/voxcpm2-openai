@@ -139,9 +139,9 @@ Citations are `SPEC.md` section/line. IDs are append-only.
 | Q-020 | `ref_audio` URL fetch SSRF | Only `data:` URIs and `http(s)` URLs; URL fetch disabled unless `ALLOW_REMOTE_REF_AUDIO=1` (default off) | no |
 | Q-021 | Uploaded clone audio >48 kHz | Resample down to 48 kHz; below stays at original rate (spec: "resample to 48 kHz if above") | no |
 | Q-022 | Backup retention | Keep newest 20 zips, prune oldest | no |
-| Q-024 | Studio Format control vs `/api/speak` returning take metadata (SPEC §7) while takes are WAV (SPEC §5) | Format select stays visible but disabled in Studio with a hint; non-WAV formats remain a `/v1` feature. No second endpoint | yes: confirm UI-only treatment |
+| Q-024 | Studio Format control vs `/api/speak` returning take metadata (SPEC §7) while takes are WAV (SPEC §5) | **Resolved by human 2026-11-02:** Format drives the `save=false` preview and take playback via `/api/takes/{id}/audio?format=`; stored takes stay 48 kHz WAV | no |
 | Q-025 | Are models aliases list entries or request-only? | **Superseded by SPEC §6:** one entry `voxcpm2`; aliases are request-only (matches Q-011) | no |
-| Q-023 | "Test a line" needs `/v1`, which requires Bearer when `API_KEYS` is set; the browser has no key | Disable Test-a-line when `EngineStatus.api_keys_required` is true, with a visible hint; no new endpoint (keeps §10 intact). Revisit if a studio-scoped ad-hoc synth route is wanted | yes: confirm UI-only gating is acceptable |
+| Q-023 | "Test a line" needs `/v1`, which requires Bearer when `API_KEYS` is set; the browser has no key | **Resolved by human 2026-11-02:** Studio preview/test synthesis uses `POST /api/speak?save=false` under Studio Basic auth; no bearer key, button never disabled | no |
 
 ## Task graph
 
@@ -173,6 +173,9 @@ Wave 0 is the lead scaffold (contracts + tooling). A task is ready only when eve
 | M2-T12 | M2 | 8 | Store metadata-only list, unique backups, take invariants (review) | `app/store.py`, `app/routers/studio_takes.py`, `tests/test_store.py`, `tests/test_studio_takes.py` | M2-T9, M2-T11 | `.venv/bin/python -m pytest tests/test_store.py tests/test_studio_takes.py -q` |
 | M2-T13 | M2 | 8 | Deterministic burst + host RTF evidence (review) | `tests/fake_engine.py`, `tests/test_acceptance.py`, `scripts/smoke.sh`, `docs/RUNBOOK.md` | M5-T2 | `.venv/bin/python -m pytest tests/test_acceptance.py -q` |
 | M3-T10 | M3 | 8 | Disabled affordance, streaming/clone e2e, 390 parity (review) | `app/static/index.html`, `app/static/studio.css`, `app/static/js/speak.js`, `app/static/js/voices.js`, `app/static/js/design.js`, `tests/test_ui_assets.py`, `tests/e2e/**` | M3-T6, M3-T9 | `.venv/bin/python -m pytest tests/e2e -q` |
+| M2-T14 | M2 | 9 | Studio preview via `/api/speak?save=false` + take formats (human) | `app/models.py`, `app/routers/studio_takes.py`, `tests/test_studio_takes.py` | M2-T12 | `.venv/bin/python -m pytest tests/test_studio_takes.py -q` |
+| M5-T4 | M5 | 9 | Align CI/CD with notely conventions + STT URL (human) | `.gitlab-ci.yml`, `deploy/compose.deploy.yaml`, `docs/RUNBOOK.md`, `tests/test_deploy.py` | M1-T13 | `.venv/bin/python -m pytest tests/test_deploy.py -q` |
+| M3-T11 | M3 | 10 | Studio preview UI + real Format control (human) | `app/static/js/clone.js`, `app/static/js/speak.js`, `app/static/index.html`, `tests/test_ui_assets.py`, `tests/e2e/**` | M2-T14 | `.venv/bin/python -m pytest tests/e2e -q` |
 | M1-T2 | M1 | 5 | `/v1` API (speech, models, voices) | `app/routers/v1.py`, `tests/test_v1.py`, `tests/test_streaming.py` | M1-T1 | `.venv/bin/python -m pytest tests/test_v1.py tests/test_streaming.py -q` |
 | M1-T4 | M1 | 4 | Startup/warm-up/readiness wiring | `app/warmup.py`, `app/main.py`, `tests/test_warmup.py` | M1-T1 | `.venv/bin/python -m pytest tests/test_warmup.py -q` |
 | M2-T2 | M2 | 2 | Clone + transcribe API | `app/routers/studio_clone.py`, `tests/test_studio_clone.py` | — | `.venv/bin/python -m pytest tests/test_studio_clone.py -q` |
@@ -208,7 +211,8 @@ Wave 0 is the lead scaffold (contracts + tooling). A task is ready only when eve
 - **Wave 6 (review fixes):** M1-T11, M1-T12, M2-T11, M3-T9 (4 parallel).
 - **Wave 7:** M3-T6, M5-T2 (2 parallel).
 - **Wave 8 (release review fixes):** M1-T13, M1-T14, M1-T15, M2-T12, M2-T13, M3-T10 (6 parallel).
-- **Wave 9:** full `scripts/verify.sh`, milestone tags, delivery report.
+- **Wave 9:** M2-T14, M5-T4 (2 parallel).
+- **Wave 10:** M3-T11, then full `scripts/verify.sh`, push/tags, delivery report.
 
 ## Dependency DAG
 
