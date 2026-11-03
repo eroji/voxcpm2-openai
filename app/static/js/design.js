@@ -5,7 +5,6 @@ import {
   api,
   state,
   loadVoices,
-  loadLanguages,
   play,
   renderWave,
   showError,
@@ -19,28 +18,19 @@ const SVG_NS = "http://www.w3.org/2000/svg";
 let candidates = [];
 let selectedCandidate = null;
 
-/* Sample-line presets (SPEC §8): follow the Design language; no preset selected initially.
- * presets.json covers en/ja/ko/zh only — other languages get a hint, never fake text. */
+/* Sample-line presets (SPEC §8): follow the Design language; no preset selected initially. */
 let presets = null;
 let designPresetId = null;
-let langHint = null;
 
 const $ = id => document.getElementById(id);
 
 function renderDesignPresets(swapText) {
   $("design-sample").lang = $("design-lang").value;
   if (!presets) return;
+  const lang = presets[$("design-lang").value] ? $("design-lang").value : "en";
   const box = $("design-presets");
-  const items = presets[$("design-lang").value];
-  if (!items) {
-    box.hidden = true;
-    langHint.hidden = false;
-    return; // textarea content deliberately untouched: no fake translations
-  }
-  box.hidden = false;
-  langHint.hidden = true;
   box.replaceChildren();
-  for (const p of items) {
+  for (const p of presets[lang]) {
     const chip = document.createElement("button");
     chip.type = "button";
     chip.className = "btn-tag";
@@ -50,26 +40,9 @@ function renderDesignPresets(swapText) {
     box.append(chip);
   }
   if (swapText && designPresetId) {
-    const p = items.find(x => x.id === designPresetId);
+    const p = presets[lang].find(x => x.id === designPresetId);
     if (p) $("design-sample").value = p.text;
   }
-}
-
-/* All 30 model-card languages (SPEC §8); the reference order puts Japanese first. */
-function renderLangOptions() {
-  if (!state.languages.length) return;
-  const sel = $("design-lang");
-  const current = sel.value || "ja";
-  sel.replaceChildren(
-    ...state.languages.map(l => {
-      const option = document.createElement("option");
-      option.value = l.code;
-      option.textContent = l.name;
-      return option;
-    })
-  );
-  sel.value = state.languages.some(l => l.code === current) ? current : "ja";
-  renderDesignPresets(false);
 }
 
 function appendTag(tag) {
@@ -232,18 +205,12 @@ registerScreen("design", {
     $("design-name").addEventListener("input", updateSaveState);
     $("candidates").addEventListener("click", onCandidatesClick);
     $("design-lang").addEventListener("change", () => renderDesignPresets(true));
-    langHint = document.createElement("p");
-    langHint.className = "meta";
-    langHint.textContent = "No sample phrases for this language yet — type a line.";
-    langHint.hidden = true;
-    $("design-presets").after(langHint);
-    loadLanguages().then(renderLangOptions).catch(() => {});
     $("design-presets").addEventListener("click", e => {
       const chip = e.target.closest(".btn-tag");
       if (!chip) return;
       for (const c of $("design-presets").children) c.setAttribute("aria-pressed", String(c === chip));
       designPresetId = chip.dataset.id;
-      const lang = $("design-lang").value;
+      const lang = presets[$("design-lang").value] ? $("design-lang").value : "en";
       const p = (presets[lang] || []).find(x => x.id === designPresetId);
       if (p) {
         $("design-sample").value = p.text;

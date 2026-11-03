@@ -2,7 +2,7 @@
  * Screen modules (speak/voices/clone/design/engine) register via registerScreen.
  * Never inject API/user text as HTML (R-044): create nodes + textContent. */
 
-export const state = { voices: [], selectedVoice: null, engine: null, languages: [] };
+export const state = { voices: [], selectedVoice: null, engine: null };
 
 async function request(path, options = {}) {
   const res = await fetch(path, options);
@@ -37,24 +37,6 @@ export async function loadVoices() {
   const data = await api.get("/api/voices");
   state.voices = data.voices || [];
   return state.voices;
-}
-
-/* The 30 model-card languages (SPEC v0.2.0 §8): fetched once, cached for every screen. */
-let languagesPromise = null;
-export function loadLanguages() {
-  if (!languagesPromise) {
-    languagesPromise = api
-      .get("/api/languages")
-      .then(data => {
-        state.languages = data.languages || [];
-        return state.languages;
-      })
-      .catch(err => {
-        languagesPromise = null; // a later screen may retry
-        throw err;
-      });
-  }
-  return languagesPromise;
 }
 
 /* Header status is text, never colour alone. Unreachable API → reason from the error. */
@@ -221,12 +203,9 @@ export function clearError(screen) {
   el.hidden = true;
 }
 
-/* Pre-load fallback only: the full 30-language list comes from /api/languages
- * (loadLanguages → state.languages); unknown codes render as the code itself. */
-const LANG_FALLBACK = { en: "English", ja: "Japanese", ko: "Korean", zh: "Chinese" };
+const LANGUAGES = { en: "English", ja: "Japanese", ko: "Korean", zh: "Chinese" };
 
 export function formatLang(code) {
   const key = String(code || "").toLowerCase();
-  const lang = state.languages.find(l => l.code.toLowerCase() === key);
-  return lang ? lang.name : LANG_FALLBACK[key] || code || "";
+  return LANGUAGES[key] || code || "";
 }

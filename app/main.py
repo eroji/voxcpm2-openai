@@ -20,7 +20,6 @@ from app.config import Settings
 from app.engine import EngineClient
 from app.errors import APIError
 from app.routers import (
-    languages,
     studio_clone,
     studio_design,
     studio_engine,
@@ -207,7 +206,6 @@ def create_app(settings: Settings | None = None, *, engine: EngineClient | None 
     app.include_router(studio_takes.router)
     app.include_router(studio_engine.router)
     app.include_router(studio_design.router)
-    app.include_router(languages.router)
 
     if settings.static_dir.exists():
         app.mount("/static", StaticFiles(directory=str(settings.static_dir)), name="static")

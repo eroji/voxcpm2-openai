@@ -1,6 +1,6 @@
 # Progress
 
-**Current wave:** 16 — language list + select polish
+**Current wave:** 14 — SPEC v0.2.0 complete
 **Resume:** `scripts/verify.sh` then `/status`; next human action is `git push` to run GitLab CI
 
 ## Task table
@@ -60,9 +60,7 @@
 | 13 | M3-T13 startup UX/e2e | pass |
 | 14 | M2-T18 remove Qwen3 import | pass | |
 | 14 | M1-T18 empty library + warm-only | pass | |
-| 14 | M3-T14 presets/empty/icons/log table | pass |
-| 15 | M2-T19 /api/languages (30 languages) | pass | |
-| 16 | M3-T15 select chevron + language dropdowns | pass | | | `pytest tests/e2e` | |
+| 14 | M3-T14 presets/empty/icons/log table | pass | | `pytest tests/e2e` | |
 | 7 | M5-T2 acceptance | pass | `pytest tests/test_acceptance.py` | |
 
 \* M0-T1 delivers runnable scripts + `NOTES.md`; findings are pending the external host (B-001).
@@ -241,11 +239,6 @@ spikes remain host-run. CI has not run yet: the branch is local (47+ commits ahe
   for pre-ready requests.
 
 - **2026-11-03 —** Release v0.2.0.
-
-- **2026-11-03 —** Added `/api/languages` from the VoxCPM2 model card (30 languages; no request
-  language tag needed) and wired Clone/Design selects to it. Presets remain en/ja/ko/zh; other
-  languages hide the preset chips and keep the text editable. Select chevrons are now inset to the
-  8 px text margin.
 
 ## Next action
 
