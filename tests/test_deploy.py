@@ -190,10 +190,12 @@ def test_ci_mirrors_notely_conventions():
     assert "--password-stdin" in ci
 
 
-def test_ci_builds_on_main_and_release_tags():
+def test_ci_builds_only_on_release_tags():
     ci = CI_FILE.read_text()
-    assert "$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH" in ci
-    assert r"/^v\d+\.\d+\.\d+$/" in ci, "release tags vX.Y.Z drive builds and production CD"
+    assert "workflow:" in ci
+    assert r"/^v\d+\.\d+\.\d+$/" in ci, "only vX.Y.Z tags create pipelines"
+    assert "$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH" not in ci, "branch pushes must not build"
+    assert "CI_COMMIT_SHORT_SHA" not in ci, "no commit-tagged images"
     assert "${CI_COMMIT_TAG#v}" in ci, "tagged builds are published as X.Y.Z, not vX.Y.Z"
 
 

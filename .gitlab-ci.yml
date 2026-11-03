@@ -10,13 +10,13 @@
 #   DEPLOY_HOST (default vllm.dotslash.io), DEPLOY_USER (default deploy),
 #   DEPLOY_PATH (default /opt/voxcpm2-openai).
 #
-# Releases are tags: `git tag v0.1.0 && git push --follow-tags` builds/pushes :0.1.0 and
-# allows the manual production deploy. A main push builds/pushes :<short-sha> only.
+# Only tags build: `git tag v0.1.0 && git push origin v0.1.0` builds/pushes :0.1.0.
+# Pushes to main and ordinary commits never create a pipeline.
 
 workflow:
   rules:
-    - if: $CI_COMMIT_TAG
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    # Only release tags build; branch/commit pushes never create a pipeline.
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
 
 stages: [build, deploy]
 
@@ -34,13 +34,12 @@ build:
     GIT_DEPTH: 0
     DOCKER_TLS_CERTDIR: ""
   rules:
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
   before_script:
     - echo "$HARBOR_TOKEN" | docker login harbor.dotslash.io -u "$HARBOR_USER" --password-stdin
   script:
     - |
-      if [ -n "${CI_COMMIT_TAG:-}" ]; then TAG="${CI_COMMIT_TAG#v}"; else TAG="$CI_COMMIT_SHORT_SHA"; fi
+      TAG="${CI_COMMIT_TAG#v}"
       echo "Building $HARBOR_IMAGE:$TAG"
       docker build -f deploy/Containerfile -t "$HARBOR_IMAGE:$TAG" .
       docker push "$HARBOR_IMAGE:$TAG"
@@ -67,8 +66,8 @@ deploy:staging:
     DEPLOY_PATH: /opt/voxcpm2-openai
     HEALTH_URL: http://127.0.0.1:8881/ready
   rules:
-    - if: '$DEPLOY_TARGET == "staging" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
-      when: on_success
+    - if: '$DEPLOY_TARGET == "staging" && $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/'
+      when: manual
     - when: never
   before_script:
     - apk add --no-cache openssh-client

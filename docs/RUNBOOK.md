@@ -24,9 +24,9 @@ docker push harbor.dotslash.io/dotslash/voxcpm2-openai:0.1.0
 
 On the `vllm` host use `podman build` / `podman push` with the same tags.
 
-The CI `build` job builds on the default branch (image tag `$CI_COMMIT_SHORT_SHA`) and on
-`vX.Y.Z` release tags (image tag `${CI_COMMIT_TAG#v}`, i.e. `X.Y.Z`) and pushes to
-`harbor.dotslash.io/dotslash/voxcpm2-openai`. It needs two **masked** CI/CD variables
+The CI `build` job runs **only on `vX.Y.Z` tags** (image tag `${CI_COMMIT_TAG#v}`, i.e. `X.Y.Z`)
+and pushes to `harbor.dotslash.io/dotslash/voxcpm2-openai`. Pushes to `main` and ordinary commits
+create no pipeline. It needs two **masked** CI/CD variables
 (Settings → CI/CD → Variables) — the same names as the notely repo:
 
 | Variable | Purpose |
@@ -231,7 +231,7 @@ variables (Settings → CI/CD → Variables):
 | `HARBOR_USER` / `HARBOR_TOKEN` | same as §1 | the target does its own `docker login` over stdin, so `HARBOR_TOKEN` must be **protected** to reach tag pipelines |
 
 - `staging`: runs automatically on default-branch pipeline success, deploying the
-  `$CI_COMMIT_SHORT_SHA` image the `build` job just pushed.
+  `X.Y.Z` image the `build` job just pushed.
 - `production`: releases are tags. `git tag vX.Y.Z && git push --follow-tags` builds image
   `X.Y.Z`, then the manual `deploy:production` job (approve it in the pipeline) pins exactly that
   image — never a later build — and finishes with a `curl -fsS http://127.0.0.1:8880/ready`
