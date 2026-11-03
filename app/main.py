@@ -19,7 +19,6 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.config import Settings
 from app.engine import EngineClient
 from app.errors import APIError
-from app.importer import import_qwen3_speakers
 from app.routers import (
     studio_clone,
     studio_design,
@@ -71,15 +70,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await engine.start()
     except Exception as exc:  # noqa: BLE001 - engine may be absent during local dev
         logger.warning("engine start failed: %s", exc)
-
-    if settings.import_dir.exists() and not store.list():
-        try:
-            result = await asyncio.to_thread(
-                import_qwen3_speakers, store, settings.import_dir, overwrite=False
-            )
-            logger.info("Qwen3 import: %s", result)
-        except Exception as exc:  # noqa: BLE001 - import must never block startup
-            logger.warning("Qwen3 import failed: %s", exc)
 
     task = asyncio.create_task(app.state.warmup.run_forever(), name="warmup")
     app.state.startup = StartupTracker(settings, store, engine, app.state.warmup)

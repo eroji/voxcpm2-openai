@@ -8,9 +8,7 @@ from typing import Any
 from fastapi import APIRouter, Request, Response
 
 from app import audio
-from app.config import Settings
 from app.errors import BadRequest
-from app.importer import import_qwen3_speakers
 from app.models import VoicePatch, VoiceSummary
 from app.store import VoiceStore
 
@@ -50,11 +48,3 @@ async def delete_voice(name: str, request: Request) -> dict[str, str]:
     store: VoiceStore = request.app.state.store
     await asyncio.to_thread(store.delete, name)
     return {"deleted": name}
-
-
-@router.post("/voices/import")
-async def import_voices(request: Request, overwrite: bool = False) -> dict[str, list[Any]]:
-    settings: Settings = request.app.state.settings
-    return await asyncio.to_thread(
-        import_qwen3_speakers, request.app.state.store, settings.import_dir, overwrite=overwrite
-    )

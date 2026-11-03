@@ -1,4 +1,8 @@
-"""Voice library CRUD + import API (M2-T4): R-010, R-011, R-024, R-041, Q-010."""
+"""Voice library CRUD API (M2-T4, M2-T18): R-010, R-024, R-041, Q-010.
+
+R-011 (Qwen3 import) is superseded by SPEC v0.2.0: voices are created only via
+Clone/Design or the API clone route, so no import endpoint exists.
+"""
 
 from __future__ import annotations
 
@@ -10,7 +14,6 @@ import pytest
 from app.config import Settings
 from app.store import VoiceStore
 from fastapi.testclient import TestClient
-from safetensors.numpy import save_file
 
 RATE = 24000
 REF_TEXT = "Thanks for waiting. Everything checks out."
@@ -35,23 +38,6 @@ def seeded(client: TestClient) -> VoiceStore:
             consent="uploaded-via-studio",
         )
     return store
-
-
-def speaker_file(path, name: str, key: str, ref_text: str = "Imported reference.") -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    save_file(
-        {"audio": tone()},
-        str(path),
-        metadata={
-            "name": name,
-            "voice_name_lower": key,
-            "ref_text": ref_text,
-            "sample_rate": str(RATE),
-            "created_at": "1700000000",
-            "consent": "uploaded-via-studio",
-            "source": "uploaded",
-        },
-    )
 
 
 def test_list_returns_full_summaries(client: TestClient, seeded: VoiceStore):
@@ -126,35 +112,16 @@ def test_delete_writes_backup_zip(client: TestClient, seeded: VoiceStore, settin
     assert [v["key"] for v in client.get("/api/voices").json()["voices"]] == ["ashley-ja"]
 
 
-def test_import_missing_source_dir_is_not_an_error(client: TestClient, settings: Settings):
-    assert not settings.import_dir.exists()
+def test_import_route_is_gone(client: TestClient, seeded: VoiceStore):
+    """SPEC v0.2.0 §7: no import endpoint. `/api/voices/{name}` still matches the path, so
+    Starlette answers 405 (not 404); either way nothing is imported."""
     response = client.post("/api/voices/import")
-    assert response.status_code == 200, response.text
-    assert response.json() == {"imported": [], "skipped": [], "failed": []}
-
-
-def test_import_then_skip_then_overwrite(client: TestClient, settings: Settings):
-    speaker_file(settings.import_dir / "qwen-a.safetensors", "Qwen A", "qwen-a")
-    speaker_file(settings.import_dir / "qwen-b.safetensors", "Qwen B", "qwen-b")
-
-    response = client.post("/api/voices/import")
-    assert response.status_code == 200, response.text
-    body = response.json()
-    assert body["imported"] == ["Qwen A", "Qwen B"]
-    assert body["skipped"] == [] and body["failed"] == []
-
-    response = client.post("/api/voices/import")
-    assert response.status_code == 200, response.text
-    body = response.json()
-    assert body["imported"] == []
-    assert body["skipped"] == ["Qwen A", "Qwen B"]
-
-    assert client.patch("/api/voices/qwen-a", json={"ref_text": "Local edit."}).status_code == 200
-    response = client.post("/api/voices/import?overwrite=true")
-    assert response.status_code == 200, response.text
-    assert response.json()["imported"] == ["Qwen A", "Qwen B"]
-    voices = {v["key"]: v for v in client.get("/api/voices").json()["voices"]}
-    assert voices["qwen-a"]["ref_text"] == "Imported reference."  # replaced, local edit gone
+    assert response.status_code in (404, 405), response.status_code
+    assert not any(
+        getattr(route, "path", "") == "/api/voices/import" for route in client.app.routes
+    )
+    keys = [v["key"] for v in client.get("/api/voices").json()["voices"]]
+    assert keys == ["ashley-en", "ashley-ja"]
 
 
 @pytest.mark.parametrize(

@@ -1,7 +1,7 @@
 services:
   voxcpm2-openai:
     container_name: voxcpm2-openai
-    image: harbor.dotslash.io/dotslash/voxcpm2-openai:v0.1.3
+    image: harbor.dotslash.io/dotslash/voxcpm2-openai:v0.2.0
     restart: always
     stop_grace_period: 25s
     devices:
@@ -20,7 +20,6 @@ services:
     volumes:
       - ./data:/data                             # voices, takes, backups, settings
       - /models:/models:ro                       # weights at /models/openbmb/VoxCPM2
-      - /opt/qwen3-tts/data/speakers:/import/qwen3-speakers:ro   # one-time voice import source
     ports:
       - "8881:8000"     # during A/B; move to 8880 at cutover after qwen3-tts-openai is stopped
     healthcheck:

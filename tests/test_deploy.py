@@ -186,12 +186,13 @@ def test_inherited_cmd_cleared():
 
 
 # Read-only reference files (AGENTS.md §4): pinned by SHA-256 so any edit fails the test,
-# not just a deletion. Hashes are of the committed originals (git status: clean).
+# not just a deletion. voxcpm2-3090.yaml is the committed original; compose.yaml is pinned to
+# the v0.2.0 state (M2-T18 removed the /import/qwen3-speakers mount).
 REFERENCE_SHA256 = {
     "deploy/voxcpm2-3090.yaml": (
         "3ddc3cabf84d86154b66365e18938d3f1f4d8d732d613396b2b97a387734f194"
     ),
-    "deploy/compose.yaml": "3f52c64ec44c343e7a6a76523cd7f225cae4d4228b880ef019f0fa2eb91caf25",
+    "deploy/compose.yaml": "d8cc4a5a1b3884abb0010a485df23e369bd835afab2450d22f36b823ba30cfbd",
 }
 
 
@@ -199,6 +200,12 @@ def test_reference_deploy_files_byte_identical():
     for rel, want in REFERENCE_SHA256.items():
         got = hashlib.sha256((ROOT / rel).read_bytes()).hexdigest()
         assert got == want, f"{rel} was edited (sha256 {got} != pinned {want})"
+
+
+def test_compose_has_no_qwen3_import_mount():
+    """SPEC v0.2.0 §5/§7: no Qwen3 import, so the read-only speakers mount must be gone."""
+    compose = (ROOT / "deploy" / "compose.yaml").read_text()
+    assert "qwen3-speakers" not in compose and "/opt/qwen3-tts" not in compose
 
 
 # ------------------------------------------------- M5-T4: CI/CD house pattern (notely parity)

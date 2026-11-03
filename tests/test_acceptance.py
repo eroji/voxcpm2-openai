@@ -7,7 +7,7 @@ ears). Mapping:
 - WAV 48 kHz + warm RTF ≤ 0.2      -> test_wav_48k_and_rtf (fake-engine plumbing smoke);
                                       the 3090 RTF number -> test_hardware_rtf_and_vram (skipped)
 - Streamed PCM first chunk ≤ 300ms -> test_stream_first_chunk_and_total
-- Eight imported voices            -> test_import_eight_voices_synth (ear check skipped)
+- Eight voices made in the Studio  -> test_eight_voices_synth (ear check skipped)
 - Warm-up before /ready            -> test_warm_start
 - Clone flow                       -> test_clone_flow
 - Design flow                      -> test_design_flow
@@ -31,13 +31,14 @@ import pytest
 from app.audio import pcm_s16le_to_float, wav_bytes
 from app.config import Settings
 from app.main import create_app
+from app.store import VoiceStore
 from fastapi.testclient import TestClient
-from safetensors.numpy import save_file
 
 BODY = {"model": "tts-1", "voice": "ashley-en", "input": "hello"}
 
-# SPEC §5: the eight Qwen3 speakers; language is derived from the key suffix (-kr -> ko).
-QWEN3_VOICES = {
+# SPEC §13 (v0.2.0): the eight reference voices, created in the Studio.
+# Language is what Clone/Design records for each name.
+STUDIO_VOICES = {
     "ashley-en": "en",
     "ashley-ja": "ja",
     "ashley-kr": "ko",
@@ -103,35 +104,24 @@ def test_stream_first_chunk_and_total(client: TestClient, library: Any) -> None:
     assert len(pcm_s16le_to_float(body)) / 48000 == pytest.approx(0.6, abs=0.05)
 
 
-# --- §13: eight imported voices ---------------------------------------------------
+# --- §13: eight voices created in the Studio ---------------------------------------
 
 
-def test_import_eight_voices_synth(client: TestClient, settings: Settings) -> None:
-    src = settings.import_dir
-    src.mkdir(parents=True, exist_ok=True)
-    for name in QWEN3_VOICES:
-        save_file(
-            {"audio": _tone(1.0)},
-            str(src / f"{name}.safetensors"),
-            metadata={
-                "name": name,
-                "voice_name_lower": name,
-                "ref_text": "Thanks for waiting. Everything checks out.",
-                "sample_rate": "24000",
-                "created_at": "1791831655",
-                "consent": "uploaded-via-studio",
-                "embedding_source": "audio",
-                "mime_type": "audio/wav",
-                "original_filename": f"{name}.wav",
-                "file_size": "48044",
-            },
+def test_eight_voices_synth(client: TestClient) -> None:
+    """SPEC §13 (v0.2.0): eight voices created in the Studio synthesize by name over /v1."""
+    store: VoiceStore = client.app.state.store
+    for name, language in STUDIO_VOICES.items():
+        store.create(
+            name,
+            _tone(1.0),
+            24000,
+            ref_text="Thanks for waiting. Everything checks out.",
+            language=language,
+            consent="uploaded-via-studio",
         )
-    r = client.post("/api/voices/import")
-    assert r.status_code == 200
-    assert sorted(r.json()["imported"]) == sorted(QWEN3_VOICES)
     listed = {v["key"]: v["language"] for v in client.get("/api/voices").json()["voices"]}
-    assert listed == QWEN3_VOICES
-    for name in QWEN3_VOICES:
+    assert listed == STUDIO_VOICES
+    for name in STUDIO_VOICES:
         assert client.post("/v1/audio/speech", json={**BODY, "voice": name}).status_code == 200
 
 
@@ -298,7 +288,7 @@ def test_acceptance_external_clients_unchanged() -> None:
 
 
 @pytest.mark.skip(
-    reason="SPEC §13 spot-check of the eight imported voices by ear against the Qwen3 "
+    reason="SPEC §13 spot-check of the eight Studio voices by ear against the Qwen3 "
     "versions requires a human listener."
 )
 def test_acceptance_voice_spot_check() -> None:
