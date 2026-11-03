@@ -228,7 +228,27 @@ def test_design_flow(page, live_app, open_studio):
 
 def test_engine_screen(page, live_app, open_studio, fake_engine):
     open_studio(page, "engine")
-    expect(page.locator("#engine-stats .vs-stat")).to_have_count(8)
+    stats = page.locator("#engine-stats .vs-stat")
+    expect(stats).to_have_count(8)
+
+    # M3-T12 cosmetics: short value + full name in title, updated labels/notes
+    expect(stats.nth(0).locator(".meta").first).to_have_text("Model")
+    expect(stats.nth(0).locator(".v")).to_have_text("VoxCPM2")
+    expect(stats.nth(0).locator(".v")).to_have_attribute("title", "openbmb/VoxCPM2")
+    expect(stats.nth(0).locator(".meta").nth(1)).to_have_text("openbmb/VoxCPM2 · 2B · 48 kHz")
+    expect(stats.nth(1).locator(".meta").first).to_have_text("GPU")
+    expect(stats.nth(1).locator(".meta").nth(1)).to_have_text("Shared with whisper-stt, TEI")
+    # the value never keeps the "NVIDIA GeForce " prefix (hosts without nvidia-smi show Unknown)
+    expect(stats.nth(1).locator(".v")).not_to_have_text(re.compile(r"^NVIDIA GeForce"))
+    expect(stats.nth(2).locator(".meta").first).to_have_text("GPU memory used")
+    expect(stats.nth(4).locator(".meta").nth(1)).to_have_text("Last 20 requests, warm-up excluded")
+    expect(stats.nth(7).locator(".meta").first).to_have_text("Runtime")
+    expect(stats.nth(7).locator(".v")).to_have_text("vLLM-Omni")
+
+    # endpoint example body is pretty-printed JSON (ui/studio.html reference)
+    expect(page.locator("#engine-endpoint pre")).to_have_text(
+        re.compile(r"\{\n\s+\"model\": \"voxcpm2\",\n")
+    )
 
     calls = fake_engine.state["calls"]
     page.click("#run-warmup")

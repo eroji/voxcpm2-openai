@@ -398,3 +398,104 @@ def test_stream_toggle_gates_format():
 def test_e2e_suite_never_skips_silently():
     for path in sorted((ROOT / "tests" / "e2e").glob("*.py")):
         assert "importorskip" not in path.read_text(encoding="utf-8"), path
+
+
+# --- M3-T12: startup page asset + updated Engine stats ---------------------------
+
+STARTING = (ROOT / "app" / "static" / "starting.html").read_text(encoding="utf-8")
+
+
+def test_starting_asset_exists_and_matches_contract():
+    assert 'href="/static/tokens.css"' in STARTING
+    assert "fetch('/ready'" in STARTING
+    assert "fetch('/api/engine/startup'" in STARTING
+    assert "STUDIO_URL = '/'" in STARTING  # location.replace(STUDIO_URL) → '/' once ready
+    assert "location.replace(" in STARTING
+    assert "POLL_MS = 2000" in STARTING  # polls every 2 s
+    # failed state reachable for preview (?demo=failed) and rendered via body.failed
+    assert "demo=failed" in STARTING
+    assert "body.classList.toggle('failed'" in STARTING
+
+
+def test_starting_asset_is_the_reference_copy_plus_documented_deltas():
+    """ui/starting.html is the source of truth; M3-T13 adds exactly three markup deltas."""
+    reference = (ROOT / "ui" / "starting.html").read_text(encoding="utf-8")
+    ours = STARTING.replace('href="/static/tokens.css"', 'href="tokens.css"')
+    our_markup, our_js = ours.split("<script>", 1)
+    ref_markup, ref_js = reference.split("<script>", 1)
+    for delta in [
+        ' tabindex="0" role="region" aria-label="Engine log"',  # keyboard-scrollable log
+        '\n      <p class="lbl" id="startup-error" role="alert" hidden></p>',  # inline errors
+    ]:
+        assert delta in our_markup, delta
+        our_markup = our_markup.replace(delta, "", 1)
+    assert our_markup == ref_markup
+    # the script is the reference's demo + render; only the handlers above may differ
+    tail = "/* Demo mode for previewing the asset without a backend. */"
+    assert our_js[our_js.index(tail) :] == ref_js[ref_js.index(tail) :]
+
+
+# --- M3-T13 startup page UX ------------------------------------------------------
+
+
+def test_copy_log_works_over_plain_http():
+    # navigator.clipboard is undefined outside a secure context: the fallback must be there.
+    assert "navigator.clipboard && window.isSecureContext" in STARTING
+    assert "document.execCommand('copy')" in STARTING
+    assert "'Copied'" in STARTING  # label for 2 s
+    assert "'Copy failed'" in STARTING
+
+
+def test_log_pane_is_keyboard_scrollable():
+    assert (
+        '<div class="log" id="log-box" tabindex="0" role="region" aria-label="Engine log">'
+        in STARTING
+    )
+
+
+def test_startup_and_restart_errors_are_visible():
+    assert "if (!r.ok) throw new Error('HTTP ' + r.status)" in STARTING
+    assert "Can’t read startup state" in STARTING
+    assert "Restart failed" in STARTING
+    assert "catch (e) {}" not in STARTING  # no silently swallowed fetch errors
+
+
+def test_endpoint_placeholder_matches_render_endpoint():
+    # engine.js renderEndpoint() sends no instructions: neither may the static placeholder.
+    assert "instructions" not in HTML
+    for key in ['"model": "voxcpm2"', '"input": "…"', '"response_format": "pcm"', '"stream": true']:
+        assert key in HTML, key
+
+
+def test_rtf_note_is_the_single_warm_up_exclusion_claim():
+    engine = js("engine.js")
+    assert engine.count("Last 20 requests, warm-up excluded") == 1
+
+
+def test_engine_stats_css_has_fixed_4_2_1_columns_and_ellipsis():
+    assert ".vs-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr))" in CSS
+    assert (
+        "@media (max-width: 900px) { .vs-stats { grid-template-columns: "
+        "repeat(2, minmax(0, 1fr)); } }" in CSS
+    )
+    assert "@media (max-width: 520px) { .vs-stats { grid-template-columns: 1fr; } }" in CSS
+    v_rule = re.search(r"\.vs-stat \.v \{([^}]*)\}", CSS).group(1)
+    for decl in ["white-space: nowrap", "overflow: hidden", "text-overflow: ellipsis"]:
+        assert decl in v_rule, decl
+
+
+def test_engine_stats_labels_and_notes_match_the_reference():
+    engine = js("engine.js")
+    for fragment in [
+        'stat("Model", model.split("/").pop()',  # VoxCPM2, full id in title
+        "v.title = title",
+        "`${model} · 2B · 48 kHz`",
+        'stat("GPU", gpu.replace(/^NVIDIA GeForce /, ""), "Shared with whisper-stt, TEI", gpu)',
+        '"GPU memory used"',
+        "all processes on the card",
+        "Last 20 requests, warm-up excluded",
+        'stat("Runtime", RUNTIME_NAME, runtimeNote(e.runtime))',
+    ]:
+        assert fragment in engine, fragment
+    assert "VRAM in use" not in engine
+    assert "Non-streamed WAV" not in engine

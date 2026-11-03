@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Voice Studio · Starting</title>
+<link rel="stylesheet" href="/static/tokens.css">
+<!--
+  Engine startup page. The app serves this at "/" (and for any Studio route) until
+  GET /ready returns 200, then the page redirects to the Studio.
+
+  Polls GET /api/engine/startup every 2 s. Contract (see ui/STARTING.md):
+  {
+    "state": "starting" | "ready" | "failed",
+    "elapsed_s": 72,
+    "steps": [ { "label": "...", "detail": "...", "status": "done|active|waiting|failed", "duration_s": 21 } ],
+    "error": null | "plain-language error for the failed step",
+    "restart_in_s": null | 30,
+    "log": ["last 16 engine/app log lines, oldest first"]
+  }
+
+  Opened from disk (no API), it runs a demo that walks through the steps.
+  Add ?demo=failed to preview the failure state.
+-->
+<style>
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--vs-bg); color: var(--vs-fg); font-family: var(--vs-font); font-size: var(--vs-fs-body); line-height: var(--vs-lh); }
+button { font: inherit; color: inherit; cursor: pointer; border-radius: 0; }
+:focus-visible { outline: 2px solid var(--vs-accent); outline-offset: 2px; }
+code, pre { font-family: var(--vs-mono); }
+
+.hd { max-width: var(--vs-max); margin: 0 auto; padding: var(--vs-s8) var(--vs-gutter) 0; }
+.brand-row { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: var(--vs-s8); padding-bottom: 14px; }
+.brand { display: flex; align-items: flex-end; gap: var(--vs-s6); }
+.mark { width: 14px; height: 14px; background: var(--vs-accent); margin-bottom: 6px; }
+.title { margin: 0; font-size: var(--vs-fs-display); font-weight: 700; letter-spacing: -0.03em; line-height: 0.95; }
+.meta-dl { margin: 0; display: grid; grid-template-columns: repeat(2, auto); column-gap: 28px; font-size: var(--vs-fs-label); }
+.meta-dl dt { color: var(--vs-muted); }
+.meta-dl dd { margin: 0; font-weight: 500; }
+
+/* 2px rule with sweeping accent segment; solid accent when failed */
+.bar { position: relative; height: 2px; background: var(--vs-fg); overflow: hidden; }
+.bar::after { content: ""; position: absolute; top: 0; left: 0; width: 25%; height: 2px; background: var(--vs-accent); animation: sweep 1.6s linear infinite; }
+body.failed .bar::after { width: 100%; animation: none; }
+@keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(400%); } }
+
+.main { max-width: var(--vs-max); margin: 0 auto; padding: 28px var(--vs-gutter) 48px; }
+.cols { display: flex; flex-wrap: wrap; gap: var(--vs-s9) var(--vs-col-gap); align-items: flex-start; }
+.col { flex: 1 1 480px; min-width: 0; display: flex; flex-direction: column; }
+
+.top { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: var(--vs-s6); margin-bottom: var(--vs-s3); }
+.h2 { margin: 0; font-size: var(--vs-fs-stat); font-weight: 700; letter-spacing: -0.02em; }
+.elapsed { display: flex; flex-direction: column; align-items: flex-end; }
+.elapsed .v { font-size: var(--vs-fs-stat); font-weight: 700; letter-spacing: -0.02em; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.lbl { font-size: var(--vs-fs-label); color: var(--vs-muted); }
+.sub { margin: 0 0 var(--vs-s7); max-width: 62ch; color: var(--vs-fg-2); }
+
+.steps { list-style: none; margin: 0; padding: 0; border-top: var(--vs-rule-section); }
+.step { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: var(--vs-s5); align-items: start; padding: var(--vs-s4) 0 11px; border-bottom: 1px solid var(--vs-rule-faint); }
+.step .n { font-size: var(--vs-fs-label); color: var(--vs-muted); font-variant-numeric: tabular-nums; padding-top: 2px; }
+.step .body { display: flex; flex-direction: column; min-width: 0; }
+.step .name { font-weight: 500; }
+.step .detail { font-size: var(--vs-fs-small); color: var(--vs-muted); }
+.step .err { font-size: var(--vs-fs-small); margin-top: var(--vs-s1); }
+.step .st { display: inline-flex; align-items: center; justify-content: flex-end; gap: var(--vs-s3); font-size: var(--vs-fs-small); white-space: nowrap; color: var(--vs-muted); font-variant-numeric: tabular-nums; }
+.step .dot { display: none; width: 8px; height: 8px; background: var(--vs-accent); }
+.step.waiting .name { color: var(--vs-muted); }
+.step.active, .step.failed { border-top: 2px solid var(--vs-accent); border-bottom-color: var(--vs-fg); margin-top: -1px; }
+.step.active .name, .step.failed .name, .step.active .st, .step.failed .st { font-weight: 700; color: var(--vs-fg); }
+.step.active .dot, .step.failed .dot { display: inline-block; }
+.step.active .dot { animation: blink 1.2s ease-in-out infinite; }
+@keyframes blink { 50% { opacity: 0.25; } }
+
+.actions { display: none; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: var(--vs-s5); padding-top: var(--vs-s5); border-top: var(--vs-rule-section); }
+body.failed .actions { display: flex; }
+.btn-primary { min-height: var(--vs-h-primary); padding: 0 var(--vs-s7); background: var(--vs-accent); color: var(--vs-on-accent); border: none; font-weight: 700; }
+.btn-secondary { min-height: var(--vs-h-input); padding: 0 var(--vs-s7); background: var(--vs-bg); border: 1px solid var(--vs-fg); font-weight: 500; }
+
+.side-h { display: flex; justify-content: space-between; align-items: baseline; padding-bottom: var(--vs-s3); border-bottom: 1px solid var(--vs-fg); margin: 6px 0 var(--vs-s5); }
+.side-h h3, .notes h3 { margin: 0; font-size: var(--vs-fs-label); font-weight: 700; }
+.log { overflow: auto; background: var(--vs-code-bg); min-height: 360px; max-height: 60vh; }
+.log pre { margin: 0; padding: 14px 16px; font-size: var(--vs-fs-label); line-height: 1.6; color: var(--vs-fg-2); white-space: pre; }
+.log .e { color: var(--vs-fg); font-weight: 400; }
+.notes { display: flex; flex-direction: column; gap: var(--vs-s3); padding-top: 18px; }
+.notes h3 { padding-bottom: var(--vs-s3); border-bottom: 1px solid var(--vs-fg); }
+.notes p { margin: 0; font-size: var(--vs-fs-small); }
+.notes code { font-size: var(--vs-fs-label); }
+
+@media (prefers-reduced-motion: reduce) { .bar::after, .step.active .dot { animation: none; } }
+</style>
+</head>
+<body>
+<header class="hd">
+  <div class="brand-row">
+    <div class="brand"><span class="mark" aria-hidden="true"></span><h1 class="title">Voice Studio</h1></div>
+    <dl class="meta-dl">
+      <dt>Model</dt><dt>Engine</dt>
+      <dd>openbmb/VoxCPM2</dd><dd id="engine-meta">Starting</dd>
+    </dl>
+  </div>
+  <div class="bar" aria-hidden="true"></div>
+</header>
+
+<main class="main">
+  <div class="cols">
+    <section class="col" aria-labelledby="h">
+      <div class="top">
+        <h2 class="h2" id="h">Starting the voice engine</h2>
+        <div class="elapsed"><span class="lbl">Elapsed</span><span class="v" id="elapsed">00:00</span></div>
+      </div>
+      <p class="sub" id="sub" role="status">Voice Studio opens automatically when VoxCPM2 is loaded and warm. This usually takes about 2 minutes after the container starts.</p>
+      <p class="lbl" id="startup-error" role="alert" hidden></p>
+      <ol class="steps" id="steps"></ol>
+      <div class="actions">
+        <span class="lbl" id="restart-note"></span>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn-secondary" id="copy-log">Copy log</button>
+          <button class="btn-primary" id="restart">Restart engine now</button>
+        </div>
+      </div>
+    </section>
+
+    <aside class="col" aria-labelledby="log-h">
+      <div class="side-h"><h3 id="log-h">Engine log</h3><span class="lbl">Last 16 lines · follows live</span></div>
+      <div class="log" id="log-box" tabindex="0" role="region" aria-label="Engine log"><pre id="log"></pre></div>
+      <div class="notes">
+        <h3>While you wait</h3>
+        <p>This page checks <code>/ready</code> every 2 seconds and opens the Studio as soon as warm-up finishes.</p>
+        <p>API callers get <code>503</code> with <code>Retry-After</code> until then, so LiteLLM retries instead of failing.</p>
+      </div>
+    </aside>
+  </div>
+</main>
+
+<script>
+const POLL_MS = 2000;
+const STUDIO_URL = '/';            // where to go once /ready is 200
+const $ = id => document.getElementById(id);
+const fmt = s => { s = Math.max(0, Math.round(s)); return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0'); };
+const fmtDur = s => Math.floor(s / 60) + ':' + String(Math.round(s % 60)).padStart(2, '0');
+const esc = t => t.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+
+let lastLog = '';
+function render(d) {
+  const failed = d.state === 'failed';
+  document.body.classList.toggle('failed', failed);
+  const steps = d.steps || [];
+  const idx = steps.findIndex(s => s.status === 'active' || s.status === 'failed');
+  const cur = idx >= 0 ? steps[idx] : null;
+
+  $('engine-meta').textContent = failed ? 'Not ready · start failed'
+    : d.state === 'ready' ? 'Ready' : `Starting · step ${idx + 1} of ${steps.length}`;
+  $('h').textContent = failed ? 'The voice engine didn’t start' : 'Starting the voice engine';
+  $('sub').textContent = failed
+    ? `VoxCPM2 stopped during “${cur ? cur.label.toLowerCase() : 'startup'}”. The details are below and in the engine log.`
+    : 'Voice Studio opens automatically when VoxCPM2 is loaded and warm. This usually takes about 2 minutes after the container starts.';
+  $('elapsed').textContent = fmt(d.elapsed_s || 0);
+  $('restart-note').textContent = failed && d.restart_in_s != null ? `The engine restarts automatically in ${d.restart_in_s} s.` : '';
+
+  $('steps').innerHTML = steps.map((s, i) => {
+    const st = s.status === 'done' ? `Done in ${fmtDur(s.duration_s || 0)}`
+      : s.status === 'active' ? 'In progress' : s.status === 'failed' ? 'Failed' : 'Waiting';
+    const err = s.status === 'failed' && d.error ? `<span class="err">${esc(d.error)}</span>` : '';
+    return `<li class="step ${s.status}"><span class="n">${String(i + 1).padStart(2, '0')}</span>
+      <span class="body"><span class="name">${esc(s.label)}</span><span class="detail">${esc(s.detail || '')}</span>${err}</span>
+      <span class="st"><span class="dot" aria-hidden="true"></span>${st}</span></li>`;
+  }).join('');
+
+  const text = (d.log || []).slice(-16).join('\n');
+  if (text !== lastLog) {
+    lastLog = text;
+    $('log').innerHTML = esc(text).replace(/^(ERROR.*)$/gm, '<span class="e">$1</span>');
+    const box = $('log-box'); box.scrollTop = box.scrollHeight;
+  }
+}
+
+/* One inline status line for the two errors the page used to swallow: an unreadable
+   startup state and a failed restart POST. kind lets a good poll clear only its own note. */
+let noteKind = '';
+function note(kind, text) { $('startup-error').textContent = text; $('startup-error').hidden = false; noteKind = kind; }
+function clearNote(kind) {
+  if (kind && noteKind !== kind) return;
+  $('startup-error').hidden = true; $('startup-error').textContent = ''; noteKind = '';
+}
+
+async function poll() {
+  try {
+    const ready = await fetch('/ready', { cache: 'no-store' });
+    if (ready.ok) { location.replace(STUDIO_URL); return; }
+    const r = await fetch('/api/engine/startup', { cache: 'no-store' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    render(await r.json());
+    clearNote('startup');
+  } catch (e) {
+    if (location.protocol === 'file:' || new URLSearchParams(location.search).has('demo')) return demo();
+    note('startup', `Can’t read startup state (${e.message || 'network'}) — retrying`);
+  }
+  setTimeout(poll, POLL_MS);
+}
+
+let copyTimer = null;
+function copyResult(ok) {
+  const btn = $('copy-log');
+  btn.textContent = ok ? 'Copied' : 'Copy failed';
+  clearTimeout(copyTimer);
+  copyTimer = setTimeout(() => { btn.textContent = 'Copy log'; }, ok ? 2000 : 3000);
+}
+
+// navigator.clipboard only exists in a secure context; over plain HTTP use a hidden textarea.
+$('copy-log').addEventListener('click', async () => {
+  let ok = false;
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(lastLog);
+      ok = true;
+    } else {
+      const ta = document.createElement('textarea');
+      ta.value = lastLog;
+      ta.style.cssText = 'position:fixed;top:-1000px;opacity:0';
+      document.body.append(ta);
+      ta.select();
+      ok = document.execCommand('copy');
+      ta.remove();
+    }
+  } catch (e) { ok = false; }
+  copyResult(ok);
+});
+
+$('restart').addEventListener('click', async () => {
+  const btn = $('restart');
+  btn.disabled = true; btn.textContent = 'Restarting…';
+  clearNote('restart');
+  try {
+    const r = await fetch('/api/engine/restart', { method: 'POST' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+  } catch (e) {
+    note('restart', `Restart failed (${e.message || 'network'}) — the engine log is below`);
+  }
+  setTimeout(() => { btn.disabled = false; btn.textContent = 'Restart engine now'; }, 3000);
+});
+
+/* Demo mode for previewing the asset without a backend. */
+function demo() {
+  const fail = new URLSearchParams(location.search).get('demo') === 'failed';
+  const defs = [
+    ['Container started', 'App online, voice library loaded (8 voices)', 2],
+    ['Loading model weights', 'openbmb/VoxCPM2 · 4.7 GB from /models', 21],
+    ['Starting the engine', 'vLLM-Omni 0.30.0 · 2 GiB KV cache · RTX 3090', 38],
+    ['Warming up', 'One full and one streamed synthesis, so the first real request is fast', 16],
+  ];
+  const logAll = [
+    'INFO  [app] Voice library loaded: 8 voices', 'INFO  [app] Waiting for engine on 127.0.0.1:8102',
+    'INFO  Delegating entrypoint handling to vllm-omni', 'INFO  vLLM server version 0.30.0, serving /models/openbmb/VoxCPM2',
+    'INFO  [OmniEngine] Launching Orchestrator thread with 1 stages', 'INFO  Patched empty HF config with model_type=voxcpm2',
+    'INFO  Resolved architecture: VoxCPM2TalkerForConditionalGeneration', 'INFO  Using max model len 4096',
+    'INFO  Chunked prefill is enabled with max_num_batched_tokens=4096', 'INFO  Starting to load model /models/openbmb/VoxCPM2...',
+    'INFO  Using FLASH_ATTN attention backend', 'INFO  Model loading took 4.31 GiB and 19.8 s',
+    'INFO  KV cache budget pinned at 2.00 GiB (max_num_seqs=2)', 'INFO  Building unified decode graph (max batch 2)...',
+    'INFO  Initializing LocDiT / AudioVAE side path', 'INFO  [app] Warm-up 1/2: non-streamed synthesis',
+    'INFO  [app] Warm-up 2/2: streamed synthesis', 'INFO  [app] Engine ready, first audio 152 ms',
+  ];
+  let t = 0;
+  const tick = () => {
+    t += 1;
+    let acc = 0, phase = defs.length;
+    for (let i = 0; i < defs.length; i++) { acc += defs[i][2] / 4; if (t < acc) { phase = i; break; } }
+    const failedNow = fail && phase >= 2;
+    if (failedNow) phase = 2;
+    const steps = defs.map((d, i) => ({ label: d[0], detail: d[1], duration_s: d[2],
+      status: i < phase ? 'done' : i === phase ? (failedNow ? 'failed' : 'active') : 'waiting' }));
+    const shown = failedNow
+      ? logAll.slice(0, 12).concat(['ERROR CUDA out of memory. Tried to allocate 2.00 GiB.', 'ERROR StageEngineCoreProc failed to start.', 'ERROR Engine core initialization failed.'])
+      : logAll.slice(0, Math.min(logAll.length, 2 + t));
+    render({ state: failedNow ? 'failed' : 'starting', elapsed_s: t * 4, steps, log: shown,
+      error: failedNow ? 'CUDA out of memory while allocating the KV cache. Another process may be using GPU memory.' : null,
+      restart_in_s: failedNow ? 30 : null });
+    if (phase < defs.length && !failedNow) setTimeout(tick, 500);
+    else if (!failedNow) { $('engine-meta').textContent = 'Ready'; $('sub').textContent = 'Ready. In the app this page now opens the Studio.'; }
+  };
+  tick();
+}
+
+poll();
+</script>
+</body>
+</html>

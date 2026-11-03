@@ -6,7 +6,7 @@ import { api, state, registerScreen, refreshEngine, loadVoices, showError, clear
 const WARM_LABEL = "Run warm-up";
 const RESTART_LABEL = "Restart engine";
 
-function stat(label, value, sub) {
+function stat(label, value, sub, title) {
   const box = document.createElement("div");
   box.className = "vs-stat";
   const mk = (cls, text) => {
@@ -15,27 +15,39 @@ function stat(label, value, sub) {
     s.textContent = text;
     return s;
   };
-  box.append(mk("meta", label), mk("v", value));
+  const v = mk("v", value);
+  if (title) v.title = title;
+  box.append(mk("meta", label), v);
   if (sub) box.append(mk("meta", sub));
   return box;
 }
 
 const gb = mb => (mb == null ? "—" : `${(mb / 1024).toFixed(1)} GB`);
 
+// "vLLM-Omni 0.30.0 · vLLM 0.30.0" → note "0.30.0 · vLLM 0.30.0" (value is the product name)
+const RUNTIME_NAME = "vLLM-Omni";
+const runtimeNote = runtime => (runtime || "").slice(RUNTIME_NAME.length).trim();
+
 function renderStats() {
   const host = document.getElementById("engine-stats");
   const e = state.engine;
   if (!host || !e) return;
+  const model = e.model || "—";
   const languages = new Set(state.voices.map(v => v.language)).size;
+  const gpu = e.gpu || "Unknown";
   host.replaceChildren(
-    stat("Model", e.model || "—"),
-    stat("GPU", e.gpu || "Unknown"),
-    stat("VRAM in use", gb(e.vram_used_mb), e.vram_total_mb == null ? "" : `of ${Math.round(e.vram_total_mb / 1024)} GB`),
+    stat("Model", model.split("/").pop(), `${model} · 2B · 48 kHz`, model),
+    stat("GPU", gpu.replace(/^NVIDIA GeForce /, ""), "Shared with whisper-stt, TEI", gpu),
+    stat(
+      "GPU memory used",
+      gb(e.vram_used_mb),
+      e.vram_total_mb == null ? "" : `of ${Math.round(e.vram_total_mb / 1024)} GB, all processes on the card`,
+    ),
     stat("KV cache", e.kv_cache || "—", `Max ${e.max_concurrency} concurrent requests`),
-    stat("Warm RTF", e.rtf == null ? "—" : Number(e.rtf).toFixed(2), "Non-streamed WAV"),
+    stat("Warm RTF", e.rtf == null ? "—" : Number(e.rtf).toFixed(2), "Last 20 requests, warm-up excluded"),
     stat("First audio", e.first_audio_ms == null ? "—" : `${Math.round(e.first_audio_ms)} ms`, "Streamed PCM, warm"),
     stat("Voices", String(e.voices ?? state.voices.length), `${languages} languages`),
-    stat("Runtime", e.runtime || "—"),
+    stat("Runtime", RUNTIME_NAME, runtimeNote(e.runtime)),
   );
 }
 

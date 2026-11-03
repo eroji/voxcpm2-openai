@@ -130,9 +130,11 @@ input[type="checkbox"] { width: 14px; height: 14px; margin: 0; accent-color: var
 .vs-cand .pick[aria-pressed="true"] { background: var(--vs-fg); color: var(--vs-bg); font-weight: 700; }
 
 /* Engine */
-.vs-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); border-top: var(--vs-rule-section); }
+.vs-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-top: var(--vs-rule-section); }
+@media (max-width: 900px) { .vs-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .vs-stats { grid-template-columns: 1fr; } }
 .vs-stat { padding: var(--vs-s5) var(--vs-s6) 14px 0; border-bottom: var(--vs-rule-row); display: flex; flex-direction: column; gap: 2px; }
-.vs-stat .v { font-size: var(--vs-fs-stat); font-weight: 700; letter-spacing: -0.02em; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.vs-stat .v { font-size: var(--vs-fs-stat); font-weight: 700; letter-spacing: -0.02em; line-height: 1.15; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .vs-code { overflow-x: auto; background: var(--vs-code-bg); }
 .vs-code pre { margin: 0; padding: var(--vs-s5) 14px; font-size: var(--vs-fs-small); white-space: pre; }
 
