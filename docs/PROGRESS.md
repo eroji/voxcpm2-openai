@@ -227,6 +227,9 @@ spikes remain host-run. CI has not run yet: the branch is local (47+ commits ahe
   30/60/120 s with a down marker, and failures map to plain-language text. Real-image check:
   startup page at `/`, `/api/voices` 503 + Retry-After 5, `/health` 200, `/ready` 503.
 
+- **2026-11-03 —** Release v0.1.3: startup page, engine log runner + backoff, updated Engine UI,
+  Studio preview/format, HF token passthrough, container supervisor fixes.
+
 ## Next action
 
 1. `git push origin main` and watch the GitLab pipeline (`checks`, `javascript`, `test`, `e2e`,
