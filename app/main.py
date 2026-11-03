@@ -19,7 +19,9 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.config import Settings
 from app.engine import EngineClient
 from app.errors import APIError
+from app.languages import LanguageStore
 from app.routers import (
+    languages,
     studio_clone,
     studio_design,
     studio_engine,
@@ -63,6 +65,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.store = store
     app.state.takes = takes
     app.state.engine = engine
+    app.state.languages = LanguageStore(settings, store)
     app.state.speech = SpeechService(store, engine, settings)
     app.state.warmup = WarmupService(store, engine, settings)
 
@@ -201,6 +204,7 @@ def create_app(settings: Settings | None = None, *, engine: EngineClient | None 
 
     app.include_router(system.router)
     app.include_router(v1.router)
+    app.include_router(languages.router)
     app.include_router(studio_voices.router)
     app.include_router(studio_clone.router)
     app.include_router(studio_takes.router)

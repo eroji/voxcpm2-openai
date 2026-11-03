@@ -5,6 +5,9 @@ import {
   api,
   state,
   loadVoices,
+  loadLanguages,
+  languageOptions,
+  noPhrasesNote,
   play,
   renderWave,
   showError,
@@ -18,19 +21,53 @@ const SVG_NS = "http://www.w3.org/2000/svg";
 let candidates = [];
 let selectedCandidate = null;
 
-/* Sample-line presets (SPEC §8): follow the Design language; no preset selected initially. */
-let presets = null;
+/* Sample-line presets (SPEC §5a/§8) from /api/languages/{code}/presets, following the Design
+ * language; no preset selected initially, and a language with none shows the hint. */
+let presets = [];
 let designPresetId = null;
 
 const $ = id => document.getElementById(id);
 
-function renderDesignPresets(swapText) {
-  $("design-sample").lang = $("design-lang").value;
-  if (!presets) return;
-  const lang = presets[$("design-lang").value] ? $("design-lang").value : "en";
+/* Design defaults to Japanese when it is enabled (the reference order), else the default. */
+function designLang() {
+  const codes = languageOptions();
+  if (!codes.length) return "";
+  return codes.some(o => o.code === "ja") ? "ja" : codes[0].code;
+}
+
+function fillLangs() {
+  const select = $("design-lang");
+  const options = languageOptions();
+  if (!options.length) return;
+  const current = select.value;
+  select.replaceChildren(
+    ...options.map(option => {
+      const node = document.createElement("option");
+      node.value = option.code;
+      node.textContent = option.name;
+      return node;
+    })
+  );
+  select.value = options.some(o => o.code === current) ? current : designLang();
+}
+
+async function renderDesignPresets(swapText) {
+  const lang = $("design-lang").value || designLang();
+  $("design-sample").lang = lang;
+  let items = [];
+  try {
+    items = (await api.get(`/api/languages/${encodeURIComponent(lang)}/presets`)).presets || [];
+  } catch {
+    items = [];
+  }
+  presets = items;
   const box = $("design-presets");
   box.replaceChildren();
-  for (const p of presets[lang]) {
+  if (!items.length) {
+    box.append(noPhrasesNote(lang)); // typed text stays exactly as it is
+    return;
+  }
+  for (const p of items) {
     const chip = document.createElement("button");
     chip.type = "button";
     chip.className = "btn-tag";
@@ -40,7 +77,7 @@ function renderDesignPresets(swapText) {
     box.append(chip);
   }
   if (swapText && designPresetId) {
-    const p = presets[lang].find(x => x.id === designPresetId);
+    const p = items.find(x => x.id === designPresetId);
     if (p) $("design-sample").value = p.text;
   }
 }
@@ -210,27 +247,19 @@ registerScreen("design", {
       if (!chip) return;
       for (const c of $("design-presets").children) c.setAttribute("aria-pressed", String(c === chip));
       designPresetId = chip.dataset.id;
-      const lang = presets[$("design-lang").value] ? $("design-lang").value : "en";
-      const p = (presets[lang] || []).find(x => x.id === designPresetId);
+      const p = presets.find(x => x.id === designPresetId);
       if (p) {
         $("design-sample").value = p.text;
-        $("design-sample").lang = lang;
+        $("design-sample").lang = $("design-lang").value;
       }
     });
-    api
-      .get("/static/presets.json")
-      .then(data => {
-        presets = data;
-        renderDesignPresets(false); // no preset selected: the reference sample text stays
-      })
-      .catch(() => {
-        /* presets are a convenience: the sample box stays free-form without them */
-      });
     updateSaveState();
   },
   async show() {
     clearError("design");
-    await loadVoices().catch(() => {}); // duplicate-name validation must work on a deep link
+    await Promise.all([loadVoices().catch(() => {}), loadLanguages().catch(() => {})]);
+    fillLangs(); // a removed language falls back to Japanese or the default (SPEC §8)
+    await renderDesignPresets(false);
     updateSaveState();
   },
 });

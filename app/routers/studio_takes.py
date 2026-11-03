@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from typing import Any
 
@@ -31,6 +32,14 @@ from app.speech import require_warm
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["takes"])
+
+_SESSION_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
+
+
+def _session(request: Request) -> str | None:
+    """Per-page-load Studio id from ``X-Studio-Session`` (or ``?session=``); invalid → None."""
+    sid = request.headers.get("X-Studio-Session") or request.query_params.get("session", "")
+    return sid if _SESSION_RE.fullmatch(sid) else None
 
 
 def _language(store: Any, name: str, adhoc: bool) -> str:
@@ -57,7 +66,7 @@ async def speak(request: Request, payload: SpeechRequest, save: bool = True) -> 
     # SPEC §4: pre-ready requests are 503 and never reach the metrics window.
     require_warm(warmup)
     if payload.stream:
-        return await _speak_stream(request, payload, save)
+        return await _speak_stream(request, payload, save, _session(request))
     if not save:
         # Q-023 preview: honor response_format, write nothing, no X-Take-Id.
         result = await request.app.state.speech.synthesize(payload, record=warmup.warm)
@@ -96,12 +105,21 @@ async def speak(request: Request, payload: SpeechRequest, save: bool = True) -> 
         language=language,
         rtf=result.rtf,
         first_audio_ms=result.first_audio_ms,
-        extra={"format": payload.response_format},
+        extra=_take_extra(payload, _session(request)),
     )
     return TakeInfo(**take, **request.app.state.takes.take_urls(take["id"]))
 
 
-async def _speak_stream(request: Request, payload: SpeechRequest, save: bool = True) -> Response:
+def _take_extra(payload: SpeechRequest, sid: str | None) -> dict[str, Any]:
+    extra: dict[str, Any] = {"format": payload.response_format}
+    if sid:
+        extra["session"] = sid
+    return extra
+
+
+async def _speak_stream(
+    request: Request, payload: SpeechRequest, save: bool, sid: str | None
+) -> Response:
     state = request.app.state
     # Admission happens here: QueueFull/EngineNotReady still reach the error handler.
     streaming = await state.speech.stream(payload, record=state.warmup.warm)
@@ -156,6 +174,7 @@ async def _speak_stream(request: Request, payload: SpeechRequest, save: bool = T
             rtf=wall / duration if duration > 0 else None,
             first_audio_ms=first_audio_ms,
             take_id=take_id,
+            extra={"session": sid} if sid else None,
         )
 
     async def body() -> Any:
@@ -187,11 +206,18 @@ async def _speak_stream(request: Request, payload: SpeechRequest, save: bool = T
 
 @router.get("/takes")
 async def list_takes(request: Request, kind: str = "studio") -> dict[str, list[TakeInfo]]:
-    """Speak Takes list. ``kind=studio`` (default) hides design candidates; ``all`` shows both."""
+    """Speak Takes list. ``kind=studio`` (default) hides design candidates; ``all`` shows both.
+
+    With a valid ``X-Studio-Session`` (M2-T21) only that session's studio takes are listed;
+    headerless API clients see everything, and design takes are never session-bound.
+    """
     takes: Any = request.app.state.takes
+    sid = _session(request)
     items: list[TakeInfo] = []
     for take in await asyncio.to_thread(takes.list):
         if kind != "all" and take.get("kind", "studio") != kind:
+            continue
+        if sid and take.get("kind", "studio") != "design" and take.get("session") != sid:
             continue
         try:
             takes.audio_path(str(take.get("id", "")))  # skip entries whose WAV is gone
@@ -234,6 +260,8 @@ async def take_wave(request: Request, take_id: str) -> dict[str, list[float]]:
 async def save_as_voice(request: Request, take_id: str, payload: SaveAsVoice) -> VoiceSummary:
     takes: Any = request.app.state.takes
     take = await asyncio.to_thread(takes.get, take_id)
+    # SPEC §5a rule 4: a voice can only carry an enabled language.
+    language = request.app.state.languages.ensure_enabled(payload.language)
     samples, rate = await asyncio.to_thread(audio.read_audio_file, takes.audio_path(take_id))
     designed = take.get("kind") == "design"
     voice = await asyncio.to_thread(
@@ -242,7 +270,7 @@ async def save_as_voice(request: Request, take_id: str, payload: SaveAsVoice) ->
         samples,
         rate,
         ref_text=str(take.get("text", "")),
-        language=payload.language,
+        language=language,
         consent="own-generated-voice",
         source="designed" if designed else "uploaded",
         metadata=(

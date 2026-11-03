@@ -240,6 +240,13 @@ spikes remain host-run. CI has not run yet: the branch is local (47+ commits ahe
 
 - **2026-11-03 —** Release v0.2.0.
 
+- **2026-11-03 —** Streams now request the engine WAV, strip/parse the header, convert float32,
+  advertise the real rate and resample to the requested rate (fixes garbled streaming). Voice
+  design/style use VoxCPM2’s `(control instruction)text` syntax. Takes are session-scoped
+  (`X-Studio-Session`), tabs no longer reflow, take playback gets pause/progress/hover states, the
+  Voices editor is full-width with auto-transcribe, Download matches Save as voice, and the clone
+  button says “Transcribe with STT”.
+
 ## Next action
 
 1. `git push origin main` and watch the GitLab pipeline (`checks`, `javascript`, `test`, `e2e`,

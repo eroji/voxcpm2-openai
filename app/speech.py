@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 from app import audio as audio_utils
 from app.config import Settings
-from app.engine import ENGINE_SAMPLE_RATE, EngineClient, StreamHandle, SynthParams
+from app.engine import EngineClient, StreamHandle, SynthParams
 from app.errors import APIError, BadRequest, EngineError, EngineNotReady
 from app.models import SpeechRequest
 from app.store import VoiceStore
@@ -326,11 +326,15 @@ class SpeechService:
         )
 
     def _params(self, request: SpeechRequest, voice: ResolvedVoice, *, stream: bool) -> SynthParams:
+        text = request.input
+        if request.instructions and request.instructions.strip():
+            # VoxCPM2 controllable cloning/design syntax (SPEC §12 S1): (control)text.
+            text = f"({request.instructions.strip()}){text}"
         return SynthParams(
-            text=request.input,
+            text=text,
             ref_audio=voice.ref_audio,
             ref_text=voice.ref_text,
-            instructions=request.instructions,
+            instructions=None,
             # Native speed control is unverified (S4); applying ffmpeg atempo locally avoids
             # double-processing if the engine ever supports it.
             speed=None,
@@ -383,13 +387,14 @@ class SpeechService:
             self._params(request, voice, stream=True), record=record
         )
         fmt = request.response_format
+        source_rate = handle.sample_rate
         try:
-            if fmt == "pcm" and target_rate == ENGINE_SAMPLE_RATE:
+            if fmt == "pcm" and target_rate == source_rate:
                 source, cleanup = handle.chunks, handle.aclose
-            elif fmt == "wav" and target_rate == ENGINE_SAMPLE_RATE:
-                source, cleanup = self._wav_native(handle, ENGINE_SAMPLE_RATE), handle.aclose
+            elif fmt == "wav" and target_rate == source_rate:
+                source, cleanup = self._wav_native(handle, target_rate), handle.aclose
             else:
-                source, cleanup = await ffmpeg_stream(handle, ENGINE_SAMPLE_RATE, target_rate, fmt)
+                source, cleanup = await ffmpeg_stream(handle, source_rate, target_rate, fmt)
         except BaseException:
             # Admission succeeded but construction failed or was cancelled:
             # the slot must not depend on the generator ever starting.

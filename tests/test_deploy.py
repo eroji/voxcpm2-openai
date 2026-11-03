@@ -1,6 +1,7 @@
 """Static checks for the s6 service definitions and Containerfile (M1-T3, M1-T6, M1-T8)."""
 
 import hashlib
+import json
 import os
 import re
 from pathlib import Path
@@ -97,6 +98,34 @@ def test_containerfile_wires_app_config_and_s6():
     assert "/etc/s6-overlay/s6-rc.d" in cf
     assert "chmod +x" in cf
     assert "HF_HOME=" in cf
+
+
+# SPEC §5a: the supported set ships with the image; the app reads it at start.
+SUPPORTED_FILE = ROOT / "deploy" / "supported-languages.json"
+
+
+def test_containerfile_copies_supported_languages_with_a_build_check():
+    folded = _folded()
+    assert "COPY deploy/supported-languages.json /opt/app/deploy/supported-languages.json" in folded
+    # the file must parse and hold the whole VoxCPM2 set, or the build fails
+    check = [
+        ln for ln in folded.splitlines() if "supported-languages.json" in ln and "json.load" in ln
+    ]
+    assert check, "no build-time parse check for the supported-languages file"
+    assert "assert len(d['languages']) == 30" in check[0], check[0]
+    assert folded.index("COPY deploy/supported-languages.json") < folded.index(check[0])
+
+
+def test_supported_languages_file_has_30_unique_entries():
+    data = json.loads(SUPPORTED_FILE.read_text("utf-8"))
+    entries = data["languages"]
+    assert len(entries) == 30
+    codes = [item["code"] for item in entries]
+    assert len(set(codes)) == 30, "duplicate language codes"
+    for item in entries:
+        assert set(item) == {"code", "name", "native"}
+        assert all(item.values()), item
+    assert {"en", "ja", "ko", "zh"} <= set(codes), "SPEC §5a seed set must be supported"
 
 
 def test_voxcpm_stays_on_uv():

@@ -83,6 +83,7 @@ Everything under `DATA_DIR=/data`:
   takes/<id>.wav + <id>.json    Studio takes (48 kHz WAV + metadata)
   backups/                      timestamped zips of voices/ + voices.json before destructive changes
   settings.json                 defaults (cfg, steps, format, stream, take retention)
+  languages.json                enabled languages, default language, per-language test phrases (section 5a)
 ```
 
 ### Voice file format
@@ -102,7 +103,7 @@ Same layout as the Qwen3 shim's speaker files (no import from Qwen3; voices are 
 | `consent` | `uploaded-via-studio` / `own-generated-voice` | required; see section 10 |
 | `embedding_source` | `audio` | keep `audio`; vLLM-Omni rejects `direct` (Qwen3-only) for VoxCPM2 |
 | `mime_type`, `original_filename`, `file_size` | | from the uploaded clip (clone only) |
-| `language` | `en` / `ja` / `ko` / `zh` | chosen in Clone / Design |
+| `language` | ISO 639-1 code, e.g. `en` / `ja` / `ko` / `zh` | chosen in Clone / Design; must be an enabled language |
 | `source` | `uploaded` / `designed` | |
 | `design_prompt`, `design_seed` | | **new**, designed voices only |
 
@@ -116,6 +117,36 @@ audio = f.get_tensor("audio").numpy()      # float32 mono
 sr = int(meta["sample_rate"]); ref_text = meta["ref_text"]
 ```
 
+
+### 5a. Languages
+
+Languages are app-level labels, not an engine input: VoxCPM2 detects the language from the text and takes no language tag. A language controls the tag on each voice, the Voices filters, the choices in Clone and Design, and which test phrases Speak and Design offer. It never changes how a voice sounds, and any voice can speak any supported language.
+
+- **Supported set** (what the engine can do): loaded at start from `deploy/supported-languages.json` (30 entries for VoxCPM2; confirm `sv`, `tl`, `tr` against the model card). Swapping models means swapping this file.
+- **Enabled set** (what the Studio offers): `/data/languages.json`, seeded on first start with `en`, `ja`, `ko`, `zh` and `en` as default:
+
+```json
+{
+  "default": "en",
+  "enabled": ["en", "ja", "ko", "zh"],
+  "presets": {
+    "en": [{"id": "greeting", "label": "Greeting", "text": "..."}],
+    "ja": [ ... ]
+  }
+}
+```
+
+  Seed `presets` from `ui/presets.json`. A newly added language starts with an empty preset list.
+
+Rules, enforced server side (the UI mirrors them):
+
+1. Only supported languages can be enabled. `POST` with an unsupported code → 400 `unsupported_language`.
+2. The default language and the last remaining language can't be removed (409 `language_locked`); make another language default first.
+3. Removing a language that voices use requires a decision, sent with the request: `voices: "relabel"` with `to: "<enabled code>"`, or `voices: "delete"`. Without one → 409 `language_in_use` with the list of voice names. Relabel rewrites each voice file's `language` metadata; delete removes the voice files. Back up `voices/` and `languages.json` first, as for other destructive changes. Removal also drops that language's presets.
+4. Voices can't be created or relabelled with a language that isn't enabled (400 `language_not_enabled`).
+5. **Drift check at start:** if an enabled language is no longer in the supported set (model changed), keep it enabled but mark it `supported: false`. The Languages screen shows "Not supported by the engine" on that row, its voices show the same note in Voices, and Speak blocks them with "This voice's language isn't supported by the current engine" instead of sending a request that would produce garbage. The only fix offered is relabel or remove (rule 3).
+
+`/v1/audio/speech` ignores languages entirely: callers pass a voice name and text, as before.
 
 ## 6. OpenAI-compatible API (`/v1`)
 
@@ -171,6 +202,12 @@ All JSON unless noted. Protected by `STUDIO_AUTH` when set (section 10).
 | DELETE | `/api/takes/{id}` | delete a take |
 | POST | `/api/design/candidates` | `{description, sample_text, language, n (1–4)}` → n candidates with seed, audio URL and wave; see spike S2 |
 | POST | `/api/design/save` | `{candidate_id, name, language}` → voice with `source=designed`, `ref_text=sample_text`, `design_prompt`, `design_seed` |
+| GET | `/api/languages` | enabled languages: code, name, native name, default flag, voice count, preset count, `supported` |
+| GET | `/api/languages/supported` | the engine's supported set (for the Add picker; exclude enabled ones client side) |
+| POST | `/api/languages` | `{code}` → enable a supported language (empty presets) |
+| PATCH | `/api/languages/{code}` | `{default: true}` to make default |
+| DELETE | `/api/languages/{code}` | body `{voices: "relabel", to}` or `{voices: "delete"}` when voices use it (section 5a, rule 3) |
+| GET / PUT | `/api/languages/{code}/presets` | read / replace that language's test phrases (array of `{id, label, text}`, max 12) |
 | GET | `/api/engine` | status: ready, model, runtime versions, GPU name, VRAM used/total, KV cache, max concurrency, rolling RTF and first-audio latency, voice count, queue depth |
 | POST | `/api/engine/warmup` | re-run warm-up |
 | POST | `/api/engine/restart` | restart engine service, then warm-up |
@@ -178,12 +215,12 @@ All JSON unless noted. Protected by `STUDIO_AUTH` when set (section 10).
 
 ## 8. UI spec
 
-The visual reference is `ui/studio.html` with `ui/tokens.css`. Open it in a browser: all five screens work as a static prototype (hash routes `#speak`, `#voices`, `#clone`, `#design`, `#engine`). Match it closely. The original design canvas (claude.ai artifact "VoxCPM2 Voice Studio") is the source these files were derived from.
+The visual reference is `ui/studio.html` with `ui/tokens.css`. Open it in a browser: all six screens work as a static prototype (hash routes `#speak`, `#voices`, `#clone`, `#design`, `#languages`, `#engine`). Match it closely. The original design canvas (claude.ai artifact "VoxCPM2 Voice Studio") is the source these files were derived from.
 
 ### Global
 
 - Header: red square mark, "Voice Studio" title, meta block "Model / Engine". The Engine value is live from `/api/engine`: `Ready · RTX 3090`, `Warming up…`, or `Not ready · <reason>` (reason in text, never color alone).
-- Tabs: 01 Speak, 02 Voices, 03 Clone, 04 Design, 05 Engine. Hash-routed; the active tab has a 2 px accent underline directly under the label.
+- Tabs: 01 Speak, 02 Voices, 03 Clone, 04 Design, 05 Languages, 06 Engine. Hash-routed; the active tab has a 2 px accent underline directly under the label.
 - Layout: max width 1280 px, 32 px side padding. Two-column screens use a main column (`flex: 999 1 560px`) and side column (`flex: 1 1 380px`), stacking on narrow screens.
 - Form rows: 112 px label column on the left, control on the right, 1 px rule between rows, 2 px rule above the action row.
 
@@ -192,7 +229,7 @@ The visual reference is `ui/studio.html` with `ui/tokens.css`. Open it in a brow
 - Voice chips from `/api/voices`; single select; remembers the last voice (localStorage).
 - **Empty library guard:** with no voices, replace the chips with a notice ("No voices in the library yet", one line of explanation, Clone from audio / Design a voice buttons), show "Add a voice to enable Generate" beside the Generate button, set `aria-disabled="true"` on it (clicking moves focus to the notice's first button instead of submitting), and show "No takes yet" in the Takes column. Text, presets and parameters stay editable. Server side, `/api/speak` and `/v1/audio/speech` with an empty library return 400 `{"error": {"code": "no_voices", "message": "No voices exist yet. Create one in the Studio (Clone or Design) first."}}`. Reference: `ui/studio.html?empty`.
 - Text (13 px, same size as style control), style control (optional), parameters: CFG, diffusion steps, format. Hide CFG / steps if spike S4 shows they can't be passed through.
-- **Test phrases** row under Text: six preset chips (Greeting, Status update, Numbers & dates, Question, Long passage, Tongue twister) from `ui/presets.json`, in the **selected voice's language** (from the voice's `language`). Clicking a chip replaces the Text box content and marks the chip pressed. Switching to a voice in another language keeps the same preset and swaps in that language's version. Default selection: Question. Serve the presets from the app (static file or `GET /api/presets`).
+- **Test phrases** row under Text: six preset chips (Greeting, Status update, Numbers & dates, Question, Long passage, Tongue twister) from `ui/presets.json`, in the **selected voice's language** (from the voice's `language`). Clicking a chip replaces the Text box content and marks the chip pressed. Switching to a voice in another language keeps the same preset and swaps in that language's version. Default selection: Question. Presets come from `/api/languages/{code}/presets`. If the voice's language has none, show "No test phrases for <Language> yet" with a link to Languages instead of chips. Language choices everywhere (Voices filters, Clone, Design) list only enabled languages, default first.
 - Stream toggle and Generate button. Ctrl/Cmd+Enter in the text box generates.
 - While generating: the Generate button reads "Generating…" and is disabled; with streaming, playback starts when the first chunk arrives (Web Audio, s16le PCM at 48 kHz).
 - Takes column: newest first. Each take shows voice, stats (duration · RTF · first-audio ms), time, text clamped to 2 lines, play button, smooth waveform, Download and Save as voice. The newest take's waveform uses the accent; older ones are grey.
@@ -221,7 +258,18 @@ The visual reference is `ui/studio.html` with `ui/tokens.css`. Open it in a brow
 - Generate candidates → list with play, waveform, seed, Select. One selection at a time; the selected candidate gets a 3 px accent top rule and accent waveform.
 - Name field and Save as voice (disabled until a candidate is selected and the name is valid).
 
-### 05 Engine
+### 05 Languages
+
+- Table of enabled languages: name (+ native name), code, voice count, test phrases ("6 of 6" / "None yet"), a "Default" tag on the default, actions Edit phrases / Make default / Remove.
+- Remove is replaced by a short reason on the default ("Default · make another language default to remove") and on the last language.
+- **Remove with voices:** clicking Remove expands the row in place (2 px accent top rule): "3 voices use Japanese: ashley-ja, …. Choose what happens to them before Japanese is removed." Then a "Relabel them as" select (enabled languages, default first), **Relabel and remove** (primary), **Delete the voices too** (outlined in accent), Cancel, and a note that relabelling doesn't change how voices sound.
+- **Remove without voices:** the row expands to "Remove Korean? No voices use it. Its test phrases are deleted too." with Remove / Cancel.
+- After removal, any screen state pointing at that language falls back (Voices filter to All, Design language to the default, Speak's selected voice to the first remaining voice if it was deleted).
+- Side column: **Add a language** select listing supported languages not yet enabled (name · native name) plus Add; a note that the list comes from the backend; and "What a language controls" (four short points, the last saying it doesn't change how a voice sounds).
+- **Edit phrases** opens an inline editor for that language's presets: rows of label + text, add / remove / reorder, Save. Empty labels or text can't be saved.
+- Unsupported rows (rule 5) show "Not supported by the engine" in the Test phrases column's place, in plain text.
+
+### 06 Engine
 
 - Stat grid from `/api/engine`, refreshed every 5 s while visible, fixed at 4 columns (2 below 900 px, 1 below 520 px). Each tile has a short one-line value and the detail in the note: Model `VoxCPM2` (note `openbmb/VoxCPM2 · 2B · 48 kHz`), GPU `RTX 3090` (strip the `NVIDIA GeForce ` prefix; full name in `title`), GPU memory used (whole card, note "of 24 GB, all processes on the card"), KV cache, Warm RTF, First audio, Voices, Runtime `vLLM-Omni` (note `0.30.0 · vLLM 0.30.0`). Values never wrap: `white-space: nowrap` with ellipsis.
 - Run warm-up, Restart engine (confirm in place).
@@ -295,7 +343,8 @@ Each spike is a short script against a running engine (the test container `voxcp
 SPEC.md                      this file
 ui/tokens.css                design tokens
 ui/studio.html               static, clickable reference of all five screens + wavePath() (add ?empty for the empty library)
-ui/presets.json              test phrases for Speak and Design, en/ja/ko/zh
+ui/presets.json              seed test phrases for Speak and Design, en/ja/ko/zh (copied into /data/languages.json on first start)
+deploy/supported-languages.json  the engine's 30 supported languages (code, name, native name)
 ui/icons/                    app icon (red square, five bars, off-white peak): favicon.svg, favicon.ico (16/32/48),
                              favicon-16.png, favicon-32.png, apple-touch-icon.png (180), icon-192.png, icon-512.png;
                              concepts/ holds the other explored directions (reference only)

@@ -78,6 +78,10 @@ Volumes and GPU (from `deploy/compose.yaml`):
 `STT_URL` is confirmed as `http://vllm.dotslash.io:8890/v1` (whisper-stt, human-verified
 2026-11-02) — that is the value in `deploy/compose.yaml`.
 
+Languages are app-level: `DATA_DIR/languages.json` holds enabled/default/presets, while
+`/opt/app/deploy/supported-languages.json` (baked into the image) is the engine set. Back it up with
+`data/`; the Languages screen edits it through the API.
+
 The first browser load shows the startup page until `/ready` 200; `/api/engine/startup` reports the
 four steps and the merged engine/app log (`/data/logs/engine.log`). If startup fails, the page
 shows the mapped cause and a Restart button; s6 retries after 30/60/120 s, then waits for a manual

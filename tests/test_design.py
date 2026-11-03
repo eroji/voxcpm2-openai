@@ -6,10 +6,8 @@ import asyncio
 
 import numpy as np
 import pytest
-from app import design as design_module
 from app.config import Settings
 from app.engine import EngineClient
-from app.errors import EngineError
 from app.models import SpeechRequest
 from app.speech import SpeechService
 from app.store import TakeStore
@@ -54,7 +52,8 @@ def test_three_candidates(client: TestClient, settings: Settings, fake_engine) -
         assert take["design_prompt"] == DESCRIPTION
     last = fake_engine.state["last"]
     assert "ref_audio" not in last and "ref_text" not in last
-    assert last["instructions"] == DESCRIPTION
+    assert last["input"].startswith(f"({DESCRIPTION})")
+    assert "instructions" not in last
 
 
 def test_candidate_count_bounds(client: TestClient) -> None:
@@ -112,25 +111,3 @@ def test_save_duplicate_name_conflicts(client: TestClient, store, make_voice) ->
     make_voice("designed-one", "en")
     item = _candidates(client, n=1).json()["candidates"][0]
     assert _save(client, item["id"], "designed-one").status_code == 409
-
-
-def test_retry_once_without_instructions(
-    client: TestClient, settings: Settings, fake_engine, caplog, monkeypatch
-) -> None:
-    engine = client.app.state.engine
-    real_synth = engine.synth
-
-    async def synth(params, **kwargs):
-        if params.instructions is not None:
-            raise EngineError("engine does not support instructions")
-        return await real_synth(params)
-
-    monkeypatch.setattr(design_module, "_instructions_retry_logged", False)
-    monkeypatch.setattr(engine, "synth", synth)
-    with caplog.at_level("WARNING", logger="app.design"):
-        resp = _candidates(client, n=2)
-    assert resp.status_code == 200
-    assert len(resp.json()["candidates"]) == 2
-    assert "instructions" not in fake_engine.state["last"]
-    warnings = [r for r in caplog.records if "instructions" in r.getMessage()]
-    assert len(warnings) == 1  # retried twice, logged once

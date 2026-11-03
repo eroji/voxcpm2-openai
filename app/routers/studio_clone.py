@@ -67,6 +67,8 @@ async def clone(
         raise BadRequest(
             "Consent is required to clone a voice.", param="consent", code="consent_required"
         )
+    # SPEC §5a rule 4: a voice can only carry an enabled language.
+    language = request.app.state.languages.ensure_enabled(language)
     if not (file.filename or "").strip():
         raise BadRequest("An audio file is required.", param="file", code="file_required")
 

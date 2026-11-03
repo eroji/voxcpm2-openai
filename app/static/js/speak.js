@@ -2,11 +2,17 @@
 import {
   api,
   state,
+  sessionId,
   loadVoices,
+  loadLanguages,
+  languageEntry,
+  noPhrasesNote,
   registerScreen,
   selectVoice,
   renderWave,
+  setWaveProgress,
   play,
+  stopAudio,
   showError,
   clearError,
   formatLang,
@@ -18,26 +24,37 @@ const $ = id => document.getElementById(id);
 const SVG_NS = "http://www.w3.org/2000/svg";
 let takes = [];
 
-/* Test-phrase presets (SPEC §8): six chips, default "question", in the selected voice's
- * language; switching voice keeps the preset id and swaps the language's text. */
-let presets = null;
+/* Test-phrase presets (SPEC §5a/§8): chips from /api/languages/{code}/presets in the selected
+ * voice's language; switching voice keeps the preset id and swaps in that language's text. */
+let presets = [];
 let presetId = "question";
-let presetLang = null;
+let presetSeq = 0; // invalidates an in-flight presets fetch when the voice changes
 
 function voiceLang() {
-  const lang = String(state.voices.find(v => v.key === state.selectedVoice)?.language || "en").toLowerCase();
-  return presets && presets[lang] ? lang : "en";
+  const voice = state.voices.find(v => v.key === state.selectedVoice);
+  const code = String(voice?.language || "").toLowerCase();
+  if (code) return code;
+  return (state.languages.find(l => l.default) || state.languages[0] || {}).code || "en";
 }
 
-function syncPresets() {
-  if (!presets) return;
+async function syncPresets(swapText) {
   const lang = voiceLang();
-  if (lang === presetLang) return;
-  presetLang = lang;
+  const seq = ++presetSeq;
   $("speak-lang-name").textContent = formatLang(lang);
-  const items = presets[lang] || presets.en;
+  let items = [];
+  try {
+    items = (await api.get(`/api/languages/${encodeURIComponent(lang)}/presets`)).presets || [];
+  } catch {
+    items = []; // no presets for this language: the hint below says so
+  }
+  if (seq !== presetSeq) return; // a newer voice selection already won
+  presets = items;
   const box = $("speak-presets");
   box.replaceChildren();
+  if (!items.length) {
+    box.append(noPhrasesNote(lang)); // no chips, and the typed text stays untouched
+    return;
+  }
   for (const p of items) {
     const chip = document.createElement("button");
     chip.type = "button";
@@ -48,7 +65,7 @@ function syncPresets() {
     box.append(chip);
   }
   const sel = items.find(p => p.id === presetId);
-  if (sel) {
+  if (sel && swapText) {
     $("speak-text").value = sel.text;
     $("speak-text").lang = lang;
   }
@@ -94,6 +111,8 @@ function takeStats(t) {
 }
 
 function renderTakes() {
+  stopAudio(); // rows are replaced: a detached row must not keep playing unseen
+  firstUi = null;
   const list = $("takes-list");
   list.textContent = ""; // empty takes: no fake rows
   takes.forEach((t, index) => list.append(takeRow(t, index)));
@@ -102,6 +121,37 @@ function renderTakes() {
 
 /* Q-024: play/download a take in the container it was requested with; disk stays WAV. */
 const takeUrl = take => `${take.audio_url}?format=${take.format || "wav"}`;
+
+const PLAY_D = "M2 1l9 5-9 5z";
+const PAUSE_D = "M2 1h3v10H2zM7 1h3v10H7z";
+let raf = 0; // one playhead animation at a time (only one take can play)
+let firstUi = null; // newest row, so the auto-play after Generate animates too
+
+/* core.play() state → this row: pause icon, .is-playing, waveform progress. */
+function syncPlayer(ui, phase, el) {
+  const playing = phase === "play";
+  ui.row.classList.toggle("is-playing", playing);
+  ui.icon.setAttribute("d", playing ? PAUSE_D : PLAY_D);
+  ui.btn.setAttribute("aria-label", playing ? "Pause take" : "Play take");
+  ui.btn.title = playing ? "Pause" : "Play";
+  const paint = () => setWaveProgress(ui.wave, el && el.duration ? el.currentTime / el.duration : 0);
+  if (playing) {
+    const tick = () => {
+      paint();
+      raf = requestAnimationFrame(tick);
+    };
+    cancelAnimationFrame(raf);
+    tick(); // smooth playhead; "time" below covers a tab where rAF is throttled
+  } else if (phase === "stop") {
+    cancelAnimationFrame(raf);
+    raf = 0;
+    setWaveProgress(ui.wave, 0);
+  } else if (phase === "pause") {
+    cancelAnimationFrame(raf);
+    raf = 0;
+    paint(); // the playhead stays where the clip stopped
+  } else paint(); // "time"
+}
 
 function takeRow(take, index) {
   const row = document.createElement("article");
@@ -130,25 +180,43 @@ function takeRow(take, index) {
   const playBtn = document.createElement("button");
   playBtn.className = "btn-play";
   playBtn.setAttribute("aria-label", "Play take");
+  playBtn.title = "Play";
   const icon = document.createElementNS(SVG_NS, "svg");
   icon.setAttribute("width", "8");
   icon.setAttribute("height", "8");
   icon.setAttribute("viewBox", "0 0 12 12");
   icon.setAttribute("aria-hidden", "true");
   const tri = document.createElementNS(SVG_NS, "path");
-  tri.setAttribute("d", "M2 1l9 5-9 5z");
+  tri.setAttribute("d", PLAY_D);
   tri.setAttribute("fill", "currentColor");
   icon.append(tri);
   playBtn.append(icon);
-  playBtn.addEventListener("click", () => play(takeUrl(take)));
 
   const wave = document.createElementNS(SVG_NS, "svg");
   wave.setAttribute("class", "vs-wave");
   wave.setAttribute("viewBox", "0 0 300 24");
   wave.setAttribute("preserveAspectRatio", "none");
   wave.setAttribute("aria-hidden", "true");
-  wave.append(document.createElementNS(SVG_NS, "path"));
+  // grey base + accent overlay clipped to the playhead
+  const clipId = `wc-${take.id}`;
+  const defs = document.createElementNS(SVG_NS, "defs");
+  const clipPath = document.createElementNS(SVG_NS, "clipPath");
+  clipPath.setAttribute("id", clipId);
+  const clipRect = document.createElementNS(SVG_NS, "rect");
+  clipRect.setAttribute("width", "0");
+  clipRect.setAttribute("height", "24");
+  clipPath.append(clipRect);
+  defs.append(clipPath);
+  const base = document.createElementNS(SVG_NS, "path");
+  base.setAttribute("class", "base");
+  const accent = document.createElementNS(SVG_NS, "path");
+  accent.setAttribute("class", "accent");
+  accent.setAttribute("clip-path", `url(#${clipId})`);
+  wave.append(defs, base, accent);
   if (index === 0) wave.classList.add("is-current");
+  const ui = { row, btn: playBtn, icon: tri, wave };
+  if (index === 0) firstUi = ui;
+  playBtn.addEventListener("click", () => play(takeUrl(take), (phase, el) => syncPlayer(ui, phase, el)));
   api
     .get(take.wave_url)
     .then(w => renderWave(wave, w.amps, index === 0))
@@ -194,10 +262,12 @@ async function errorFrom(res) {
   return `HTTP ${res.status}`;
 }
 
-/* s16le mono 48 kHz chunks → gapless AudioContext playback, starting on the first chunk.
+/* s16le mono chunks → gapless AudioContext playback, starting on the first chunk.
+ * The rate comes from X-Sample-Rate (M1-T20), never hard-coded.
  * Resolves when the response stream ends — scheduled audio keeps playing after that. */
 async function playPcmStream(res) {
-  const ctx = new AudioContext({ sampleRate: 48000 });
+  const rate = Number(res.headers.get("X-Sample-Rate")) || 48000;
+  const ctx = new AudioContext({ sampleRate: rate });
   const reader = res.body.getReader();
   let when = ctx.currentTime;
   try {
@@ -218,7 +288,7 @@ async function playPcmStream(res) {
       const samples = new Float32Array(usable / 2);
       const view = new DataView(bytes.buffer, bytes.byteOffset, usable);
       for (let i = 0; i < samples.length; i++) samples[i] = view.getInt16(i * 2, true) / 32768;
-      const buffer = ctx.createBuffer(1, samples.length, 48000);
+      const buffer = ctx.createBuffer(1, samples.length, rate);
       buffer.copyToChannel(samples, 0);
       const src = ctx.createBufferSource();
       src.buffer = buffer;
@@ -239,7 +309,7 @@ async function playWhole(res) {
   const take = await res.json(); // contract §2: non-stream /api/speak → TakeInfo (Q-024)
   takes.unshift(take);
   renderTakes();
-  play(takeUrl(take));
+  play(takeUrl(take), (phase, el) => firstUi && syncPlayer(firstUi, phase, el));
 }
 
 /* Streams are PCM at 48 kHz, so Format only applies when streaming is off (Q-024). */
@@ -255,6 +325,12 @@ async function generate() {
   if (button.getAttribute("aria-disabled") === "true") {
     // empty library: never call the API, move focus to the notice's first button (SPEC §8)
     $("speak-novoice").querySelector("button").focus();
+    return;
+  }
+  const entry = languageEntry(state.voices.find(v => v.key === state.selectedVoice)?.language);
+  if (entry && entry.supported === false) {
+    // SPEC §5a rule 5: the engine can't do this language — never send garbage
+    showError("speak", "This voice's language isn't supported by the current engine");
     return;
   }
   clearError("speak");
@@ -275,7 +351,7 @@ async function generate() {
   try {
     const res = await fetch("/api/speak", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "X-Studio-Session": sessionId },
       body: JSON.stringify(body),
     });
     if (!res.ok) {
@@ -298,7 +374,7 @@ async function generate() {
 
 async function init() {
   syncFmt(); // Format state must be right even if the voices fetch below fails
-  await loadVoices();
+  await Promise.all([loadVoices(), loadLanguages().catch(() => {})]);
   let saved = null;
   try {
     saved = localStorage.getItem("vs.lastVoice");
@@ -314,7 +390,7 @@ async function init() {
     if (!chip) return;
     for (const c of $("voice-chips").children) c.setAttribute("aria-pressed", String(c === chip));
     selectVoice(chip.dataset.key);
-    syncPresets(); // keep the preset id, swap in the new voice's language
+    syncPresets(true); // keep the preset id, swap in the new voice's language
   });
 
   $("speak-presets").addEventListener("click", e => {
@@ -322,21 +398,13 @@ async function init() {
     if (!chip) return;
     for (const c of $("speak-presets").children) c.setAttribute("aria-pressed", String(c === chip));
     presetId = chip.dataset.id;
-    const p = (presets[presetLang] || presets.en).find(x => x.id === presetId);
+    const p = presets.find(x => x.id === presetId);
     if (p) {
       $("speak-text").value = p.text;
-      $("speak-text").lang = presetLang;
+      $("speak-text").lang = voiceLang();
     }
   });
-  api
-    .get("/static/presets.json")
-    .then(data => {
-      presets = data;
-      syncPresets();
-    })
-    .catch(() => {
-      /* presets are a convenience: the text box stays free-form without them */
-    });
+  syncPresets(true); // default selection: Question
 
   $("generate").addEventListener("click", generate);
   $("speak-text").addEventListener("keydown", e => {
@@ -362,13 +430,14 @@ async function init() {
 }
 
 async function show() {
-  await loadVoices();
+  await Promise.all([loadVoices(), loadLanguages().catch(() => {})]);
   // a deleted/renamed voice must never be posted: revalidate against the live keys
   if (!state.voices.some(v => v.key === state.selectedVoice)) {
     state.selectedVoice = state.voices[0] ? state.voices[0].key : null;
   }
   renderChips();
-  syncPresets(); // a voice/language change while away must re-label the presets
+  // re-render chips after a language/preset change; fill an empty box, never clobber typed text
+  await syncPresets(!$("speak-text").value.trim());
   await loadTakes();
 }
 

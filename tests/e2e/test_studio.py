@@ -6,6 +6,8 @@ read-only or cleaned up by the test that wrote it, so the suite is order-indepen
 
 from __future__ import annotations
 
+import contextlib
+import json
 import re
 import time
 from pathlib import Path
@@ -16,10 +18,11 @@ import pytest
 import soundfile as sf
 from playwright.sync_api import expect  # missing Playwright = collection error, never a skip
 
-from conftest import _serve, _settings
+from conftest import _seed, _serve, _settings
 
 RESULTS_DIR = Path(__file__).resolve().parents[2] / "test-results"
-SCREENS = ["speak", "voices", "clone", "design", "engine"]
+SCREENS = ["speak", "voices", "clone", "design", "languages", "engine"]
+_serve_app = contextlib.contextmanager(_serve)  # conftest's _serve is a bare generator
 
 
 @pytest.fixture(scope="session")
@@ -29,15 +32,23 @@ def live_app_empty(fake_engine, tmp_path_factory: pytest.TempPathFactory):
     yield from _serve(_settings(data_dir, fake_engine))
 
 
+@pytest.fixture
+def live_langs(fake_engine, tmp_path):
+    """Isolated app for the Languages screen: its mutations never touch the session data."""
+    settings = _settings(tmp_path / "langs", fake_engine)
+    _seed(settings)
+    yield from _serve(settings)
+
+
 def test_shell_and_engine_status(page, live_app, open_studio):
     open_studio(page)
     assert page.title() == "Voice Studio"
-    expect(page.locator(".vs-tab")).to_have_count(5)
+    expect(page.locator(".vs-tab")).to_have_count(6)
     expect(page.locator('.vs-tab[data-tab="speak"]')).to_have_attribute("aria-current", "page")
     expect(page.locator("#engine-status")).to_have_text(re.compile("^Ready"), timeout=10000)
 
 
-@pytest.mark.parametrize("screen", ["voices", "clone", "design", "engine", "speak"])
+@pytest.mark.parametrize("screen", ["voices", "clone", "design", "languages", "engine", "speak"])
 def test_hash_routing(page, live_app, open_studio, screen):
     open_studio(page)
     page.click(f'.vs-tab[data-tab="{screen}"]')
@@ -63,7 +74,7 @@ def test_speak_generate(page, live_app, open_studio):
     newest = page.locator("#takes-list .vs-take").first
     expect(newest.locator(".who b")).to_have_text("ashley-en")
     expect(newest.locator("svg.vs-wave")).to_have_class(re.compile("is-current"))
-    expect(newest.locator("svg.vs-wave path")).to_have_attribute("d", re.compile("M0.+Z"))
+    expect(newest.locator("svg.vs-wave path.base")).to_have_attribute("d", re.compile("M0.+Z"))
 
     # M3-T11: Format is real — a non-stream generate records it and the row links use it
     expect(page.locator("#fmt")).to_be_enabled()  # streaming was turned off above
@@ -129,7 +140,7 @@ def test_voices_screen(page, live_app, open_studio):
     en_row.get_by_role("button", name="Edit").click()
     expect(en_row.locator('input[data-field="name"]')).to_be_visible()
     expect(en_row.locator('select[data-field="language"]')).to_be_visible()
-    expect(en_row.locator('input[data-field="ref_text"]')).to_be_visible()
+    expect(en_row.locator('textarea[data-field="ref_text"]')).to_be_visible()
     en_row.get_by_role("button", name="Cancel").click()
     expect(en_row.locator("td.name")).to_have_text("ashley-en")
 
@@ -377,11 +388,324 @@ def test_keyboard_nav(page, live_app, open_studio):
     expect(page.locator("#screen-voices")).to_be_visible()
 
 
+# --- M3-T16: Languages screen and language-aware Studio --------------------------
+
+
+def test_languages_table(page, live_langs, open_studio):
+    """SPEC §8: enabled languages default-first, with counts, presets and the Default tag."""
+    open_studio(page, "languages", live_langs)
+    rows = page.locator("#lang-rows .vs-lang-row")
+    expect(rows).to_have_count(4)
+    expect(page.locator("#lang-count")).to_have_text("4 of 30 enabled")
+    expect(rows.first).to_have_attribute("data-code", "en")  # the default language is first
+    english = page.locator('.vs-lang-row[data-code="en"]')
+    expect(english.locator(".tag")).to_have_text("Default")
+    expect(english).to_contain_text("6 of 6")
+    expect(english).to_contain_text("1 voice")
+    expect(english.locator('button[data-act="remove"]')).to_have_count(0)
+    expect(english.locator(".lock")).to_contain_text(
+        "Default · make another language default to remove"
+    )
+    japanese = page.locator('.vs-lang-row[data-code="ja"]')
+    expect(japanese).to_contain_text("1 voice")
+    expect(japanese.locator(".code")).to_have_text("JA")
+    expect(japanese.get_by_role("button", name="Make default")).to_be_visible()
+
+
+def test_languages_add_and_make_default(page, live_langs, open_studio):
+    open_studio(page, "languages", live_langs)
+    expect(page.locator("#lang-rows .vs-lang-row")).to_have_count(4)  # show() has rendered
+    page.select_option("#add-lang", "de")
+    page.click("#add-lang-btn")
+    rows = page.locator("#lang-rows .vs-lang-row")
+    expect(rows).to_have_count(5)
+    expect(page.locator("#lang-count")).to_have_text("5 of 30 enabled")
+    german = page.locator('.vs-lang-row[data-code="de"]')
+    expect(german).to_contain_text("None yet")
+    # a new language appears everywhere a language is chosen
+    page.click('.vs-tab[data-tab="clone"]')
+    expect(page.locator("#clone-lang option")).to_have_count(5)
+    page.click('.vs-tab[data-tab="languages"]')
+    german.get_by_role("button", name="Make default").click()
+    expect(german.locator(".tag")).to_have_text("Default")
+    expect(page.locator('.vs-lang-row[data-code="en"] .tag')).to_have_count(0)
+    expect(rows.first).to_have_attribute("data-code", "de")
+    expect(page.locator('.vs-lang-row[data-code="de"] button[data-act="remove"]')).to_have_count(0)
+    expect(page.locator('.vs-lang-row[data-code="en"] button[data-act="remove"]')).to_be_visible()
+
+
+def test_languages_remove_with_voices_relabels(page, live_langs, open_studio):
+    """SPEC §5a rule 3: the row expands with the voice decision before anything is removed."""
+    open_studio(page, "languages", live_langs)
+    expect(page.locator("#lang-rows .vs-lang-row")).to_have_count(4)  # show() has rendered
+    japanese = page.locator('.vs-lang-row[data-code="ja"]')
+    japanese.get_by_role("button", name="Remove").click()
+    panel = japanese.locator(".vs-lang-remove")
+    expect(japanese).to_have_class(re.compile("removing"))
+    expect(panel).to_contain_text("1 voice use Japanese: ashley-ja")
+    expect(panel).to_contain_text("Choose what happens to them before Japanese is removed.")
+    expect(panel.locator("select option")).to_have_text(
+        ["English", "Korean", "Chinese"]
+    )  # enabled others, default first
+    panel.get_by_role("button", name="Cancel").click()
+    expect(page.locator("#lang-rows .vs-lang-row")).to_have_count(4)  # nothing happened
+
+    japanese.get_by_role("button", name="Remove").click()
+    panel = japanese.locator(".vs-lang-remove")
+    panel.locator("select").select_option("en")
+    panel.get_by_role("button", name="Relabel and remove").click()
+    expect(page.locator('.vs-lang-row[data-code="ja"]')).to_have_count(0)
+    expect(page.locator("#lang-rows .vs-lang-row")).to_have_count(3)
+    saved = httpx.get(f"{live_langs}/api/voices").json()["voices"]
+    voices = {v["key"]: v["language"] for v in saved}
+    assert voices == {"ashley-en": "en", "ashley-ja": "en", "ashley-ko": "ko"}
+    # the removed language is gone from the filters, and the relabelled voice reads as English
+    page.click('.vs-tab[data-tab="voices"]')
+    expect(page.locator('#lang-filters [data-lang="ja"]')).to_have_count(0)
+    expect(page.locator('#voice-rows tr[data-key="ashley-ja"] td').nth(1)).to_have_text("English")
+
+
+def test_languages_remove_without_voices(page, live_langs, open_studio):
+    open_studio(page, "languages", live_langs)
+    expect(page.locator("#lang-rows .vs-lang-row")).to_have_count(4)  # show() has rendered
+    chinese = page.locator('.vs-lang-row[data-code="zh"]')
+    chinese.get_by_role("button", name="Remove").click()
+    panel = chinese.locator(".vs-lang-remove")
+    expect(panel).to_contain_text(
+        "Remove Chinese? No voices use it. Its test phrases are deleted too."
+    )
+    panel.get_by_role("button", name="Remove").click()
+    expect(page.locator("#lang-rows .vs-lang-row")).to_have_count(3)
+    codes = [item["code"] for item in httpx.get(f"{live_langs}/api/languages").json()["languages"]]
+    assert codes == ["en", "ja", "ko"]
+
+
+def test_languages_presets_editor(page, live_langs, open_studio):
+    open_studio(page, "languages", live_langs)
+    expect(page.locator("#lang-rows .vs-lang-row")).to_have_count(4)  # show() has rendered
+    english = page.locator('.vs-lang-row[data-code="en"]')
+    english.get_by_role("button", name="Edit phrases").click()
+    editor = english.locator(".vs-lang-remove")
+    expect(editor.locator(".phrase")).to_have_count(6)
+    editor.locator('input[data-field="label"]').first.fill("")
+    editor.get_by_role("button", name="Save").click()
+    expect(page.locator("#languages-error")).to_contain_text("Every test phrase needs a label")
+    editor.locator('input[data-field="label"]').first.fill("Hello")
+    editor.locator('input[data-field="text"]').first.fill("E2E edited phrase.")
+    editor.get_by_role("button", name="Save").click()
+    expect(page.locator("#languages-error")).to_be_hidden()
+    saved = httpx.get(f"{live_langs}/api/languages/en/presets").json()["presets"]
+    assert saved[0]["label"] == "Hello" and saved[0]["text"] == "E2E edited phrase."
+    expect(english).to_contain_text("6 of 6")
+    # Speak offers the edited phrase in the first chip
+    page.click('.vs-tab[data-tab="speak"]')
+    expect(page.locator("#speak-presets .btn-tag").first).to_have_text("Hello")
+
+
+def test_clone_and_design_language_selects(page, live_langs, open_studio):
+    """Enabled languages only, default first; Design prefers Japanese (SPEC §5a)."""
+
+    def option_values(selector: str, expected: list[str]) -> None:
+        expect(page.locator(selector)).to_have_count(len(expected))  # show() is async
+        got = page.eval_on_selector_all(selector, "els => els.map(e => e.value)")
+        assert got == expected
+
+    open_studio(page, "clone", live_langs)
+    option_values("#clone-lang option", ["en", "ja", "ko", "zh"])
+    assert page.locator("#clone-lang").input_value() == "en"
+    page.click('.vs-tab[data-tab="design"]')
+    option_values("#design-lang option", ["en", "ja", "ko", "zh"])
+    assert page.locator("#design-lang").input_value() == "ja"
+
+    httpx.post(f"{live_langs}/api/languages", json={"code": "de"})
+    page.click('.vs-tab[data-tab="languages"]')  # re-reads the enabled set for every screen
+    page.click('.vs-tab[data-tab="design"]')
+    option_values("#design-lang option", ["en", "ja", "ko", "zh", "de"])
+    page.click('.vs-tab[data-tab="clone"]')
+    option_values("#clone-lang option", ["en", "ja", "ko", "zh", "de"])
+
+
+def test_design_empty_presets_hint(page, live_langs, open_studio):
+    """A language with no phrases shows the hint instead of chips and never rewrites the text."""
+    httpx.post(f"{live_langs}/api/languages", json={"code": "de"})
+    open_studio(page, "design", live_langs)
+    expect(page.locator("#design-lang option")).to_have_count(5)  # show() has filled the select
+    page.select_option("#design-lang", "de")
+    expect(page.locator("#design-presets .btn-tag")).to_have_count(0)
+    expect(page.locator("#design-presets")).to_contain_text("No test phrases for German yet")
+    expect(page.locator("#design-presets a")).to_have_attribute("href", "#languages")
+    page.fill("#design-sample", "Typed line stays put.")
+    page.select_option("#design-lang", "en")
+    expect(page.locator("#design-presets .btn-tag")).to_have_count(6)
+    expect(page.locator("#design-sample")).to_have_value("Typed line stays put.")
+
+
+def test_speak_presets_and_no_phrases_link(page, live_langs, open_studio):
+    """Speak follows the voice language; a language with none links to Languages (SPEC §5a)."""
+    open_studio(page, "speak", live_langs)
+    expect(page.locator("#voice-chips .vs-chip")).to_have_count(3)  # show() has rendered
+    page.click('#voice-chips .vs-chip[data-key="ashley-ja"]')
+    expect(page.locator("#speak-lang-name")).to_have_text("Japanese")
+    expect(page.locator('#speak-presets [data-id="question"]')).to_have_attribute(
+        "aria-pressed", "true"
+    )
+    expect(page.locator("#speak-text")).to_have_value(re.compile("[぀-ゟ゠-ヿ]"))
+
+    httpx.post(f"{live_langs}/api/languages", json={"code": "de"})
+    relabel = httpx.patch(f"{live_langs}/api/voices/ashley-ko", json={"language": "de"})
+    assert relabel.status_code == 200
+    page.click('.vs-tab[data-tab="languages"]')  # refresh the cached language lists
+    page.click('.vs-tab[data-tab="speak"]')
+    expect(page.locator('#voice-chips .vs-chip[data-key="ashley-ko"] .lang')).to_have_text("DE")
+    page.click('#voice-chips .vs-chip[data-key="ashley-ko"]')
+    expect(page.locator("#speak-presets .btn-tag")).to_have_count(0)
+    expect(page.locator("#speak-presets")).to_contain_text("No test phrases for German yet")
+    page.click("#speak-presets a")
+    expect(page.locator("#screen-languages")).to_be_visible()
+
+
+def test_unsupported_language_blocks_speak(fake_engine, tmp_path, page, open_studio):
+    """SPEC §5a rule 5: drift marks the row, the Voices cell and blocks Generate without sending."""
+    supported = tmp_path / "supported.json"
+    supported.write_text(
+        json.dumps(
+            {
+                "languages": [
+                    {"code": "en", "name": "English", "native": "English"},
+                    {"code": "ja", "name": "Japanese", "native": "日本語"},
+                    {"code": "zh", "name": "Chinese", "native": "中文"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    settings = _settings(tmp_path / "drift", fake_engine, supported_languages_file=supported)
+    _seed(settings)  # ashley-ko keeps a language the engine no longer offers
+    with _serve_app(settings) as base:
+        open_studio(page, "languages", base)
+        korean = page.locator('.vs-lang-row[data-code="ko"]')
+        expect(korean).to_contain_text("Not supported by the engine")
+        expect(korean).to_have_text(re.compile("KO"))
+
+        page.click('.vs-tab[data-tab="voices"]')
+        expect(page.locator('#voice-rows tr[data-key="ashley-ko"] td').nth(1)).to_have_text(
+            "Not supported by the engine"
+        )
+
+        page.click('.vs-tab[data-tab="speak"]')
+        expect(page.locator("#voice-chips .vs-chip")).to_have_count(3)  # show() has rendered
+        page.click('#voice-chips .vs-chip[data-key="ashley-ko"]')
+        sent: list[str] = []
+        page.on("request", lambda r: sent.append(r.url))
+        page.click("#generate")
+        expect(page.locator("#speak-error")).to_contain_text(
+            "This voice's language isn't supported by the current engine"
+        )
+        assert not any("/api/speak" in url for url in sent)
+
+
+# --- M3-T17: take player, waveform progress, voice editor, clone copy, session --------------
+
+
+def _new_take(page, live_app, open_studio) -> None:
+    """Stream-generate one take (the default) so the row appears without core auto-play."""
+    open_studio(page)
+    page.fill("#speak-text", "Take player check line.")
+    page.click("#generate")
+    expect(page.locator("#generate")).to_have_text("Generate", timeout=30000)
+    expect(page.locator("#takes-list .vs-take")).to_have_count(1)
+
+
+def test_take_play_pause_and_waveform_progress(page, live_app, open_studio):
+    _new_take(page, live_app, open_studio)
+    row = page.locator("#takes-list .vs-take")
+    button = row.locator("button.btn-play")
+    expect(button).to_have_attribute("aria-label", "Play take")
+    button.click()
+    expect(row).to_have_class(re.compile("is-playing"))
+    expect(button).to_have_attribute("aria-label", "Pause take")
+    expect(button).to_have_attribute("title", "Pause")
+    accent = row.locator("svg.vs-wave path.accent")
+    expect(accent).to_have_attribute("clip-path", re.compile(r"url\(#wc-\d+"))
+    page.wait_for_timeout(150)  # well inside the 0.6 s clip
+    button.click()
+    expect(row).not_to_have_class(re.compile("is-playing"))
+    expect(button).to_have_attribute("aria-label", "Play take")
+    # the accent overlay is clipped to the playhead the clip reached
+    width = row.locator("svg.vs-wave clipPath rect").get_attribute("width")
+    assert float(width) > 0
+
+
+def test_take_hover_highlights_the_row(page, live_app, open_studio):
+    _new_take(page, live_app, open_studio)
+    row = page.locator("#takes-list .vs-take")
+    plain = row.evaluate("el => getComputedStyle(el).backgroundColor")
+    row.hover()
+    expect(row).to_have_css("background-color", "rgb(26, 26, 26)")  # --vs-code-bg
+    assert plain != "rgb(26, 26, 26)"
+
+
+def test_download_link_is_styled_like_save_as_voice(page, live_app, open_studio):
+    _new_take(page, live_app, open_studio)
+    link = page.locator("#takes-list .vs-take a.btn-link")
+    button = page.locator("#takes-list .vs-take button.btn-link")
+    assert link.evaluate("el => getComputedStyle(el).color") == button.evaluate(
+        "el => getComputedStyle(el).color"
+    )
+    assert link.evaluate("el => getComputedStyle(el).textDecorationLine") == "none"
+
+
+def test_voice_editor_spans_the_row_and_grows(page, live_app, open_studio):
+    transcript = "Thanks for waiting. Everything checks out."
+    open_studio(page, "voices")
+    row = page.locator('#voice-rows tr[data-key="ashley-en"]')
+    row.get_by_role("button", name="Edit").click()
+    cell = row.locator("td.vs-edit")
+    expect(cell).to_be_visible()
+    assert cell.evaluate("td => td.colSpan") == 6
+    wrap = page.locator("#voices-list .vs-table-wrap")
+    assert cell.evaluate("td => td.scrollWidth") <= wrap.evaluate("el => el.clientWidth") + 1
+    tx = row.locator('textarea[data-field="ref_text"]')
+    one_line = tx.evaluate("el => el.clientHeight")
+    expect(row.get_by_role("button", name="Auto-transcribe")).to_be_visible()
+    tx.fill(" ".join(["Edited transcript"] * 20))
+    assert tx.evaluate("el => el.clientHeight") > one_line  # auto-grew
+    assert tx.evaluate("el => el.scrollHeight") <= tx.evaluate("el => el.clientHeight") + 1
+    row.get_by_role("button", name="Save").click()
+    expect(row.locator("textarea")).to_have_count(0)  # collapsed back to a normal row
+    expect(row.locator("td.tx")).to_have_text(re.compile("Edited transcript"))
+    assert row.evaluate("tr => tr.getBoundingClientRect().height") < 60
+    # restore the seeded transcript: live_app is shared by the rest of the suite
+    row.get_by_role("button", name="Edit").click()
+    row.locator('textarea[data-field="ref_text"]').fill(transcript)
+    row.get_by_role("button", name="Save").click()
+    expect(row.locator("td.tx")).to_have_text(transcript)
+
+
+def test_clone_transcribe_copy_is_transcribe_with_stt(page, live_app, open_studio):
+    open_studio(page, "clone")
+    expect(page.locator("#auto-transcribe")).to_have_text("Transcribe with STT")
+
+
+def test_takes_are_scoped_to_the_page_session(page, live_app, open_studio):
+    """M2-T21 parity: a new page load is a new session, so the Takes list starts empty."""
+    _new_take(page, live_app, open_studio)
+    page.reload()
+    page.wait_for_function(
+        "document.getElementById('engine-status')?.textContent?.startsWith('Ready')", timeout=10000
+    )
+    expect(page.locator("#takes-list .vs-take")).to_have_count(0)
+    expect(page.locator("#takes-empty")).to_be_visible()
+    assert httpx.get(f"{live_app}/api/takes").json()["takes"]  # still on disk, just not listed
+
+
 def _settle(page, screen: str) -> None:
     if screen == "speak":
         expect(page.locator("#voice-chips .vs-chip")).to_have_count(3)
     elif screen == "voices":
         expect(page.locator("#voice-rows tr[data-key]")).to_have_count(3)
+    elif screen == "languages":
+        expect(page.locator("#lang-rows .vs-lang-row")).to_have_count(4)
     elif screen == "engine":
         expect(page.locator("#engine-stats .vs-stat")).to_have_count(8)
     else:

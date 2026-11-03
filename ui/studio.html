@@ -155,6 +155,27 @@ input[type="checkbox"] { width: 14px; height: 14px; margin: 0; accent-color: var
 .vs-code { overflow-x: auto; background: var(--vs-code-bg); }
 .vs-code pre { margin: 0; padding: var(--vs-s5) 14px; font-size: var(--vs-fs-small); white-space: pre; }
 
+/* Languages */
+.vs-lang-table { min-width: 640px; }
+.vs-lang-head, .vs-lang-main { display: grid; grid-template-columns: minmax(170px, 1.4fr) 56px 80px 90px minmax(200px, 1.2fr); gap: var(--vs-s6); align-items: center; }
+.vs-lang-head { padding: var(--vs-s3) 0; font-size: var(--vs-fs-label); color: var(--vs-muted); border-bottom: var(--vs-rule-row); }
+.vs-lang-row { border-bottom: 1px solid var(--vs-rule-faint); }
+.vs-lang-row.removing { border-top: 2px solid var(--vs-accent); border-bottom-color: var(--vs-fg); margin-top: -1px; }
+.vs-lang-main { min-height: 40px; }
+.vs-lang-main .nm { display: flex; align-items: baseline; gap: var(--vs-s3); min-width: 0; }
+.vs-lang-main .nm b { font-weight: 700; }
+.vs-lang-main .nm .native { font-size: var(--vs-fs-small); color: var(--vs-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tag { flex: none; font-size: var(--vs-fs-label); padding: 0 6px; border: 1px solid var(--vs-fg); }
+.vs-lang-main .code { font-family: var(--vs-mono); font-size: var(--vs-fs-small); color: var(--vs-fg-2); }
+.vs-lang-main .acts { display: flex; gap: var(--vs-s6); justify-content: flex-end; flex-wrap: wrap; align-items: center; }
+.vs-lang-main .acts .btn-link { font-size: var(--vs-fs-small); }
+.vs-lang-main .lock { font-size: var(--vs-fs-label); color: var(--vs-muted); text-align: right; max-width: 180px; }
+.vs-lang-remove { display: flex; flex-direction: column; gap: var(--vs-s4); padding: var(--vs-s1) 0 14px; }
+.vs-lang-remove p { margin: 0; }
+.vs-lang-remove .opts { display: flex; flex-wrap: wrap; align-items: center; gap: var(--vs-s4) var(--vs-s5); }
+.btn-small { min-height: var(--vs-h-chip); padding: 0 14px; font-size: var(--vs-fs-small); }
+.btn-danger { background: var(--vs-bg); border: 1px solid var(--vs-accent); }
+
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 </head>
@@ -176,7 +197,8 @@ input[type="checkbox"] { width: 14px; height: 14px; margin: 0; accent-color: var
     <button class="vs-tab" data-tab="voices"><span class="num">02</span>Voices</button>
     <button class="vs-tab" data-tab="clone"><span class="num">03</span>Clone</button>
     <button class="vs-tab" data-tab="design"><span class="num">04</span>Design</button>
-    <button class="vs-tab" data-tab="engine"><span class="num">05</span>Engine</button>
+    <button class="vs-tab" data-tab="languages"><span class="num">05</span>Languages</button>
+    <button class="vs-tab" data-tab="engine"><span class="num">06</span>Engine</button>
   </nav>
 </header>
 
@@ -415,7 +437,36 @@ input[type="checkbox"] { width: 14px; height: 14px; margin: 0; accent-color: var
   </div>
 </div>
 
-<!-- 05 ENGINE -->
+<!-- 05 LANGUAGES -->
+<div class="vs-screen" id="screen-languages" hidden>
+  <div class="vs-cols">
+    <section class="vs-col-main" aria-labelledby="lang-h">
+      <div class="vs-head"><h2 class="vs-h2" id="lang-h">Languages <span class="count" id="lang-count"></span></h2></div>
+      <div class="vs-table-wrap" style="border-top:var(--vs-rule-section)">
+        <div class="vs-lang-table">
+          <div class="vs-lang-head" aria-hidden="true"><span>Language</span><span>Code</span><span>Voices</span><span>Test phrases</span><span></span></div>
+          <div id="lang-rows"></div>
+        </div>
+      </div>
+    </section>
+    <aside class="vs-col-side vs-steps" aria-labelledby="add-lang-h">
+      <h3 id="add-lang-h">Add a language</h3>
+      <div style="display:flex;gap:8px;flex-wrap:wrap" id="add-lang-box">
+        <label class="sr" for="add-lang">Language to add</label>
+        <select class="vs-select" id="add-lang" style="flex:1 1 200px"></select>
+        <button class="btn-primary" id="add-lang-btn">Add</button>
+      </div>
+      <p class="meta" style="white-space:normal">Only languages the engine supports are listed. The list comes from the backend, so a different model changes what you can add.</p>
+      <h3 style="margin-top:14px">What a language controls</h3>
+      <p><b>1</b>  The tag on each voice, and the language filters in Voices.</p>
+      <p><b>2</b>  The choices in Clone and Design.</p>
+      <p><b>3</b>  Which test phrases Speak and Design offer. A new language starts with none until you add them.</p>
+      <p><b>4</b>  Not how a voice sounds: VoxCPM2 reads the language from the text, so any voice can speak any supported language.</p>
+    </aside>
+  </div>
+</div>
+
+<!-- 06 ENGINE -->
 <div class="vs-screen" id="screen-engine" hidden>
   <section aria-labelledby="engine-h">
     <div class="vs-head">
@@ -566,6 +617,64 @@ document.getElementById('generate').addEventListener('click', e => {
   if (e.currentTarget.getAttribute('aria-disabled') === 'true') { e.preventDefault(); document.querySelector('#speak-novoice .btn-secondary').focus(); }
 });
 setLibraryEmpty(new URLSearchParams(location.search).has('empty'));
+
+/* Languages screen (static reference; the real app calls /api/languages). */
+const SUPPORTED = [{"code": "ar", "name": "Arabic", "native": "العربية"}, {"code": "my", "name": "Burmese", "native": "မြန်မာ"}, {"code": "zh", "name": "Chinese", "native": "中文"}, {"code": "da", "name": "Danish", "native": "Dansk"}, {"code": "nl", "name": "Dutch", "native": "Nederlands"}, {"code": "en", "name": "English", "native": "English"}, {"code": "fi", "name": "Finnish", "native": "Suomi"}, {"code": "fr", "name": "French", "native": "Français"}, {"code": "de", "name": "German", "native": "Deutsch"}, {"code": "el", "name": "Greek", "native": "Ελληνικά"}, {"code": "he", "name": "Hebrew", "native": "עברית"}, {"code": "hi", "name": "Hindi", "native": "हिन्दी"}, {"code": "id", "name": "Indonesian", "native": "Bahasa Indonesia"}, {"code": "it", "name": "Italian", "native": "Italiano"}, {"code": "ja", "name": "Japanese", "native": "日本語"}, {"code": "km", "name": "Khmer", "native": "ខ្មែរ"}, {"code": "ko", "name": "Korean", "native": "한국어"}, {"code": "lo", "name": "Lao", "native": "ລາວ"}, {"code": "ms", "name": "Malay", "native": "Bahasa Melayu"}, {"code": "no", "name": "Norwegian", "native": "Norsk"}, {"code": "pl", "name": "Polish", "native": "Polski"}, {"code": "pt", "name": "Portuguese", "native": "Português"}, {"code": "ru", "name": "Russian", "native": "Русский"}, {"code": "es", "name": "Spanish", "native": "Español"}, {"code": "sw", "name": "Swahili", "native": "Kiswahili"}, {"code": "sv", "name": "Swedish", "native": "Svenska"}, {"code": "tl", "name": "Tagalog", "native": "Tagalog"}, {"code": "th", "name": "Thai", "native": "ไทย"}, {"code": "tr", "name": "Turkish", "native": "Türkçe"}, {"code": "vi", "name": "Vietnamese", "native": "Tiếng Việt"}];
+const LANG = { enabled: ['en', 'ja', 'ko', 'zh'], def: 'en', removing: null };
+const VOICE_LANG = { 'ashley-en': 'en', 'ashley-ja': 'ja', 'ashley-kr': 'ko', 'ashley-zh': 'zh', 'alison-en': 'en', 'bennett-en': 'en', 'jack-en': 'en', 'mia-en': 'en' };
+const sup = c => SUPPORTED.find(l => l.code === c);
+function renderLanguages() {
+  const rows = document.getElementById('lang-rows'), e = LANG.enabled;
+  document.getElementById('lang-count').textContent = `${e.length} of ${SUPPORTED.length} enabled`;
+  rows.innerHTML = '';
+  e.forEach(code => {
+    const L = sup(code), voices = Object.keys(VOICE_LANG).filter(v => VOICE_LANG[v] === code);
+    const phrases = (PRESETS[code] || []).length, isDef = code === LANG.def, locked = isDef || e.length === 1;
+    const others = [LANG.def, ...e.filter(c => c !== LANG.def)].filter(c => c !== code);
+    const row = document.createElement('div');
+    row.className = 'vs-lang-row' + (LANG.removing === code ? ' removing' : '');
+    const nVoices = voices.length === 1 ? '1 voice' : `${voices.length} voices`;
+    row.innerHTML = `<div class="vs-lang-main">
+      <span class="nm"><b>${L.name}</b>${L.native !== L.name ? `<span class="native">${L.native}</span>` : ''}${isDef ? '<span class="tag">Default</span>' : ''}</span>
+      <span class="code">${code.toUpperCase()}</span><span>${nVoices}</span>
+      <span class="${phrases ? '' : 'meta'}">${phrases ? phrases + ' of 6' : 'None yet'}</span>
+      <span class="acts"><button class="btn-link">Edit phrases</button>${isDef ? '' : '<button class="btn-link" data-act="default">Make default</button>'}${locked ? `<span class="lock">${isDef ? 'Default · make another language default to remove' : 'Last language'}</span>` : (LANG.removing === code ? '' : '<button class="btn-link" data-act="remove">Remove</button>')}</span></div>`;
+    if (LANG.removing === code) {
+      const panel = document.createElement('div');
+      panel.className = 'vs-lang-remove'; panel.setAttribute('role', 'group'); panel.setAttribute('aria-label', 'Remove ' + L.name);
+      panel.innerHTML = voices.length ? `
+        <p><b>${nVoices} use ${L.name}:</b> <span style="color:var(--vs-fg-2)">${voices.join(', ')}</span>. Choose what happens to them before ${L.name} is removed.</p>
+        <div class="opts"><label class="meta" for="move-${code}">Relabel them as</label>
+          <select class="vs-select" id="move-${code}" style="min-height:28px;padding:4px 8px">${others.map(c => `<option value="${c}">${sup(c).name}</option>`).join('')}</select>
+          <button class="btn-inverse btn-small" data-act="relabel" style="font-weight:700">Relabel and remove</button>
+          <button class="btn-danger btn-small" data-act="delete">Delete the voices too</button>
+          <button class="btn-link" data-act="cancel">Cancel</button></div>
+        <p class="meta" style="white-space:normal">Relabelling only changes the tag, filters and test phrases. VoxCPM2 reads the language from the text itself, so the voices sound the same.</p>` : `
+        <div class="opts"><span>Remove ${L.name}? No voices use it. Its test phrases are deleted too.</span>
+          <button class="btn-danger btn-small" data-act="drop">Remove</button><button class="btn-link" data-act="cancel">Cancel</button></div>`;
+      row.appendChild(panel);
+    }
+    row.addEventListener('click', ev => {
+      const act = ev.target.closest('[data-act]')?.dataset.act; if (!act) return;
+      if (act === 'remove') LANG.removing = code;
+      if (act === 'cancel') LANG.removing = null;
+      if (act === 'default') LANG.def = code;
+      const drop = () => { LANG.enabled = LANG.enabled.filter(c => c !== code); LANG.removing = null; };
+      if (act === 'relabel') { const to = row.querySelector('select').value; voices.forEach(v => VOICE_LANG[v] = to); drop(); }
+      if (act === 'delete') { voices.forEach(v => delete VOICE_LANG[v]); drop(); }
+      if (act === 'drop') drop();
+      renderLanguages();
+    });
+    rows.appendChild(row);
+  });
+  const avail = SUPPORTED.filter(l => !e.includes(l.code));
+  document.getElementById('add-lang-box').hidden = !avail.length;
+  document.getElementById('add-lang').innerHTML = avail.map(l => `<option value="${l.code}">${l.name}${l.native !== l.name ? ' · ' + l.native : ''}</option>`).join('');
+}
+document.getElementById('add-lang-btn').addEventListener('click', () => {
+  const v = document.getElementById('add-lang').value; if (v) { LANG.enabled.push(v); renderLanguages(); }
+});
+renderLanguages();
 
 const st = document.getElementById('stream-toggle');
 st.addEventListener('click', () => st.setAttribute('aria-pressed', st.getAttribute('aria-pressed') !== 'true'));

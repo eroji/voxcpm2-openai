@@ -265,6 +265,61 @@ async def test_streamed_pcm_resamples_from_engine_native_rate(
 
 
 @pytest.mark.parametrize("fmt", ["pcm", "wav"])
+async def test_stream_resamples_from_the_engine_rate_not_a_guess(
+    fake_engine: Any,
+    settings: Settings,
+    library: VoiceStore,
+    fmt: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """M1-T20: a 24 kHz engine stream at a 48 kHz target goes through ffmpeg, not passthrough."""
+    fake_engine.state["stream_rate"] = 24000
+    service, engine = _service(library, settings, fake_engine.url)
+    await engine.start()
+    seen: list[list[str]] = []
+    real_spawn = asyncio.create_subprocess_exec
+
+    async def spy(*args: Any, **kwargs: Any) -> Any:
+        seen.append(list(args))
+        return await real_spawn(*args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spy)
+    speech = await service.stream(_req(fmt, stream=True))
+    assert speech.sample_rate == 48000  # X-Sample-Rate is the target rate
+    data = b"".join([chunk async for chunk in speech.chunks])
+    assert seen, "the source/target rates differ, so ffmpeg must run"
+    assert int(seen[0][seen[0].index("-ar") + 1]) == 24000  # first -ar is the engine's real rate
+    seconds = len(data) / 2 / 48000 if fmt == "pcm" else len(read_audio(data)[0]) / 48000
+    assert abs(seconds - 0.6) < 0.1
+    await engine.aclose()
+
+
+async def test_stream_passthrough_only_when_rates_match(
+    fake_engine: Any, settings: Settings, library: VoiceStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """24 kHz engine → 24 kHz pcm target: no ffmpeg, the engine's own frames go straight out."""
+    fake_engine.state["stream_rate"] = 24000
+    settings = settings.model_copy(update={"sample_rate": 24000})
+    service, engine = _service(library, settings, fake_engine.url)
+    await engine.start()
+    spawned: list[list[str]] = []
+    real_spawn = asyncio.create_subprocess_exec
+
+    async def spy(*args: Any, **kwargs: Any) -> Any:
+        spawned.append(list(args))
+        return await real_spawn(*args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spy)
+    speech = await service.stream(_req("pcm", stream=True))
+    assert speech.sample_rate == 24000
+    data = b"".join([chunk async for chunk in speech.chunks])
+    assert not spawned
+    assert b"RIFF" not in data
+    assert abs(len(data) / 2 / 24000 - 0.6) < 0.1
+    await engine.aclose()
+
+
+@pytest.mark.parametrize("fmt", ["pcm", "wav"])
 async def test_stream_input_rate_is_engine_native_not_sample_rate(
     fake_engine: Any, settings: Settings, library: VoiceStore, fmt: str
 ) -> None:

@@ -1,4 +1,4 @@
-"""M2-T3/M2-T11/M2-T14: /api/speak + /api/takes — persistence, streaming, formats, wave."""
+"""M2-T3/M2-T11/M2-T14/M2-T21: /api/speak + /api/takes — persistence, streaming, formats, wave."""
 
 from __future__ import annotations
 
@@ -396,6 +396,91 @@ def test_speak_before_ready_is_503_with_retry_after(settings: Any, monkeypatch: 
         assert resp.headers["Retry-After"] == "5"
         assert resp.json()["error"]["code"] == "engine_not_ready"
         assert c.app.state.engine.stats().rtf is None  # SPEC §4: not a sample
+
+
+# --- M2-T21: session-scoped takes (X-Studio-Session) ---------------------------------------
+
+
+def _speak_as(client: Any, session: str | None, **fields: Any) -> Any:
+    headers = {"X-Studio-Session": session} if session is not None else {}
+    body = {"model": "voxcpm2", "voice": "ashley-en", "input": "hello there", **fields}
+    return client.post("/api/speak", json=body, headers=headers)
+
+
+def _take_ids(client: Any, session: str | None = None, kind: str | None = None) -> list[str]:
+    headers = {"X-Studio-Session": session} if session is not None else {}
+    url = "/api/takes" + (f"?kind={kind}" if kind else "")
+    return [t["id"] for t in client.get(url, headers=headers).json()["takes"]]
+
+
+def test_same_session_sees_only_its_takes(client: Any, library: Any) -> None:
+    mine = _speak_as(client, "sess-a").json()["id"]
+    _speak_as(client, None)  # another (headerless) caller
+    assert _take_ids(client, "sess-a") == [mine]
+
+
+def test_two_sessions_are_isolated(client: Any, library: Any) -> None:
+    a = _speak_as(client, "sess-a").json()["id"]
+    b = _speak_as(client, "sess-b").json()["id"]
+    assert _take_ids(client, "sess-a") == [a]
+    assert _take_ids(client, "sess-b") == [b]
+
+
+def test_no_session_header_returns_all_takes(client: Any, library: Any) -> None:
+    a = _speak_as(client, "sess-a").json()["id"]
+    b = _speak_as(client, "sess-b").json()["id"]
+    assert set(_take_ids(client)) == {a, b}
+
+
+def test_invalid_session_header_is_treated_as_absent(client: Any, library: Any) -> None:
+    a = _speak_as(client, "sess-a").json()["id"]
+    for bad in ("no spaces", "x" * 65, "sess/../etc", ""):
+        assert _take_ids(client, bad) == [a]
+    long = _speak_as(client, "x" * 64).json()["id"]  # 64 chars is the boundary, valid
+    assert _take_ids(client, "x" * 64) == [long]
+
+
+def test_query_param_session_works_like_the_header(client: Any, library: Any) -> None:
+    a = _speak_as(client, "sess-a").json()["id"]
+    _speak_as(client, "sess-b")
+    assert [t["id"] for t in client.get("/api/takes?session=sess-a").json()["takes"]] == [a]
+    assert client.get("/api/takes?session=no%20good").json()["takes"]  # invalid → all
+    assert len(client.get("/api/takes?session=no%20good").json()["takes"]) == 2
+
+
+def test_streamed_take_carries_the_session(client: Any, library: Any) -> None:
+    resp = _speak_as(client, "sess-a", stream=True, response_format="pcm")
+    assert resp.status_code == 200
+    take = _wait_for_take(client, resp.headers["X-Take-Id"])  # headerless list sees all
+    assert _take_ids(client, "sess-a") == [take["id"]]
+    assert _take_ids(client, "sess-b") == []
+
+
+def test_design_takes_are_not_session_bound(client: Any, library: Any, settings: Any) -> None:
+    studio = _speak_as(client, "sess-a").json()["id"]
+    design = _design_take(settings)["id"]
+    assert _take_ids(client, "sess-b") == []
+    assert _take_ids(client, "sess-b", kind="design") == [design]
+    assert _take_ids(client, "sess-b", kind="all") == [design]
+    assert set(_take_ids(client, "sess-a", kind="all")) == {studio, design}
+
+
+def test_preview_with_session_stores_nothing(client: Any, library: Any) -> None:
+    resp = client.post(
+        "/api/speak?save=false",
+        json={"model": "voxcpm2", "voice": "ashley-en", "input": "hi"},
+        headers={"X-Studio-Session": "sess-a"},
+    )
+    assert resp.status_code == 200
+    assert _take_ids(client, "sess-a") == []
+
+
+def test_take_on_disk_records_the_session(client: Any, library: Any, settings: Any) -> None:
+    import json
+
+    take = _speak_as(client, "sess-a").json()
+    meta = json.loads((settings.takes_dir / f"{take['id']}.json").read_text("utf-8"))
+    assert meta["session"] == "sess-a"
 
 
 def test_preview_before_ready_is_503(settings: Any, monkeypatch: Any) -> None:

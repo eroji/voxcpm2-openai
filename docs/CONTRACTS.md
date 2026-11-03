@@ -171,8 +171,12 @@ Tests set `startup_page=False` unless they exercise this feature.
 
 ### Static assets
 
-- `app/static/presets.json` — the six test phrases per language (`en/ja/ko/zh`), served at
-  `/static/presets.json`; Speak follows the selected voice language, Design follows `#design-lang`.
+- `DATA_DIR/languages.json` — enabled languages, default, per-language presets (seeded en/ja/ko/zh
+  from `app/static/presets.json`). `deploy/supported-languages.json` is the 30-language engine set.
+- `/api/languages` management routes (SPEC §7): enabled entries (default first) with
+  `supported/voices/presets`, supported set, add/default/remove (relabel/delete voices),
+  `GET|PUT /{code}/presets`. UI language choices use enabled languages only; presets come from the
+  API, not the static file.
 - `app/static/icons/` — favicon.svg/ico, 16/32 PNG, apple-touch, 192/512; linked from both pages.
 - Empty library: Speak hides chips and disables Generate (`aria-disabled`), Voices shows only the
   empty state; no Qwen3 import exists (SPEC v0.2.0).

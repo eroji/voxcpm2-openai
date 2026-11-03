@@ -5,7 +5,10 @@
 import {
   api,
   state,
+  sessionId,
   loadVoices,
+  loadLanguages,
+  languageOptions,
   refreshEngine,
   play,
   showError,
@@ -83,6 +86,24 @@ function gate() {
 }
 
 let probeSeq = 0; // invalidates an in-flight duration probe when a newer file is picked
+
+/* Language choices are the enabled languages, default first (SPEC §5a): the first option
+ * is the default language, and a still-enabled selection is kept across visits. */
+function fillLangs() {
+  const select = $("clone-lang");
+  const options = languageOptions();
+  if (!options.length) return;
+  const current = select.value;
+  select.replaceChildren(
+    ...options.map(option => {
+      const node = document.createElement("option");
+      node.value = option.code;
+      node.textContent = option.name;
+      return node;
+    })
+  );
+  select.value = options.some(o => o.code === current) ? current : options[0].code;
+}
 
 function onFile(f) {
   clearError("clone");
@@ -190,7 +211,7 @@ async function onTest() {
     });
     const res = await fetch("/api/speak?save=false", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "X-Studio-Session": sessionId },
       body: JSON.stringify({
         model: "voxcpm2",
         voice: $("clone-name").value || "ad-hoc",
@@ -253,8 +274,9 @@ registerScreen("clone", {
   async show() {
     try {
       // fresh names for duplicate validation + engine flags for gating; never throws
-      await Promise.allSettled([refreshEngine(), loadVoices()]);
+      await Promise.allSettled([refreshEngine(), loadVoices(), loadLanguages()]);
     } finally {
+      fillLangs(); // language list follows the enabled set (SPEC §5a)
       gate(); // a voices failure must not skip the gating
       updateSave();
     }

@@ -12,7 +12,7 @@ router = APIRouter(prefix="/api", tags=["design"])
 
 def _service(request: Request) -> DesignService:
     state = request.app.state
-    return DesignService(state.store, state.takes, state.engine, state.settings)
+    return DesignService(state.store, state.takes, state.engine, state.settings, state.languages)
 
 
 @router.post("/design/candidates", response_model=CandidateList)

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import socket
+import struct
 import threading
 import time
 from typing import Any
@@ -13,10 +14,10 @@ import numpy as np
 import pytest
 import uvicorn
 from app.audio import duration_s, pcm_s16le_to_float, read_audio, wav_bytes
-from app.engine import EngineClient, SynthParams, SynthResult
-from app.errors import EngineNotReady, QueueFull
+from app.engine import EngineClient, SynthParams, SynthResult, _wav_header
+from app.errors import EngineError, EngineNotReady, QueueFull
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from tests.fake_engine import SAMPLE_RATE, read_wav_duration
 
@@ -88,9 +89,128 @@ async def test_stream(fake_engine: Any) -> None:
     assert len(chunks) >= 2
     pcm = b"".join(chunks)
     assert len(pcm) % 2 == 0
+    assert b"RIFF" not in pcm  # the container the engine streamed is stripped (M1-T20)
+    assert handle.sample_rate == SAMPLE_RATE
     assert abs(duration_s(pcm_s16le_to_float(pcm), SAMPLE_RATE) - 0.6) < 0.05
     assert engine.stats().first_audio_ms is not None
     await engine.aclose()
+
+
+async def test_stream_asks_the_engine_for_a_self_describing_container(fake_engine: Any) -> None:
+    """`fmt="pcm"` stays a *downstream* hint; the engine is asked for wav (M1-T20)."""
+    engine = EngineClient(fake_engine.url)
+    await engine.start()
+    handle = await engine.open_stream(
+        SynthParams(text="hi", ref_audio="data:,", fmt="pcm", stream=True)
+    )
+    assert fake_engine.state["last"]["response_format"] == "wav"
+    assert fake_engine.state["last"]["stream"] is True
+    await handle.aclose()
+    await engine.aclose()
+
+
+async def test_stream_float32_is_converted_to_s16le(fake_engine: Any) -> None:
+    """A float32 engine stream must not reach the browser as noise (reported bug)."""
+    fake_engine.state["stream_format"] = "wav_f32"
+    engine = EngineClient(fake_engine.url)
+    await engine.start()
+    handle = await engine.open_stream(
+        SynthParams(text="hi", ref_audio="data:,", fmt="pcm", stream=True)
+    )
+    pcm = b"".join([chunk async for chunk in handle.chunks])
+    await handle.aclose()
+    assert handle.sample_rate == SAMPLE_RATE
+    samples = pcm_s16le_to_float(pcm)
+    assert abs(duration_s(samples, SAMPLE_RATE) - 0.6) < 0.05
+    assert np.isfinite(samples).all()
+    assert 0.0 < float(np.max(np.abs(samples))) <= 1.0  # real audio, no static
+    await engine.aclose()
+
+
+async def test_stream_reports_the_engine_rate(fake_engine: Any) -> None:
+    fake_engine.state["stream_rate"] = 24000
+    engine = EngineClient(fake_engine.url)
+    await engine.start()
+    handle = await engine.open_stream(
+        SynthParams(text="hi", ref_audio="data:,", fmt="pcm", stream=True)
+    )
+    pcm = b"".join([chunk async for chunk in handle.chunks])
+    await handle.aclose()
+    assert handle.sample_rate == 24000
+    assert abs(duration_s(pcm_s16le_to_float(pcm), 24000) - 0.6) < 0.05
+    await engine.aclose()
+
+
+async def test_stream_without_a_header_falls_back_to_engine_defaults(fake_engine: Any) -> None:
+    """SPEC §6 assumption: an engine that ignores response_format=wav is s16le @ 48 kHz."""
+    fake_engine.state["stream_format"] = "pcm16"
+    engine = EngineClient(fake_engine.url)
+    await engine.start()
+    handle = await engine.open_stream(
+        SynthParams(text="hi", ref_audio="data:,", fmt="pcm", stream=True)
+    )
+    assert handle.sample_rate == SAMPLE_RATE
+    pcm = b"".join([chunk async for chunk in handle.chunks])
+    await handle.aclose()
+    assert abs(duration_s(pcm_s16le_to_float(pcm), SAMPLE_RATE) - 0.6) < 0.05
+    await engine.aclose()
+
+
+def test_wav_header_parser_walks_chunks() -> None:
+    """The parser reads fmt/data wherever they sit, not just at the fixed 44-byte offsets."""
+    from tests.fake_engine import _stream_header
+
+    plain = _stream_header(24000, 3, 32)
+    assert _wav_header(plain) == (44, 3, 1, 24000, 32)
+    padded = plain[:12] + b"LIST" + struct.pack("<I", 6) + b"info\x00\x00" + plain[12:]
+    assert _wav_header(padded) == (58, 3, 1, 24000, 32)
+    assert _wav_header(plain[:30]) is None  # needs more bytes
+    assert _wav_header(b"RIFF\x00\x00\x00\x00WAVE") is None
+
+
+async def test_stream_unsupported_sample_format() -> None:
+    """24-bit engine audio is a 502, never noise sent to the browser."""
+    app = FastAPI()
+
+    @app.get("/health")
+    async def health() -> dict[str, str]:
+        return {"status": "ok"}
+
+    @app.post("/v1/audio/speech")
+    async def speech() -> StreamingResponse:
+        header = struct.pack(
+            "<4sI4s4sIHHIIHH4sI",
+            b"RIFF",
+            0xFFFFFFFF,
+            b"WAVE",
+            b"fmt ",
+            16,
+            1,
+            1,
+            SAMPLE_RATE,
+            SAMPLE_RATE * 3,
+            3,
+            24,
+            b"data",
+            0xFFFFFFFF,
+        )
+
+        async def gen() -> Any:
+            yield header + b"\x00" * 300
+
+        return StreamingResponse(gen(), media_type="audio/wav")
+
+    url, server, thread = _serve(app)
+    try:
+        engine = EngineClient(url)
+        await engine.start()
+        with pytest.raises(EngineError, match="unsupported engine stream format"):
+            await engine.open_stream(SynthParams(text="hi", fmt="pcm", stream=True))
+        assert engine._sem._value == engine.concurrency  # the failed header read freed the slot
+        await engine.aclose()
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
 
 
 async def test_record_false_keeps_the_metrics_window_empty(fake_engine: Any) -> None:

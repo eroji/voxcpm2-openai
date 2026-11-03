@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     static_dir: Path = APP_DIR / "static"
     asset_dir: Path = APP_DIR / "assets"
 
+    # SPEC §5a: the engine's supported-language set. Swapping models means swapping this file.
+    supported_languages_file: Path = APP_DIR.parent / "deploy" / "supported-languages.json"
+
     model_path: str = "/models/openbmb/VoxCPM2"
     engine_url: str = "http://127.0.0.1:8102"
     engine_model: str = "openbmb/VoxCPM2"

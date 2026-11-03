@@ -1,11 +1,28 @@
 /* Voice Studio core: API client, shared state, hash routing, renderers.
- * Screen modules (speak/voices/clone/design/engine) register via registerScreen.
+ * Screen modules (speak/voices/clone/design/languages/engine) register via registerScreen.
  * Never inject API/user text as HTML (R-044): create nodes + textContent. */
 
-export const state = { voices: [], selectedVoice: null, engine: null };
+export const state = {
+  voices: [],
+  selectedVoice: null,
+  engine: null,
+  languages: [], // enabled languages (SPEC §5a), default first, from /api/languages
+  supportedLanguages: [], // the engine's supported set, from /api/languages/supported
+};
+
+/* Per-page-load Studio session id (M2-T21): takes are scoped to it, so a refresh starts
+ * from an empty Takes list. crypto.randomUUID needs a secure context; on plain http the
+ * random hex fallback keeps the same `[A-Za-z0-9_-]{1,64}` shape the server accepts. */
+export const sessionId =
+  (crypto.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`)
+    .replace(/[^A-Za-z0-9_-]/g, "")
+    .slice(0, 64);
 
 async function request(path, options = {}) {
-  const res = await fetch(path, options);
+  const res = await fetch(path, {
+    ...options,
+    headers: { "X-Studio-Session": sessionId, ...(options.headers || {}) },
+  });
   if (!res.ok) {
     let message = `HTTP ${res.status}`;
     try {
@@ -29,7 +46,9 @@ export const api = {
   get: path => request(path),
   post: (path, body) => request(path, json("POST", body)),
   patch: (path, body) => request(path, json("PATCH", body)),
-  del: path => request(path, { method: "DELETE" }),
+  put: (path, body) => request(path, json("PUT", body)),
+  del: (path, body) =>
+    request(path, body === undefined ? { method: "DELETE" } : json("DELETE", body)),
   postForm: (path, form) => request(path, { method: "POST", body: form }),
 };
 
@@ -37,6 +56,49 @@ export async function loadVoices() {
   const data = await api.get("/api/voices");
   state.voices = data.voices || [];
   return state.voices;
+}
+
+/* Enabled + supported languages (SPEC §5a): one cached fetch shared by every screen.
+ * refreshScreens() drops the cache so the next show() re-reads the server. */
+let languagesPromise = null;
+
+export function loadLanguages(force = false) {
+  if (force) languagesPromise = null;
+  if (!languagesPromise) {
+    languagesPromise = Promise.all([
+      api.get("/api/languages"),
+      api.get("/api/languages/supported"),
+    ])
+      .then(([enabled, supported]) => {
+        state.languages = enabled.languages || [];
+        state.supportedLanguages = supported.languages || [];
+        return state.languages;
+      })
+      .catch(err => {
+        languagesPromise = null; // a failed fetch must be retried, never cached
+        throw err;
+      });
+  }
+  return languagesPromise;
+}
+
+/* Enabled languages, default first, as {code,name} options for selects and filters. */
+export function languageOptions() {
+  return state.languages.map(l => ({ code: l.code, name: l.name }));
+}
+
+/* The enabled entry for a code, or null when the app no longer offers it. */
+export function languageEntry(code) {
+  const key = String(code || "").toLowerCase();
+  return state.languages.find(l => l.code === key) || null;
+}
+
+/* After a language changes: drop the cache and re-run every screen's show() hook. */
+export function refreshScreens() {
+  languagesPromise = null;
+  for (const [name, handlers] of screens) {
+    if (handlers.show) Promise.resolve(handlers.show()).catch(err => showError(name, err.message));
+  }
 }
 
 /* Header status is text, never colour alone. Unreachable API → reason from the error. */
@@ -111,6 +173,9 @@ function start() {
   }
   addEventListener("hashchange", route);
   for (const [name, handlers] of screens) runInit(name, handlers);
+  loadLanguages().catch(() => {
+    /* labels fall back to the code until the next screen show() retries */
+  });
   refreshEngine();
   setInterval(refreshEngine, 10000);
   route();
@@ -160,33 +225,62 @@ export function wavePath(amps) {
   return top + bot + ' Z';
 }
 
+/* Every <path> in the svg gets the same outline: the grey base plus the accent overlay
+ * that speak.js clips to the playhead. */
 export function renderWave(svg, amps, current = false) {
-  const path = svg.querySelector("path");
-  if (path) path.setAttribute("d", wavePath(amps));
+  const d = wavePath(amps);
+  for (const path of svg.querySelectorAll("path")) path.setAttribute("d", d);
   svg.classList.toggle("is-current", !!current);
 }
 
-let audio = null;
-let playingUrl = null;
-
-export function stopAudio() {
-  if (audio) audio.pause();
-  // revoke blob: URLs we created (playWhole / test line) so they cannot leak
-  if (playingUrl && playingUrl.startsWith("blob:")) URL.revokeObjectURL(playingUrl);
-  audio = null;
-  playingUrl = null;
+/* Playhead for the accent overlay: fraction 0..1 → clip rect width in the 300-wide viewBox. */
+export function setWaveProgress(svg, fraction) {
+  const rect = svg.querySelector("clipPath rect");
+  if (rect) rect.setAttribute("width", String(300 * Math.min(1, Math.max(0, fraction))));
 }
 
-export function play(url) {
+/* One shared Audio element. `onState(phase, el)` (optional) lets a screen mirror the
+ * state — phase is "play" | "pause" | "time" | "stop" — so a take row can show pause
+ * and animate its waveform without owning the element. */
+let audio = null;
+let playingUrl = null;
+let onState = null;
+
+const emit = (phase, el) => {
+  if (onState) onState(phase, el);
+};
+
+export function stopAudio() {
+  const el = audio;
+  const url = playingUrl;
+  const cb = onState;
+  audio = null;
+  playingUrl = null;
+  onState = null;
+  if (el) el.pause();
+  // revoke blob: URLs we created (playWhole / test line) so they cannot leak
+  if (url && url.startsWith("blob:")) URL.revokeObjectURL(url);
+  if (cb) cb("stop", el);
+}
+
+export function play(url, state) {
   if (audio && playingUrl === url) {
-    stopAudio(); // second click on the same source toggles off
-    return;
+    if (audio.paused) {
+      audio.play().then(() => emit("play", audio)).catch(() => stopAudio());
+    } else {
+      audio.pause();
+      emit("pause", audio);
+    }
+    return; // second click on the same source toggles play/pause
   }
   stopAudio();
   audio = new Audio(url);
   playingUrl = url;
+  onState = state || null;
   audio.addEventListener("ended", stopAudio);
-  audio.play().catch(() => stopAudio());
+  audio.addEventListener("error", stopAudio);
+  audio.addEventListener("timeupdate", () => emit("time", audio));
+  audio.play().then(() => emit("play", audio)).catch(() => stopAudio());
 }
 
 export function showError(screen, message) {
@@ -203,9 +297,29 @@ export function clearError(screen) {
   el.hidden = true;
 }
 
+/* Language names come from the enabled/supported lists (SPEC §5a); the four seeded
+ * names stay as a fallback so a label is never blank before the first fetch. */
 const LANGUAGES = { en: "English", ja: "Japanese", ko: "Korean", zh: "Chinese" };
+
+/* The "this language has no test phrases" line: Speak and Design show it instead of chips. */
+export function noPhrasesNote(lang) {
+  const note = document.createElement("span");
+  note.className = "meta";
+  note.style.whiteSpace = "normal";
+  note.append(`No test phrases for ${formatLang(lang)} yet. `);
+  const link = document.createElement("a");
+  link.className = "btn-link";
+  link.href = "#languages";
+  link.textContent = "Add some in Languages";
+  note.append(link);
+  return note;
+}
 
 export function formatLang(code) {
   const key = String(code || "").toLowerCase();
-  return LANGUAGES[key] || code || "";
+  if (!key) return "";
+  const found =
+    state.languages.find(l => l.code === key) ||
+    state.supportedLanguages.find(l => l.code === key);
+  return found ? found.name : LANGUAGES[key] || key.toUpperCase();
 }

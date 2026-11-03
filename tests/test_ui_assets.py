@@ -24,7 +24,7 @@ def js(name):
     return (JS_DIR / name).read_text(encoding="utf-8")
 
 
-TABS = ["speak", "voices", "clone", "design", "engine"]
+TABS = ["speak", "voices", "clone", "design", "languages", "engine"]
 
 # Element IDs from docs/CONTRACTS.md §7 (header row handled separately).
 CONTRACT_IDS = [
@@ -76,6 +76,13 @@ CONTRACT_IDS = [
     "restart-engine",
     "engine-endpoint",
     "engine-error",
+    # languages (M3-T16)
+    "lang-h",
+    "lang-count",
+    "lang-rows",
+    "add-lang",
+    "add-lang-btn",
+    "languages-error",
 ]
 
 
@@ -87,8 +94,8 @@ def test_shell_basics():
         assert f'class="vs-tab" data-tab="{tab}"' in HTML
     for tab in TABS:
         assert f'id="screen-{tab}"' in HTML
-    assert HTML.count('class="vs-tab"') == 5
-    assert HTML.count('class="vs-screen"') == 5
+    assert HTML.count('class="vs-tab"') == 6
+    assert HTML.count('class="vs-screen"') == 6
 
 
 def test_contract_ids_exist_exactly_once():
@@ -173,10 +180,11 @@ def test_clone_drop_copy_is_3_to_30_seconds():
 
 
 def test_design_language_default_follows_reference_order():
-    # SPEC §8 does not pin the default; ui/studio.html lists Japanese first.
-    select = re.search(r'id="design-lang">(.*?)</select>', HTML, re.S).group(1)
-    opts = re.findall(r'<option value="(\w+)"', select)
-    assert opts == ["ja", "en", "ko", "zh"]
+    # SPEC §8 does not pin the default: the options come from the enabled set (M3-T16)
+    # and design.js picks Japanese when it is enabled, else the default language.
+    assert '<select class="vs-select" id="design-lang"></select>' in HTML
+    design = js("design.js")
+    assert 'codes.some(o => o.code === "ja") ? "ja" : codes[0].code' in design
 
 
 def test_engine_status_renders_reason():
@@ -297,7 +305,7 @@ def test_clone_show_gates_after_engine_status():
     assert re.search(
         r"import\s*\{[^}]*\brefreshEngine\b[^}]*\}\s*from\s*[\"']\./core\.js", clone
     ), "clone.js must import refreshEngine from core"
-    assert "Promise.allSettled([refreshEngine(), loadVoices()])" in clone
+    assert "Promise.allSettled([refreshEngine(), loadVoices(), loadLanguages()])" in clone
     show = re.search(r"async show\(\) \{(?P<body>.*?)\n  \},", clone, re.S)
     assert show, "show() not found"
     body = show.group("body")
@@ -328,11 +336,11 @@ def test_clone_test_line_needs_only_a_file():
 
 
 def test_format_applies_with_stream_hint_and_no_dead_branch():
-    # Q-024 resolved: Format drives response_format; streams are PCM at 48 kHz
+    # Q-024 resolved: Format drives response_format; streams are PCM at the advertised rate
     assert "Streaming uses PCM at 48 kHz" in HTML
     assert "Studio takes are WAV; use /v1 for other formats." not in HTML
     speak = js("speak.js")
-    assert "res.headers.get(" not in speak  # dead non-WAV response branch removed
+    assert 'res.headers.get("Content-Type")' not in speak  # dead non-WAV response branch removed
     assert "res.blob()" not in speak
 
 
@@ -361,7 +369,11 @@ def test_design_sample_declares_japanese_and_follows_the_language_select():
 def test_stream_requests_pin_sample_rate_to_the_decoder():
     speak = js("speak.js")
     assert "if (stream) body.sample_rate = 48000;" in speak
-    assert "new AudioContext({ sampleRate: 48000 })" in speak  # 48 kHz handling unchanged
+    # M3-T17: the decoder follows the response header, never a hard-coded 48 kHz
+    assert 'Number(res.headers.get("X-Sample-Rate")) || 48000' in speak
+    assert "new AudioContext({ sampleRate: rate })" in speak
+    assert "ctx.createBuffer(1, samples.length, rate)" in speak
+    assert "sampleRate: 48000" not in speak
 
 
 def test_voices_count_is_the_library_total():
@@ -383,7 +395,7 @@ def test_take_playback_appends_format():
     speak = js("speak.js")
     # play/download use the take's requested container; the waveform keeps wave_url
     assert "${take.audio_url}?format=${take.format" in speak
-    assert "play(takeUrl(take))" in speak
+    assert "play(takeUrl(take)" in speak
     assert "dl.href = takeUrl(take)" in speak
     assert ".get(take.wave_url)" in speak
 
@@ -567,7 +579,7 @@ def test_empty_state_and_preset_ids_exist():
         assert f'id="{el_id}"' in HTML, el_id
     # the textarea declares a language and the JS swaps it with the preset
     assert re.search(r'id="speak-text"[^>]*\blang="en"', HTML)
-    assert '$("speak-text").lang = presetLang' in js("speak.js")
+    assert '$("speak-text").lang = lang' in js("speak.js")
     # Voices header actions live only in the two mutually exclusive containers
     assert HTML.count('data-goto="clone"') == 3  # voices-actions, voices-empty, speak-novoice
 
@@ -582,3 +594,144 @@ def test_starting_log_uses_grid_rows_and_parser():
         "r.classList.toggle('open')",
     ]:
         assert fragment in STARTING, fragment
+
+
+# --- M3-T16: Languages screen and language-aware Studio ---------------------------
+
+
+def test_languages_screen_markup():
+    assert 'id="screen-languages"' in HTML
+    assert '<span class="num">05</span>Languages' in HTML
+    assert '<span class="num">06</span>Engine' in HTML
+    for el_id in ["lang-rows", "lang-count", "add-lang", "add-lang-btn"]:
+        assert f'id="{el_id}"' in HTML, el_id
+    assert '<div class="vs-lang-head"' in HTML  # table head ported from the reference
+    # the rows are rendered by languages.js, never hardcoded
+    inner = re.search(r'id="lang-rows"[^>]*>(.*?)</', HTML, re.S)
+    assert inner is not None and not inner.group(1).strip()
+    # no static language lists survive in the shell: filters and selects come from the API
+    assert 'data-lang="en"' not in HTML
+    assert '<option value="ja">' not in HTML
+
+
+def test_languages_module_registered_and_linked():
+    assert '<script type="module" src="/static/js/languages.js"></script>' in HTML
+    assert HTML.index("/js/design.js") < HTML.index("/js/languages.js")
+    assert 'registerScreen("languages"' in js("languages.js")
+
+
+def test_languages_remove_confirmations_are_literal():
+    languages = js("languages.js")
+    for fragment in [
+        "Relabel and remove",
+        "Delete the voices too",
+        "Relabel them as",
+        "Its test phrases are deleted too",
+        "Default · make another language default to remove",
+        "Last language",
+        "Not supported by the engine",
+    ]:
+        assert fragment in languages, fragment
+    # server text is never injected as HTML
+    assert "innerHTML" not in languages
+
+
+def test_presets_come_from_the_language_api():
+    for name in ["speak.js", "design.js"]:
+        source = js(name)
+        assert "/presets`" in source and "/api/languages/${encodeURIComponent(" in source, name
+        assert "presets.json" not in source, name
+    for path in sorted(JS_DIR.glob("*.js")):
+        assert "/static/presets.json" not in path.read_text(encoding="utf-8"), path.name
+
+
+def test_language_state_helpers_exported():
+    for name in [
+        "loadLanguages",
+        "languageOptions",
+        "languageEntry",
+        "refreshScreens",
+        "noPhrasesNote",
+    ]:
+        assert re.search(rf"export (async )?(function {name}\b|const {name}\b)", CORE), name
+    assert "languages: []" in CORE and "supportedLanguages: []" in CORE
+    # the language selects, filters and labels all read the enabled set
+    for name in ["speak.js", "voices.js", "clone.js", "design.js"]:
+        assert "loadLanguages" in js(name), name
+
+
+def test_languages_css_rules():
+    for selector in [
+        ".vs-lang-table",
+        ".vs-lang-head",
+        ".vs-lang-main",
+        ".vs-lang-row",
+        ".vs-lang-remove",
+        ".tag",
+        ".btn-small",
+        ".btn-danger",
+    ]:
+        assert selector in CSS, selector
+    # the inset select chevron must survive the port
+    assert 'background-image: url("data:image/svg+xml' in CSS
+
+
+# --- M3-T17: take player, waveform progress, voice editor, clone copy, session id ----------
+
+
+def test_clone_transcribe_button_copy():
+    # reported bug 7: no product name in the UI, the API is simply "STT"
+    assert ">Transcribe with STT<" in HTML
+    assert "Auto-transcribe with whisper-stt" not in HTML
+
+
+def test_take_player_toggles_play_pause():
+    speak = js("speak.js")
+    assert '"M2 1h3v10H2zM7 1h3v10H7z"' in speak  # the pause icon
+    assert '"M2 1l9 5-9 5z"' in speak  # the play triangle
+    assert 'setAttribute("aria-label", playing ? "Pause take" : "Play take")' in speak
+    assert 'classList.toggle("is-playing"' in speak
+    # core owns the single Audio element and resets the row on ended/error
+    assert 'addEventListener("ended", stopAudio)' in CORE
+    assert 'addEventListener("error", stopAudio)' in CORE
+
+
+def test_take_waveform_clips_the_accent_overlay_to_the_playhead():
+    speak = js("speak.js")
+    for fragment in ["clipPath", 'setAttribute("clip-path"', "setWaveProgress"]:
+        assert fragment in speak, fragment
+    assert 'addEventListener("timeupdate"' in CORE  # progress follows the playhead
+    assert 'svg.querySelector("clipPath rect")' in CORE
+    assert "300 * Math.min(1, Math.max(0, fraction))" in CORE
+
+
+def test_take_row_hover_and_download_css():
+    assert ".vs-take:hover, .vs-take.is-playing { background: var(--vs-code-bg); }" in CSS
+    assert ".vs-take.is-playing { border-top-color: var(--vs-accent); }" in CSS
+    assert ".vs-wave path.accent { fill: var(--vs-accent); }" in CSS
+    rule = re.search(r"\.btn-link \{([^}]*)\}", CSS).group(1)
+    assert "color: inherit" in rule and "text-decoration: none" in rule
+    assert "a.btn-link { color: inherit; text-decoration: none; }" in CSS
+
+
+def test_voice_editor_is_a_full_width_row_with_a_growing_transcript():
+    voices = js("voices.js")
+    assert "td.colSpan = 6" in voices
+    assert 'el("textarea", "vs-edit-tx")' in voices
+    assert "tx.scrollHeight" in voices  # auto-grow hook
+    assert 'actionButton("Auto-transcribe", "transcribe")' in voices
+    assert 'actionButton("Save", "save")' in voices
+    assert 'actionButton("Cancel", "cancel")' in voices
+    assert "/api/transcribe" in voices
+    assert "/audio`" in voices  # the reference audio feeds the transcriber
+    assert "let busy = false" in voices  # in-flight guard
+    for selector in [".vs-edit-grid", ".vs-edit-tx", ".vs-edit-acts"]:
+        assert selector in CSS, selector
+
+
+def test_studio_session_id_scopes_takes():
+    assert "export const sessionId" in CORE
+    assert "crypto.randomUUID" in CORE
+    assert '"X-Studio-Session": sessionId' in CORE  # every api request
+    for name in ["speak.js", "clone.js"]:  # the raw /api/speak fetches
+        assert '"X-Studio-Session": sessionId' in js(name), name

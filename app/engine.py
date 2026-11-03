@@ -5,8 +5,9 @@ Contract frozen for wave 2+:
 - ``synth`` returns the engine's WAV bytes and records rolling metrics.
 - ``open_stream`` admits the request (queue/readiness) **before** returning a
   ``StreamHandle`` so 429/503 reach the router before response headers; the
-  handle yields normalized s16le mono PCM at 48 kHz and releases the slot
-  exactly once on exhaustion, cancel or ``aclose()``.
+  handle yields normalized s16le mono PCM at ``handle.sample_rate`` (the rate the
+  engine actually sent, read off its WAV header) and releases the slot exactly
+  once on exhaustion, cancel or ``aclose()``.
 - Concurrency is capped at ``settings.engine_concurrency``; at most
   ``settings.max_queue`` requests wait, then ``QueueFull`` (HTTP 429).
 - ``ready`` mirrors the last ``/health`` result. Warm-up is owned by
@@ -20,6 +21,7 @@ import contextlib
 import json
 import logging
 import shutil
+import struct
 import subprocess
 import threading
 import time
@@ -32,8 +34,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import httpx
+import numpy as np
 
-from app.audio import duration_s, mime_for, read_audio
+from app.audio import duration_s, mime_for, pcm_s16le, pcm_s16le_to_float, read_audio
 from app.errors import EngineError, EngineNotReady, QueueFull
 
 if TYPE_CHECKING:
@@ -43,6 +46,9 @@ logger = logging.getLogger("app.engine")
 
 _SPEECH_PATH = "/v1/audio/speech"
 ENGINE_SAMPLE_RATE = 48_000  # engine-native rate (SPEC §2); single source of truth
+_HEADER_MIN = 44  # smallest complete PCM16 mono WAV header
+_HEADER_MAX = 64 * 1024  # a RIFF stream whose data chunk is not announced by here is broken
+_raw_stream_logged = False
 
 
 @dataclass(slots=True)
@@ -55,7 +61,7 @@ class SynthParams:
     seed: int | None = None
     cfg: float | None = None
     steps: int | None = None
-    fmt: str = "wav"  # wav (non-stream) | pcm (stream)
+    fmt: str = "wav"  # downstream container semantics; streams always ask the engine for wav
     stream: bool = False
 
 
@@ -87,12 +93,14 @@ class EngineStats:
 class StreamHandle:
     """A live engine stream.
 
-    ``chunks`` yields s16le mono 48 kHz and releases the engine slot in its
+    ``chunks`` yields s16le mono at ``sample_rate`` (the rate the engine really
+    sent, taken from its WAV header) and releases the engine slot in its
     ``finally``; ``aclose`` is idempotent and safe after exhaustion.
     """
 
     chunks: AsyncGenerator[bytes, None]
     aclose: Callable[[], Awaitable[None]]
+    sample_rate: int = ENGINE_SAMPLE_RATE
 
 
 class EngineClient:
@@ -212,8 +220,10 @@ class EngineClient:
         """Admit the request (queue/readiness) *before* returning, then open the stream.
 
         Admission raises ``QueueFull``/``EngineNotReady`` here — never after the
-        router has already sent ``200`` (SPEC §4/§6). The slot is held by the
-        returned handle and released exactly once when its chunks finish.
+        router has already sent ``200`` (SPEC §4/§6). The engine's WAV header is
+        read (and stripped) here too, so ``handle.sample_rate`` is the rate the
+        caller has to resample *from*. The slot is held by the returned handle and
+        released exactly once when its chunks finish.
         ``record=False`` keeps the request out of the RTF / first-audio window (warm-up).
         """
         await self._acquire()
@@ -241,34 +251,86 @@ class EngineClient:
                 # even when resp.aclose() is interrupted.
                 self._release()
 
+        body = resp.aiter_bytes()
+        buf = bytearray()
+        try:
+            header = await self._stream_header(body, buf)
+            if header is None:  # the engine ignored response_format=wav
+                data_at, audio_format, channels, rate, bits = 0, 1, 1, ENGINE_SAMPLE_RATE, 16
+            else:
+                data_at, audio_format, channels, rate, bits = header
+            convert = _stream_converter(audio_format, channels, bits)
+        except BaseException:
+            await aclose()
+            raise
+        head = bytes(buf[data_at:])
+        frame = max(1, channels * bits // 8)  # engine bytes per frame
+
         async def chunks() -> AsyncGenerator[bytes, None]:
-            """Engine streams s16le mono 48 kHz (SPEC §6); pass it through unchanged."""
+            """Normalized s16le mono at ``rate``; releases the engine slot at the end."""
             first_ms: float | None = None
             total = 0
             try:
-                buf = bytearray()
-                try:
-                    async for raw in resp.aiter_bytes():
-                        buf += raw
-                        frames = len(buf) - len(buf) % 2
-                        if frames == 0:
-                            continue
-                        out = bytes(buf[:frames])
-                        del buf[:frames]
-                        if first_ms is None:
-                            first_ms = (time.perf_counter() - started) * 1000.0
-                        total += len(out)
-                        yield out
-                except httpx.HTTPError as exc:
-                    raise EngineError(f"engine stream failed: {exc}") from exc
+                carry = bytearray()
+                async for piece in _prefixed(head, body):
+                    carry += piece
+                    frames = len(carry) // frame
+                    if frames == 0:
+                        continue
+                    take = frames * frame
+                    out = convert(bytes(carry[:take]))
+                    del carry[:take]  # the sub-frame remainder carries to the next chunk
+                    if first_ms is None:
+                        first_ms = (time.perf_counter() - started) * 1000.0
+                    total += len(out)
+                    yield out
                 wall = time.perf_counter() - started
-                dur = total / 2 / ENGINE_SAMPLE_RATE
+                dur = total / 2 / rate
                 if record:
                     self._record(wall / dur if dur > 0 else None, first_ms)
             finally:
                 await aclose()
 
-        return StreamHandle(chunks=chunks(), aclose=aclose)
+        return StreamHandle(chunks=chunks(), aclose=aclose, sample_rate=rate)
+
+    @staticmethod
+    async def _fill(stream: AsyncIterator[bytes], buf: bytearray, n: int) -> bool:
+        """Buffer into ``buf`` until it holds ``n`` bytes; False once the engine is at EOF."""
+        while len(buf) < n:
+            try:
+                buf += await stream.__anext__()
+            except StopAsyncIteration:
+                return False
+            except httpx.HTTPError as exc:
+                raise EngineError(f"engine stream failed: {exc}") from exc
+        return True
+
+    async def _stream_header(
+        self, stream: AsyncIterator[bytes], buf: bytearray
+    ) -> tuple[int, int, int, int, int] | None:
+        """Consume the engine stream's WAV header into ``buf``.
+
+        Returns ``(data_offset, audio_format, channels, sample_rate, bits)`` or
+        ``None`` when the engine streamed bare samples without a container — the
+        documented SPEC §6 assumption of s16le mono 48 kHz.
+        """
+        await self._fill(stream, buf, _HEADER_MIN)
+        if buf[:4] != b"RIFF" or buf[8:12] != b"WAVE":
+            global _raw_stream_logged
+            if not _raw_stream_logged:
+                logger.warning(
+                    "engine streamed raw samples (response_format=wav ignored) — "
+                    "assuming s16le mono %d Hz",
+                    ENGINE_SAMPLE_RATE,
+                )
+                _raw_stream_logged = True
+            return None
+        while True:
+            header = _wav_header(bytes(buf))
+            if header is not None:
+                return header
+            if len(buf) >= _HEADER_MAX or not await self._fill(stream, buf, len(buf) + 1):
+                raise EngineError("unsupported engine stream format: incomplete WAV header")
 
     async def restart(self) -> None:
         """Restart the s6 service and *wait* for it to be healthy again.
@@ -383,7 +445,9 @@ class EngineClient:
         body: dict[str, object] = {
             "model": self.model,
             "input": params.text,
-            "response_format": params.fmt,
+            # Streams must be self-describing: bare PCM carries no sample type or rate, so
+            # the engine is always asked for WAV and the header is stripped in _stream_header.
+            "response_format": "wav" if params.stream else params.fmt,
             "stream": params.stream,
         }
         if params.ref_audio is not None:
@@ -502,6 +566,64 @@ class EngineClient:
             info = (None, None, None)
         self._gpu_cache = (now, info)
         return info
+
+
+async def _prefixed(head: bytes, rest: AsyncIterator[bytes]) -> AsyncGenerator[bytes, None]:
+    """Yield already-buffered bytes, then the rest of the stream, mapping transport errors."""
+    if head:
+        yield head
+    try:
+        async for chunk in rest:
+            yield chunk
+    except httpx.HTTPError as exc:
+        raise EngineError(f"engine stream failed: {exc}") from exc
+
+
+def _wav_header(buf: bytes) -> tuple[int, int, int, int, int] | None:
+    """Locate the ``data`` chunk of a RIFF/WAVE header.
+
+    Returns ``(data_offset, audio_format, channels, sample_rate, bits)`` or ``None``
+    while more bytes are needed. Walks chunks so an extended ``fmt `` (or a leading
+    LIST chunk) does not desynchronise the parse.
+    """
+    seen_fmt = False
+    audio_format = channels = rate = bits = 0
+    off = 12
+    while off + 8 <= len(buf):
+        chunk, size = struct.unpack_from("<4sI", buf, off)
+        if chunk == b"data":
+            if not seen_fmt:
+                return None
+            return off + 8, audio_format, channels, rate, bits
+        if chunk == b"fmt ":
+            if off + 24 > len(buf):
+                return None
+            audio_format, channels, rate, _, _, bits = struct.unpack_from("<HHIIHH", buf, off + 8)
+            if audio_format == 0xFFFE and off + 8 + 40 <= len(buf):  # WAVE_FORMAT_EXTENSIBLE
+                audio_format = struct.unpack_from("<H", buf, off + 8 + 24 + 6)[0]
+            seen_fmt = True
+        off += 8 + size + size % 2
+    return None
+
+
+def _stream_converter(audio_format: int, channels: int, bits: int) -> Callable[[bytes], bytes]:
+    """Return the transform that turns one engine stream frame set into s16le mono."""
+    if (audio_format, bits) not in ((1, 16), (3, 32)):
+        raise EngineError(
+            f"unsupported engine stream format (format {audio_format}, {bits}-bit, {channels} ch)"
+        )
+    if audio_format == 1 and channels == 1:
+        return lambda data: data
+
+    def convert(data: bytes) -> bytes:
+        samples = (
+            np.frombuffer(data, dtype="<f4") if audio_format == 3 else pcm_s16le_to_float(data)
+        )
+        if channels > 1:
+            samples = samples.reshape(-1, channels).mean(axis=1)
+        return pcm_s16le(samples)
+
+    return convert
 
 
 def _runtime_label() -> str:

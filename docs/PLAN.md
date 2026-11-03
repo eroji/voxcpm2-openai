@@ -5,7 +5,7 @@
 > their own brief in `docs/tasks/<ID>.md`. Steps use `- [ ]` in briefs.
 
 **Goal:** One container serving VoxCPM2 via vLLM-Omni behind an OpenAI-compatible
-`/v1/audio/speech` API and the five-screen Voice Studio UI, replacing `qwen3-tts-openai`.
+`/v1/audio/speech` API and the six-screen Voice Studio UI, replacing `qwen3-tts-openai`.
 
 **Architecture:** s6 supervises two processes: the vLLM-Omni engine on loopback `:8102` and a
 FastAPI app on `:8000`. The app owns voice storage (`/data`), resolves voice names to inline
@@ -47,7 +47,7 @@ plain HTML/CSS/ES modules (no build step), pytest + pytest-asyncio, ruff, mypy, 
 | M0 | Spikes S1–S6 | Findings appended to `NOTES.md` with command output from the `vllm` host | `spikes` (manual, host-run) |
 | M1 | Engine + `/v1` | `/v1/audio/speech` (all formats, stream), models, voices, warm-up, queueing, OpenAI errors; unit+integration green | `test`, `e2e` |
 | M2 | Voice store + Studio API | voices CRUD/import/clone/transcribe/takes/engine status; data survives restart; backups written | `test` |
-| M3 | UI | All five screens wired, hash routing, waveforms, tokens and layout match `ui/studio.html`; keyboard-only pass | `e2e`, `ui-parity` |
+| M3 | UI | All six screens wired, hash routing, waveforms, tokens and layout match `ui/studio.html`; keyboard-only pass | `e2e` |
 | M4 | Design flow | description → 1–4 candidates → select → save → voice usable by name | `test`, `e2e` |
 | M5 | Delivery + cutover | CI image build, runbook/rollback documented, acceptance suite exists | CI `build` |
 
@@ -114,6 +114,7 @@ Citations are `SPEC.md` section/line. IDs are append-only.
 | R-051 | No secrets in repo or CI logs | delivery brief, §10 |
 | R-052 | Startup page at `/` until warm, with 4-step progress, live log, failure mapping | `ui/STARTING.md` |
 | R-053 | `/api/engine/startup` contract + `/api` 503 gate with startup/restart exceptions | `ui/STARTING.md` |
+| R-054 | Languages store (`languages.json`), supported set file, management API, preset editing, voice relabel/delete rules, drift flag | SPEC §5a/§7 |
 
 ## Ambiguities and decisions
 
@@ -142,6 +143,7 @@ Citations are `SPEC.md` section/line. IDs are append-only.
 | Q-021 | Uploaded clone audio >48 kHz | Resample down to 48 kHz; below stays at original rate (spec: "resample to 48 kHz if above") | no |
 | Q-022 | Backup retention | Keep newest 20 zips, prune oldest | no |
 | Q-024 | Studio Format control vs `/api/speak` returning take metadata (SPEC §7) while takes are WAV (SPEC §5) | **Resolved by human 2026-11-02:** Format drives the `save=false` preview and take playback via `/api/takes/{id}/audio?format=`; stored takes stay 48 kHz WAV | no |
+| Q-026 | SPEC §8 still says “Auto-transcribe with whisper-stt”; human requested “Transcribe with STT” | Use the human’s copy; spec wording is superseded for the button label | no |
 | Q-025 | Are models aliases list entries or request-only? | **Superseded by SPEC §6:** one entry `voxcpm2`; aliases are request-only (matches Q-011) | no |
 | Q-023 | "Test a line" needs `/v1`, which requires Bearer when `API_KEYS` is set; the browser has no key | **Resolved by human 2026-11-02:** Studio preview/test synthesis uses `POST /api/speak?save=false` under Studio Basic auth; no bearer key, button never disabled | no |
 
@@ -187,6 +189,12 @@ Wave 0 is the lead scaffold (contracts + tooling). A task is ready only when eve
 | M2-T18 | M2 | 14 | Remove Qwen3 import (spec v0.2.0) | `app/importer.py`, `app/main.py`, `app/routers/studio_voices.py`, `deploy/compose.yaml`, `tests/test_importer.py`, `tests/test_studio_voices.py`, `tests/test_acceptance.py`, `tests/test_deploy.py` | M2-T4 | `pytest tests/test_studio_voices.py tests/test_acceptance.py` |
 | M1-T18 | M1 | 14 | Empty library 400 + warm-only synthesis/metrics | `app/config.py`, `app/speech.py`, `app/routers/v1.py`, `app/routers/studio_takes.py`, `tests/conftest.py`, `tests/test_v1.py`, `tests/test_studio_takes.py`, `tests/test_speech.py`, `tests/test_metrics.py` | M1-T12, M2-T16 | `pytest tests/test_metrics.py tests/test_v1.py` |
 | M3-T14 | M3 | 14 | Presets, empty states, icons, startup log table | `app/static/index.html`, `app/static/starting.html`, `app/static/studio.css`, `app/static/js/speak.js`, `app/static/js/voices.js`, `app/static/js/design.js`, `app/static/presets.json`, `app/static/icons/**`, `tests/test_ui_assets.py`, `tests/e2e/*` | M3-T13 | `pytest tests/e2e` |
+| M2-T20 | M2 | 17 | Languages store + management API + voice enforcement | `app/languages.py`, `app/routers/languages.py`, `app/main.py`, `app/config.py`, `deploy/supported-languages.json`, `deploy/Containerfile`, voice routers, `app/design.py`, `tests/test_languages.py`, related tests | M2-T5, M2-T18 | `pytest tests/test_languages.py` |
+| M3-T16 | M3 | 18 | Languages screen + language-aware Studio | `app/static/index.html`, `app/static/studio.css`, `app/static/js/core.js`, `app/static/js/languages.js`, `app/static/js/speak.js`, `app/static/js/clone.js`, `app/static/js/design.js`, `app/static/js/voices.js`, `app/static/icons/**`, `tests/test_ui_assets.py`, `tests/e2e/test_studio.py` | M2-T20 | `pytest tests/e2e` |
+| M1-T20 | M1 | 19 | Engine stream WAV/format/rate normalization | `app/engine.py`, `app/speech.py`, `tests/fake_engine.py`, stream tests | M1-T9 | `pytest tests/test_streaming.py` |
+| M2-T21 | M2 | 20 | Session-scoped takes | `app/routers/studio_takes.py`, `tests/test_studio_takes.py` | M2-T12 | `pytest tests/test_studio_takes.py` |
+| M3-T17 | M3 | 19 | Player/editor/session/tab fixes | `app/static/js/core.js`, `speak.js`, `voices.js`, `clone.js`, `index.html`, `studio.css`, UI/e2e tests | M3-T14 | `pytest tests/e2e` |
+| M4-T3 | M4 | 19 | Voice design/style control syntax | `app/design.py`, `app/speech.py`, `tests/test_design.py` | M4-T1 | `pytest tests/test_design.py` |
 | M1-T2 | M1 | 5 | `/v1` API (speech, models, voices) | `app/routers/v1.py`, `tests/test_v1.py`, `tests/test_streaming.py` | M1-T1 | `.venv/bin/python -m pytest tests/test_v1.py tests/test_streaming.py -q` |
 | M1-T4 | M1 | 4 | Startup/warm-up/readiness wiring | `app/warmup.py`, `app/main.py`, `tests/test_warmup.py` | M1-T1 | `.venv/bin/python -m pytest tests/test_warmup.py -q` |
 | M2-T2 | M2 | 2 | Clone + transcribe API | `app/routers/studio_clone.py`, `tests/test_studio_clone.py` | — | `.venv/bin/python -m pytest tests/test_studio_clone.py -q` |

@@ -37,7 +37,8 @@ async def patch_voice(name: str, patch: VoicePatch, request: Request) -> dict[st
     if patch.ref_text is not None:
         fields["ref_text"] = patch.ref_text
     if patch.language is not None:
-        fields["language"] = patch.language
+        # SPEC §5a rule 4: a voice can only carry an enabled language.
+        fields["language"] = request.app.state.languages.ensure_enabled(patch.language)
     if not fields:
         raise BadRequest("Nothing to update.", param="body", code="empty_patch")
     return (await asyncio.to_thread(store.update, name, **fields)).summary()

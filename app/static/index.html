@@ -28,7 +28,8 @@
     <button class="vs-tab" data-tab="voices"><span class="num">02</span>Voices</button>
     <button class="vs-tab" data-tab="clone"><span class="num">03</span>Clone</button>
     <button class="vs-tab" data-tab="design"><span class="num">04</span>Design</button>
-    <button class="vs-tab" data-tab="engine"><span class="num">05</span>Engine</button>
+    <button class="vs-tab" data-tab="languages"><span class="num">05</span>Languages</button>
+    <button class="vs-tab" data-tab="engine"><span class="num">06</span>Engine</button>
   </nav>
 </header>
 
@@ -112,10 +113,6 @@
       <input class="vs-input" id="voice-search" type="search" placeholder="Search">
       <div class="vs-filters" role="group" aria-label="Filter by language" id="lang-filters">
         <button class="vs-filter" data-lang="all" aria-pressed="true">All</button>
-        <button class="vs-filter" data-lang="en" aria-pressed="false">English</button>
-        <button class="vs-filter" data-lang="ja" aria-pressed="false">Japanese</button>
-        <button class="vs-filter" data-lang="ko" aria-pressed="false">Korean</button>
-        <button class="vs-filter" data-lang="zh" aria-pressed="false">Chinese</button>
       </div>
     </div>
     <p class="vs-error" id="voices-error" role="alert" hidden></p>
@@ -146,7 +143,7 @@
         <label class="lbl" for="ref-text">Transcript<span class="hint">Exact words spoken</span></label>
         <div class="ctl" style="display:flex;flex-direction:column;gap:10px;align-items:flex-start">
           <textarea class="vs-text" id="ref-text" rows="3" placeholder="Paste or auto-fill the transcript"></textarea>
-          <button class="btn-link" id="auto-transcribe" disabled>Auto-transcribe with whisper-stt</button>
+          <button class="btn-link" id="auto-transcribe" disabled>Transcribe with STT</button>
         </div>
       </div>
       <div class="vs-row">
@@ -155,7 +152,7 @@
       </div>
       <div class="vs-row">
         <label class="lbl" for="clone-lang">Language</label>
-        <div class="ctl"><select class="vs-select" id="clone-lang"><option value="en">English</option><option value="ja">Japanese</option><option value="ko">Korean</option><option value="zh">Chinese</option></select></div>
+        <div class="ctl"><select class="vs-select" id="clone-lang"></select></div>
       </div>
       <p class="vs-error" id="clone-error" role="alert" hidden></p>
       <p class="vs-status" id="clone-status" role="status" hidden></p>
@@ -190,7 +187,7 @@
       <div class="vs-row">
         <span class="lbl">Options</span>
         <div class="ctl vs-grid-params">
-          <div class="vs-field"><label for="design-lang">Language</label><select class="vs-select" id="design-lang"><option value="ja">Japanese</option><option value="en">English</option><option value="ko">Korean</option><option value="zh">Chinese</option></select></div>
+          <div class="vs-field"><label for="design-lang">Language</label><select class="vs-select" id="design-lang"></select></div>
           <div class="vs-field"><label for="design-n">Candidates</label><select class="vs-select" id="design-n"><option>3</option><option>2</option><option>4</option></select></div>
         </div>
       </div>
@@ -216,7 +213,37 @@
   </div>
 </div>
 
-<!-- 05 ENGINE -->
+<!-- 05 LANGUAGES -->
+<div class="vs-screen" id="screen-languages" hidden>
+  <div class="vs-cols">
+    <section class="vs-col-main" aria-labelledby="lang-h">
+      <div class="vs-head"><h2 class="vs-h2" id="lang-h">Languages <span class="count" id="lang-count"></span></h2></div>
+      <p class="vs-error" id="languages-error" role="alert" hidden></p>
+      <div class="vs-table-wrap" style="border-top:var(--vs-rule-section)">
+        <div class="vs-lang-table">
+          <div class="vs-lang-head" aria-hidden="true"><span>Language</span><span>Code</span><span>Voices</span><span>Test phrases</span><span></span></div>
+          <div id="lang-rows"></div>
+        </div>
+      </div>
+    </section>
+    <aside class="vs-col-side vs-steps" aria-labelledby="add-lang-h">
+      <h3 id="add-lang-h">Add a language</h3>
+      <div style="display:flex;gap:8px;flex-wrap:wrap" id="add-lang-box">
+        <label class="sr" for="add-lang">Language to add</label>
+        <select class="vs-select" id="add-lang" style="flex:1 1 200px"></select>
+        <button class="btn-primary" id="add-lang-btn">Add</button>
+      </div>
+      <p class="meta" style="white-space:normal">Only languages the engine supports are listed. The list comes from the backend, so a different model changes what you can add.</p>
+      <h3 style="margin-top:14px">What a language controls</h3>
+      <p><b>1</b>  The tag on each voice, and the language filters in Voices.</p>
+      <p><b>2</b>  The choices in Clone and Design.</p>
+      <p><b>3</b>  Which test phrases Speak and Design offer. A new language starts with none until you add them.</p>
+      <p><b>4</b>  Not how a voice sounds: VoxCPM2 reads the language from the text, so any voice can speak any supported language.</p>
+    </aside>
+  </div>
+</div>
+
+<!-- 06 ENGINE -->
 <div class="vs-screen" id="screen-engine" hidden>
   <section aria-labelledby="engine-h">
     <div class="vs-head">
@@ -241,6 +268,7 @@
 <script type="module" src="/static/js/voices.js"></script>
 <script type="module" src="/static/js/clone.js"></script>
 <script type="module" src="/static/js/design.js"></script>
+<script type="module" src="/static/js/languages.js"></script>
 <script type="module" src="/static/js/engine.js"></script>
 </body>
 </html>
