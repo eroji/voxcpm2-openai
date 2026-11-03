@@ -1,7 +1,7 @@
 services:
   voxcpm2-openai:
     container_name: voxcpm2-openai
-    image: harbor.dotslash.io/dotslash/voxcpm2-openai:v0.1.0
+    image: harbor.dotslash.io/dotslash/voxcpm2-openai:v0.1.1
     restart: always
     stop_grace_period: 25s
     devices:

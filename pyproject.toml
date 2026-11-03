@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "voxcpm2-openai"
-version = "0.1.0"
+version = "0.1.1"
 description = "VoxCPM2 TTS service with OpenAI-compatible API and Voice Studio"
 requires-python = ">=3.12"
 dependencies = [

@@ -172,7 +172,7 @@ REFERENCE_SHA256 = {
     "deploy/voxcpm2-3090.yaml": (
         "3ddc3cabf84d86154b66365e18938d3f1f4d8d732d613396b2b97a387734f194"
     ),
-    "deploy/compose.yaml": "de2d4ea52024e86ab0b385d632ed18292a38b933035bc07a30adcabef56edb43",
+    "deploy/compose.yaml": "c5e9a031b9cf345b58a4a419253b6fbae537b7c083fbae49f313b2f439263050",
 }
 
 
