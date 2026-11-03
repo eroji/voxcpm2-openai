@@ -142,6 +142,31 @@ event loop (`asyncio.to_thread`) because it shells out to `nvidia-smi`.
 - `STT_URL` (OpenAI base ending in `/v1`): POST `{STT_URL}/audio/transcriptions` multipart
   `file`; return its `text`. Empty `STT_URL` → 503 "transcription is not configured".
 
+## 6b. Startup page and API (from `ui/STARTING.md`)
+
+While the app is not warm and `STARTUP_PAGE` is true (default):
+
+- `GET /` serves `app/static/starting.html`; once `/ready` is 200 it serves the Studio.
+- `/api/*` returns 503 `{"error": ...}` + `Retry-After: 5`, except
+  `GET /api/engine/startup` and `POST /api/engine/restart`.
+- `/v1/*`, `/health`, `/ready` are unchanged.
+
+`GET /api/engine/startup` (Studio auth; always available):
+
+```json
+{"state":"starting|ready|failed","elapsed_s":72,
+ "steps":[{"label":"...","detail":"...","status":"done|active|waiting|failed","duration_s":21}],
+ "error":null,"restart_in_s":null,"log":["... last 16 lines, oldest first ..."]}
+```
+
+Steps: container started → loading model weights → starting the engine → warming up. The tracker
+marks a step `failed` on a fatal engine log line or when `STARTUP_FAIL_AFTER_S` (default 600) passes
+without health; `error` is a plain-language mapping (CUDA OOM, missing `voxcpm`, exited with code,
+timeout). Engine log: `$DATA_DIR/logs/engine.log`, written by `app/engine_runner.py`, ANSI stripped,
+200 chars/line, last 200 kept. `restart_in_s` is null while s6's immediate restart is in effect.
+
+Tests set `startup_page=False` unless they exercise this feature.
+
 ## 7. UI module contract (parallel-safe)
 
 `app/static/index.html` loads modules in this order:

@@ -79,6 +79,11 @@ Volumes and GPU (from `deploy/compose.yaml`):
 `STT_URL` is confirmed as `http://vllm.dotslash.io:8890/v1` (whisper-stt, human-verified
 2026-11-02) — that is the value in `deploy/compose.yaml`.
 
+The first browser load shows the startup page until `/ready` 200; `/api/engine/startup` reports the
+four steps and the merged engine/app log (`/data/logs/engine.log`). If startup fails, the page
+shows the mapped cause and a Restart button; s6 retries after 30/60/120 s, then waits for a manual
+restart.
+
 Hugging Face downloads are off by default (`HF_HUB_OFFLINE=1`, weights are local). To allow
 authenticated cache downloads, export `HF_TOKEN` in the host environment and start with
 `HF_HUB_OFFLINE=0`; compose passes both through (`HF_TOKEN: "${HF_TOKEN:-}"`). Never put the token

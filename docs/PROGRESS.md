@@ -1,6 +1,6 @@
 # Progress
 
-**Current wave:** 10 — final; pushed to GitLab, CI running
+**Current wave:** 13 — startup page feature complete
 **Resume:** `scripts/verify.sh` then `/status`; next human action is `git push` to run GitLab CI
 
 ## Task table
@@ -51,7 +51,13 @@
 | 8 | M1-T15 speech off-loop (review) | pass | `pytest tests/test_speech.py` | |
 | 8 | M2-T12 store/take invariants (review) | pass | `pytest tests/test_store.py tests/test_studio_takes.py` | |
 | 8 | M2-T13 deterministic burst + host RTF (review) | pass | `pytest tests/test_acceptance.py` | |
-| 8 | M3-T10 UI release e2e (review) | pass | `pytest tests/e2e` | |
+| 8 | M3-T10 UI release e2e (review) | pass |
+| 11 | M2-T15a engine log runner | pass | |
+| 11 | M3-T12 startup asset + Engine UI | pass | |
+| 12 | M2-T15b startup API/routing | pass | |
+| 13 | M2-T16 startup state/gate fixes | pass | |
+| 13 | M2-T17 runner log/backoff | pass | |
+| 13 | M3-T13 startup UX/e2e | pass | `pytest tests/e2e` | |
 | 7 | M5-T2 acceptance | pass | `pytest tests/test_acceptance.py` | |
 
 \* M0-T1 delivers runnable scripts + `NOTES.md`; findings are pending the external host (B-001).
@@ -150,9 +156,9 @@ scripts/verify.sh
   format check     54 files already formatted
   lint             All checks passed
   typecheck        Success: no issues found in 21 source files
-  unit+integration 284 passed, 5 skipped in 39.82s
-  coverage         95.25% (gate 65%)
-  e2e              26 passed (real Chromium)
+  unit+integration 344 passed, 5 skipped in 37.30s
+  coverage         93.45% (gate 65%)
+  e2e              29 passed (real Chromium)
   python build     sdist + wheel built
   package contract Containerfile + s6 checks passed
 ==> OK
@@ -214,6 +220,12 @@ spikes remain host-run. CI has not run yet: the branch is local (47+ commits ahe
   with that explanation instead of a raw docker error. Checks/tests/e2e
   are not repeated in CI; `scripts/verify.sh` is the quality gate. Image tags: short SHA on `main`,
   `X.Y.Z` on `vX.Y.Z` tags.
+
+- **2026-11-03 —** Startup page feature (`ui/STARTING.md`) implemented: `/` serves the startup
+  page until warm, `/api/engine/startup` returns the 4-step contract, `/api/*` is gated with the
+  two documented exceptions, engine logs tee to `/data/logs/engine.log`, s6 backoff
+  30/60/120 s with a down marker, and failures map to plain-language text. Real-image check:
+  startup page at `/`, `/api/voices` 503 + Retry-After 5, `/health` 200, `/ready` 503.
 
 ## Next action
 

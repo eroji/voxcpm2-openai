@@ -112,6 +112,8 @@ Citations are `SPEC.md` section/line. IDs are append-only.
 | R-049 | **Human decision 2026-11-02:** CI builds/pushes the container image only; all quality gates (format/lint/types/tests+coverage/e2e/build/package contract) live in `scripts/verify.sh` | delivery brief |
 | R-050 | CD opt-in only: deploy jobs excluded unless `DEPLOY_TARGET=staging|production`; production tag + manual approval; not enabled now | delivery brief |
 | R-051 | No secrets in repo or CI logs | delivery brief, §10 |
+| R-052 | Startup page at `/` until warm, with 4-step progress, live log, failure mapping | `ui/STARTING.md` |
+| R-053 | `/api/engine/startup` contract + `/api` 503 gate with startup/restart exceptions | `ui/STARTING.md` |
 
 ## Ambiguities and decisions
 
@@ -176,6 +178,12 @@ Wave 0 is the lead scaffold (contracts + tooling). A task is ready only when eve
 | M2-T14 | M2 | 9 | Studio preview via `/api/speak?save=false` + take formats (human) | `app/models.py`, `app/routers/studio_takes.py`, `tests/test_studio_takes.py` | M2-T12 | `.venv/bin/python -m pytest tests/test_studio_takes.py -q` |
 | M5-T4 | M5 | 9 | Align CI/CD with notely conventions + STT URL (human) | `.gitlab-ci.yml`, `deploy/compose.deploy.yaml`, `docs/RUNBOOK.md`, `tests/test_deploy.py` | M1-T13 | `.venv/bin/python -m pytest tests/test_deploy.py -q` |
 | M3-T11 | M3 | 10 | Studio preview UI + real Format control (human) | `app/static/js/clone.js`, `app/static/js/speak.js`, `app/static/index.html`, `tests/test_ui_assets.py`, `tests/e2e/**` | M2-T14 | `.venv/bin/python -m pytest tests/e2e -q` |
+| M2-T15a | M2 | 11 | Engine log runner + s6 wiring | `app/engine_runner.py`, `deploy/s6/engine/run`, `tests/test_engine_runner.py`, `tests/test_deploy.py` | M1-T3 | `pytest tests/test_engine_runner.py tests/test_deploy.py` |
+| M3-T12 | M3 | 11 | Startup page asset + Engine stat cosmetics | `app/static/starting.html`, `app/static/index.html`, `app/static/studio.css`, `app/static/js/engine.js`, `tests/test_ui_assets.py`, `tests/e2e/test_studio.py` | M3-T10 | `pytest tests/e2e` |
+| M2-T15b | M2 | 12 | Startup tracker + `/api/engine/startup` + routing | `app/startup.py`, `app/main.py`, `app/routers/studio_engine.py`, `tests/test_startup.py`, `tests/e2e/test_startup.py` | M2-T15a, M3-T12 | `pytest tests/test_startup.py tests/e2e/test_startup.py` |
+| M2-T16 | M2 | 13 | Startup state/gate/RTF fixes (review) | `app/startup.py`, `app/main.py`, `app/warmup.py`, `app/engine.py`, `app/routers/studio_engine.py`, `tests/test_startup.py`, `tests/test_warmup.py`, `tests/test_engine.py` | M2-T15b | `pytest tests/test_startup.py tests/test_warmup.py tests/test_engine.py` |
+| M2-T17 | M2 | 13 | Runner log safety + s6 backoff (review) | `app/engine_runner.py`, `deploy/s6/engine/finish`, `deploy/s6/engine/run`, `tests/test_engine_runner.py`, `tests/test_deploy.py` | M2-T15a | `pytest tests/test_engine_runner.py tests/test_deploy.py` |
+| M3-T13 | M3 | 13 | Startup UX + ready-path e2e (review) | `app/static/starting.html`, `app/static/index.html`, `app/static/js/engine.js`, `tests/test_ui_assets.py`, `tests/e2e/test_startup.py` | M2-T15b, M3-T12 | `pytest tests/e2e/test_startup.py` |
 | M1-T2 | M1 | 5 | `/v1` API (speech, models, voices) | `app/routers/v1.py`, `tests/test_v1.py`, `tests/test_streaming.py` | M1-T1 | `.venv/bin/python -m pytest tests/test_v1.py tests/test_streaming.py -q` |
 | M1-T4 | M1 | 4 | Startup/warm-up/readiness wiring | `app/warmup.py`, `app/main.py`, `tests/test_warmup.py` | M1-T1 | `.venv/bin/python -m pytest tests/test_warmup.py -q` |
 | M2-T2 | M2 | 2 | Clone + transcribe API | `app/routers/studio_clone.py`, `tests/test_studio_clone.py` | — | `.venv/bin/python -m pytest tests/test_studio_clone.py -q` |
@@ -212,7 +220,10 @@ Wave 0 is the lead scaffold (contracts + tooling). A task is ready only when eve
 - **Wave 7:** M3-T6, M5-T2 (2 parallel).
 - **Wave 8 (release review fixes):** M1-T13, M1-T14, M1-T15, M2-T12, M2-T13, M3-T10 (6 parallel).
 - **Wave 9:** M2-T14, M5-T4 (2 parallel).
-- **Wave 10:** M3-T11, then full `scripts/verify.sh`, push/tags, delivery report.
+- **Wave 10:** M3-T11.
+- **Wave 11:** M2-T15a, M3-T12.
+- **Wave 12:** M2-T15b.
+- **Wave 13:** M2-T16, M2-T17, M3-T13; then full `scripts/verify.sh`.
 
 ## Dependency DAG
 
