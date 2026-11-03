@@ -179,6 +179,12 @@ def test_image_override_file_pins_deploy_image():
     assert "voxcpm2-openai" in text
 
 
+def test_ci_fails_loudly_without_harbor_credentials():
+    ci = CI_FILE.read_text()
+    assert "HARBOR_USER and HARBOR_TOKEN must be set" in ci
+    assert "unprotected" in ci, "explain protected-variable pitfall for tag pipelines"
+
+
 def test_ci_mirrors_notely_conventions():
     ci = CI_FILE.read_text()
     assert "HARBOR_TOKEN" in ci
@@ -196,7 +202,11 @@ def test_ci_builds_only_on_release_tags():
     assert r"/^v\d+\.\d+\.\d+$/" in ci, "only vX.Y.Z tags create pipelines"
     assert "$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH" not in ci, "branch pushes must not build"
     assert "CI_COMMIT_SHORT_SHA" not in ci, "no commit-tagged images"
-    assert "${CI_COMMIT_TAG#v}" in ci, "tagged builds are published as X.Y.Z, not vX.Y.Z"
+    assert 'TAG="$CI_COMMIT_TAG"' in ci, "image tag keeps the v prefix"
+    assert '"$HARBOR_IMAGE:latest"' in ci and 'docker push "$HARBOR_IMAGE:latest"' in ci, (
+        "latest must move with each release"
+    )
+    assert "${CI_COMMIT_TAG#v}" not in ci, "do not strip the v prefix"
 
 
 def test_production_deploy_is_tag_only_and_manual():

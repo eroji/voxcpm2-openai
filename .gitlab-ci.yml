@@ -10,7 +10,7 @@
 #   DEPLOY_HOST (default vllm.dotslash.io), DEPLOY_USER (default deploy),
 #   DEPLOY_PATH (default /opt/voxcpm2-openai).
 #
-# Only tags build: `git tag v0.1.0 && git push origin v0.1.0` builds/pushes :0.1.0.
+# Only tags build: `git tag v0.1.0 && git push origin v0.1.0` builds/pushes :v0.1.0 and :latest.
 # Pushes to main and ordinary commits never create a pipeline.
 
 workflow:
@@ -36,13 +36,20 @@ build:
   rules:
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
   before_script:
-    - echo "$HARBOR_TOKEN" | docker login harbor.dotslash.io -u "$HARBOR_USER" --password-stdin
+    - |
+      if [ -z "${HARBOR_USER:-}" ] || [ -z "${HARBOR_TOKEN:-}" ]; then
+        echo "HARBOR_USER and HARBOR_TOKEN must be set as CI/CD variables."
+        echo "For tag pipelines they must be unprotected (or the tag must be protected)."
+        exit 1
+      fi
+      echo "$HARBOR_TOKEN" | docker login harbor.dotslash.io -u "$HARBOR_USER" --password-stdin
   script:
     - |
-      TAG="${CI_COMMIT_TAG#v}"
-      echo "Building $HARBOR_IMAGE:$TAG"
-      docker build -f deploy/Containerfile -t "$HARBOR_IMAGE:$TAG" .
+      TAG="$CI_COMMIT_TAG"
+      echo "Building $HARBOR_IMAGE:$TAG (and :latest)"
+      docker build -f deploy/Containerfile -t "$HARBOR_IMAGE:$TAG" -t "$HARBOR_IMAGE:latest" .
       docker push "$HARBOR_IMAGE:$TAG"
+      docker push "$HARBOR_IMAGE:latest"
       echo "DEPLOY_IMAGE=$HARBOR_IMAGE:$TAG" > build.env
   artifacts:
     expire_in: 1 week
@@ -50,7 +57,7 @@ build:
       dotenv: build.env
 
 # ------------------------------------------------------------------ CD (opt-in)
-# Nothing below runs unless DEPLOY_TARGET is set. Staging follows main; production needs a
+# Nothing below runs unless DEPLOY_TARGET is set. Both deploy from a release tag; production needs a
 # vX.Y.Z tag plus a manual approval. The image is pinned to the tag that built it.
 deploy:staging:
   stage: deploy
