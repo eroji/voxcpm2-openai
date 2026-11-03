@@ -19,9 +19,9 @@ Locally (or on any machine with a registry login):
 
 ```bash
 docker build -f deploy/Containerfile \
-  -t harbor.dotslash.io/dotslash/voxcpm2-openai:v0.1.3 \
+  -t harbor.dotslash.io/dotslash/voxcpm2-openai:v0.2.0 \
   -t harbor.dotslash.io/dotslash/voxcpm2-openai:latest .
-docker push harbor.dotslash.io/dotslash/voxcpm2-openai:v0.1.3
+docker push harbor.dotslash.io/dotslash/voxcpm2-openai:v0.2.0
 docker push harbor.dotslash.io/dotslash/voxcpm2-openai:latest
 ```
 
@@ -44,7 +44,7 @@ variables must be unprotected. The job needs a docker-capable runner (Q-015).
 
 ## 2. Run on 8881 (A/B next to qwen3-tts)
 
-`deploy/compose.yaml` pins the current release image (`:v0.1.3`). For any other release, use the
+`deploy/compose.yaml` pins the current release image (`:v0.2.0`). For any other release, use the
 image override with an explicit `DEPLOY_IMAGE`:
 
 ```bash
@@ -52,7 +52,7 @@ mkdir -p /opt/voxcpm2-openai/deploy/data
 # copy deploy/compose.yaml, deploy/compose.deploy.yaml and deploy/voxcpm2-3090.yaml
 # from the repo into /opt/voxcpm2-openai/deploy
 cd /opt/voxcpm2-openai/deploy
-export DEPLOY_IMAGE=harbor.dotslash.io/dotslash/voxcpm2-openai:v0.1.3
+export DEPLOY_IMAGE=harbor.dotslash.io/dotslash/voxcpm2-openai:v0.2.0
 podman-compose -f compose.yaml -f compose.deploy.yaml up -d
 podman logs -f voxcpm2-openai        # expect "service engine: starting" + VoxCPM2; load takes minutes
 # If [base]/Qwen3-TTS appears, the image still carries the old qwen3 supervisor: rebuild from this
@@ -72,7 +72,6 @@ Volumes and GPU (from `deploy/compose.yaml`):
 |---|---|
 | `./data:/data` = `/opt/voxcpm2-openai/deploy/data` | the only stateful path: voices, takes, backups, settings |
 | `/models:/models:ro` | weights at `/models/openbmb/VoxCPM2` |
-| `/opt/qwen3-tts/data/speakers:/import/qwen3-speakers:ro` | one-time lossless import of the eight Qwen3 voices |
 | `devices: nvidia.com/gpu=GPU-79ad6f3b-…` | CDI GPU 1 (RTX 3090, **host index 1**), shared with `whisper-stt` + TEI |
 | `shm_size: 8g` | engine shared memory |
 
@@ -210,7 +209,7 @@ podman stop qwen3-tts-openai
 # 2. move the new service to 8880: in /opt/voxcpm2-openai/deploy/compose.yaml change
 #    ports:  "8881:8000"  ->  "8880:8000"  (host copy only)
 cd /opt/voxcpm2-openai/deploy
-export DEPLOY_IMAGE=harbor.dotslash.io/dotslash/voxcpm2-openai:v0.1.3
+export DEPLOY_IMAGE=harbor.dotslash.io/dotslash/voxcpm2-openai:v0.2.0
 podman-compose -f compose.yaml -f compose.deploy.yaml up -d
 curl -fsS http://127.0.0.1:8880/ready && echo READY
 

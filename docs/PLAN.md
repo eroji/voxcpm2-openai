@@ -71,7 +71,7 @@ Citations are `SPEC.md` section/line. IDs are append-only.
 | R-008 | Engine metrics: VRAM via `nvidia-smi -i 0`; RTF + first-audio rolling average of last 20 | §4 L73 |
 | R-009 | `/data` layout: `voices/<name>.safetensors`, `voices.json`, `takes/<id>.wav`+`.json`, `backups/`, `settings.json` | §5 L79–86 |
 | R-010 | Voice safetensors: float32 mono tensor `audio`, metadata keys, unique `[a-z0-9][a-z0-9_-]{0,63}` name | §5 L88–108 |
-| R-011 | Import `/import/qwen3-speakers/*.safetensors` on first start when voices empty; infer language suffix (`-kr`→ko); add `language`,`source`; `POST /api/voices/import`, skip existing unless `overwrite=true` | §5 L119–121 |
+| R-011 | ~~Qwen3 import~~ **Superseded by SPEC v0.2.0:** no import; voices are created in the Studio (Clone/Design) | §5 |
 | R-012 | Resolve voice audio+`ref_text` → WAV data URI cached by name+mtime | §6 L142 |
 | R-013 | `POST /v1/audio/speech` fields: model(any, required), input(required ≤4000), voice(required, case-insens), response_format, stream, instructions, speed 0.5–2.0, sample_rate, ref_audio/ref_text, cfg/steps/seed | §6 L127–140 |
 | R-014 | Unknown voice → 400 listing valid names; ad-hoc `ref_audio`/`ref_text` bypass store | §6 L133,139 |
@@ -184,6 +184,9 @@ Wave 0 is the lead scaffold (contracts + tooling). A task is ready only when eve
 | M2-T16 | M2 | 13 | Startup state/gate/RTF fixes (review) | `app/startup.py`, `app/main.py`, `app/warmup.py`, `app/engine.py`, `app/routers/studio_engine.py`, `tests/test_startup.py`, `tests/test_warmup.py`, `tests/test_engine.py` | M2-T15b | `pytest tests/test_startup.py tests/test_warmup.py tests/test_engine.py` |
 | M2-T17 | M2 | 13 | Runner log safety + s6 backoff (review) | `app/engine_runner.py`, `deploy/s6/engine/finish`, `deploy/s6/engine/run`, `tests/test_engine_runner.py`, `tests/test_deploy.py` | M2-T15a | `pytest tests/test_engine_runner.py tests/test_deploy.py` |
 | M3-T13 | M3 | 13 | Startup UX + ready-path e2e (review) | `app/static/starting.html`, `app/static/index.html`, `app/static/js/engine.js`, `tests/test_ui_assets.py`, `tests/e2e/test_startup.py` | M2-T15b, M3-T12 | `pytest tests/e2e/test_startup.py` |
+| M2-T18 | M2 | 14 | Remove Qwen3 import (spec v0.2.0) | `app/importer.py`, `app/main.py`, `app/routers/studio_voices.py`, `deploy/compose.yaml`, `tests/test_importer.py`, `tests/test_studio_voices.py`, `tests/test_acceptance.py`, `tests/test_deploy.py` | M2-T4 | `pytest tests/test_studio_voices.py tests/test_acceptance.py` |
+| M1-T18 | M1 | 14 | Empty library 400 + warm-only synthesis/metrics | `app/config.py`, `app/speech.py`, `app/routers/v1.py`, `app/routers/studio_takes.py`, `tests/conftest.py`, `tests/test_v1.py`, `tests/test_studio_takes.py`, `tests/test_speech.py`, `tests/test_metrics.py` | M1-T12, M2-T16 | `pytest tests/test_metrics.py tests/test_v1.py` |
+| M3-T14 | M3 | 14 | Presets, empty states, icons, startup log table | `app/static/index.html`, `app/static/starting.html`, `app/static/studio.css`, `app/static/js/speak.js`, `app/static/js/voices.js`, `app/static/js/design.js`, `app/static/presets.json`, `app/static/icons/**`, `tests/test_ui_assets.py`, `tests/e2e/*` | M3-T13 | `pytest tests/e2e` |
 | M1-T2 | M1 | 5 | `/v1` API (speech, models, voices) | `app/routers/v1.py`, `tests/test_v1.py`, `tests/test_streaming.py` | M1-T1 | `.venv/bin/python -m pytest tests/test_v1.py tests/test_streaming.py -q` |
 | M1-T4 | M1 | 4 | Startup/warm-up/readiness wiring | `app/warmup.py`, `app/main.py`, `tests/test_warmup.py` | M1-T1 | `.venv/bin/python -m pytest tests/test_warmup.py -q` |
 | M2-T2 | M2 | 2 | Clone + transcribe API | `app/routers/studio_clone.py`, `tests/test_studio_clone.py` | — | `.venv/bin/python -m pytest tests/test_studio_clone.py -q` |
@@ -223,7 +226,8 @@ Wave 0 is the lead scaffold (contracts + tooling). A task is ready only when eve
 - **Wave 10:** M3-T11.
 - **Wave 11:** M2-T15a, M3-T12.
 - **Wave 12:** M2-T15b.
-- **Wave 13:** M2-T16, M2-T17, M3-T13; then full `scripts/verify.sh`.
+- **Wave 13:** M2-T16, M2-T17, M3-T13.
+- **Wave 14 (SPEC v0.2.0):** M2-T18, M1-T18, M3-T14; then full `scripts/verify.sh`, tag v0.2.0.
 
 ## Dependency DAG
 

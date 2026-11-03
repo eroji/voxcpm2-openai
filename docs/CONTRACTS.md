@@ -14,7 +14,6 @@ task needs a change, it reports `BLOCKED` and the lead amends this file in a new
 | `app/store.py` | `VoiceStore(settings)` and `TakeStore(settings)`. See §4. |
 | `app/engine.py` | `EngineClient` see §5. |
 | `app/speech.py` | `SpeechService(store, engine, settings)`; `synthesize(req)->SpeechResult`, `stream(req)->StreamingSpeech`, `resolve(req)->ResolvedVoice`. |
-| `app/importer.py` | `import_qwen3_speakers(store, source_dir, overwrite=False) -> {"imported","skipped","failed"}`. |
 | `app/warmup.py` | `WarmupService(store, engine, settings)`; attributes `warm: bool`, `last_error: str|None`; `run()->bool`, `run_forever()`. |
 | `app/main.py` | `create_app(settings=None, *, engine=None)`; lifespan builds `app.state.{settings,store,takes,engine,speech,warmup}`. Pass `engine=` in tests. Static at `/static`, `/` serves `static/index.html`. Basic-auth middleware for `/`, `/api/*`, `/static/*` when `STUDIO_AUTH` set. Validation errors → 400 OpenAI shape. |
 | `app/auth.py` | `require_v1` dependency (Bearer when `API_KEYS` set). `/v1` router must include it. |
@@ -41,7 +40,6 @@ task needs a change, it reports `BLOCKED` and the lead amends this file in a new
 | PATCH | `/api/voices/{name}` | `VoiceSummary` (body `VoicePatch`) |
 | DELETE | `/api/voices/{name}` | `{"deleted": name}` |
 | POST | `/api/voices/clone` | `VoiceSummary` (multipart, see §6) |
-| POST | `/api/voices/import` | `{"imported":[],"skipped":[],"failed":[]}` |
 | POST | `/api/transcribe` | `{"text": str}` (multipart `file`) |
 | POST | `/api/speak` | `save=true` (default): `TakeInfo`; `stream=true` → audio + `X-Take-Id`. `save=false`: audio bytes in `response_format`, no take (Studio preview / Test a line) |
 | GET | `/api/takes?kind=studio` | `{"takes":[TakeInfo]}`; default `studio`, `all` includes design candidates |
@@ -77,6 +75,10 @@ Errors on both prefixes use `{"error":{"message","type","param","code"}}`.
 - `model` accepted as any string. Unknown extra fields ignored (`task_type` included).
 - `input` 1..4000 chars (enforced by `SpeechRequest` and again by the routers using
   `settings.max_input_chars`) → else 400. `voice` case-insensitive; unknown → 400 listing names.
+- Empty library (no stored voices, no `ref_audio`) → 400 `code="no_voices"`, message
+  "No voices exist yet. Create one in the Studio (Clone or Design) first." Ad-hoc `ref_audio`
+  still works. Synthesis requires warm-up (`/ready` 200); otherwise 503 + `Retry-After`.
+- Warm-up and any pre-ready request never enter the RTF/first-audio rolling windows (SPEC §4).
 - `ref_audio` present (data URI, or http(s) only when `ALLOW_REMOTE_REF_AUDIO=1`) → ad-hoc clone;
   `voice` is then only a label and need not exist.
 - `response_format` default `wav`; `pcm` = s16le mono at `sample_rate` (default 48000).
@@ -166,6 +168,14 @@ timeout). Engine log: `$DATA_DIR/logs/engine.log`, written by `app/engine_runner
 200 chars/line, last 200 kept. `restart_in_s` is null while s6's immediate restart is in effect.
 
 Tests set `startup_page=False` unless they exercise this feature.
+
+### Static assets
+
+- `app/static/presets.json` — the six test phrases per language (`en/ja/ko/zh`), served at
+  `/static/presets.json`; Speak follows the selected voice language, Design follows `#design-lang`.
+- `app/static/icons/` — favicon.svg/ico, 16/32 PNG, apple-touch, 192/512; linked from both pages.
+- Empty library: Speak hides chips and disables Generate (`aria-disabled`), Voices shows only the
+  empty state; no Qwen3 import exists (SPEC v0.2.0).
 
 ## 7. UI module contract (parallel-safe)
 

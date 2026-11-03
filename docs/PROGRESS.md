@@ -1,6 +1,6 @@
 # Progress
 
-**Current wave:** 13 — startup page feature complete
+**Current wave:** 14 — SPEC v0.2.0 complete
 **Resume:** `scripts/verify.sh` then `/status`; next human action is `git push` to run GitLab CI
 
 ## Task table
@@ -57,7 +57,10 @@
 | 12 | M2-T15b startup API/routing | pass | |
 | 13 | M2-T16 startup state/gate fixes | pass | |
 | 13 | M2-T17 runner log/backoff | pass | |
-| 13 | M3-T13 startup UX/e2e | pass | `pytest tests/e2e` | |
+| 13 | M3-T13 startup UX/e2e | pass |
+| 14 | M2-T18 remove Qwen3 import | pass | |
+| 14 | M1-T18 empty library + warm-only | pass | |
+| 14 | M3-T14 presets/empty/icons/log table | pass | | `pytest tests/e2e` | |
 | 7 | M5-T2 acceptance | pass | `pytest tests/test_acceptance.py` | |
 
 \* M0-T1 delivers runnable scripts + `NOTES.md`; findings are pending the external host (B-001).
@@ -229,6 +232,13 @@ spikes remain host-run. CI has not run yet: the branch is local (47+ commits ahe
 
 - **2026-11-03 —** Release v0.1.3: startup page, engine log runner + backoff, updated Engine UI,
   Studio preview/format, HF token passthrough, container supervisor fixes.
+
+- **2026-11-03 —** SPEC v0.2.0: Qwen3 import removed (code, route, compose mount, docs); empty-library
+  guard (400 `no_voices`, UI notices, disabled Generate); test-phrase presets served from
+  `/static/presets.json`; app icons; startup log table; warm-only synthesis and metrics exclusion
+  for pre-ready requests.
+
+- **2026-11-03 —** Release v0.2.0.
 
 ## Next action
 
