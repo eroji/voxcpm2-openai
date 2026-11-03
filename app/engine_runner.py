@@ -9,11 +9,18 @@ other; the exit epoch goes to ``$DATA_DIR/logs/engine-last-exit`` for the tracke
 
 Env: ``$MODEL_PATH``, ``$DEPLOY_CONFIG``, ``$ENGINE_PORT``, ``$ENGINE_MODEL``.
 ``ENGINE_COMMAND`` replaces the whole command (test hook).
+
+``$VOXCPM2_CFG_VALUE`` / ``$VOXCPM2_INFERENCE_TIMESTEPS`` (optional) set VoxCPM2's guidance and
+diffusion steps for every request. vLLM-Omni only reads them at start, from
+``hf_overrides.voxcpm2_runtime_config`` (backported by deploy/patches/voxcpm2_runtime_knobs.py),
+so the runner writes a copy of the deploy config with them added; the validated reference
+file itself is never edited.
 """
 
 from __future__ import annotations
 
 import ctypes
+import math
 import os
 import shlex
 import signal
@@ -25,6 +32,65 @@ from typing import TextIO
 
 LOG_MAX_BYTES = 2 * 1024 * 1024
 LINE_MAX_CHARS = 8 * 1024  # one progress-bar line must not eat the whole log
+
+
+class ConfigError(ValueError):
+    """A VOXCPM2_* engine setting is invalid: the engine is not started with it."""
+
+
+def runtime_knobs() -> dict[str, float | int]:
+    """VOXCPM2_CFG_VALUE / VOXCPM2_INFERENCE_TIMESTEPS as voxcpm2_runtime_config keys.
+
+    Unset or empty means the engine default (CFG 2.0, 10 steps).
+    """
+    knobs: dict[str, float | int] = {}
+    cfg = os.environ.get("VOXCPM2_CFG_VALUE", "").strip()
+    if cfg:
+        try:
+            value = float(cfg)
+        except ValueError:
+            raise ConfigError(f"VOXCPM2_CFG_VALUE={cfg!r} is not a number") from None
+        if not math.isfinite(value) or value <= 0:
+            raise ConfigError(f"VOXCPM2_CFG_VALUE={cfg!r} must be a positive number")
+        knobs["cfg_value"] = value
+    steps = os.environ.get("VOXCPM2_INFERENCE_TIMESTEPS", "").strip()
+    if steps:
+        try:
+            count = int(steps)
+        except ValueError:
+            message = f"VOXCPM2_INFERENCE_TIMESTEPS={steps!r} is not a whole number"
+            raise ConfigError(message) from None
+        if count < 2:
+            raise ConfigError(f"VOXCPM2_INFERENCE_TIMESTEPS={steps!r} must be at least 2")
+        knobs["inference_timesteps"] = count
+    return knobs
+
+
+def deploy_config(base: str, knobs: dict[str, float | int]) -> str:
+    """The deploy config to start with: ``base`` itself, or a copy with the knobs added to
+    every stage's ``engine_extras.hf_overrides.voxcpm2_runtime_config`` (stage 0 when none
+    has one), written next to the engine log."""
+    if not knobs:
+        return base
+    import yaml  # ships with vLLM in the image; only needed when a knob is set
+
+    data = yaml.safe_load(Path(base).read_text("utf-8"))
+    stages = data.get("stages") or []
+    if not stages:
+        raise ConfigError(f"{base} has no stages to apply VOXCPM2_* settings to")
+    targets = [
+        s
+        for s in stages
+        if "voxcpm2_runtime_config" in ((s.get("engine_extras") or {}).get("hf_overrides") or {})
+    ] or stages[:1]
+    for stage in targets:
+        extras = stage.setdefault("engine_extras", {})
+        overrides = extras.setdefault("hf_overrides", {})
+        overrides.setdefault("voxcpm2_runtime_config", {}).update(knobs)
+    out = Path(os.environ.get("DATA_DIR", "/data")) / "engine-deploy.yaml"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(yaml.safe_dump(data, sort_keys=False), "utf-8")
+    return str(out)
 
 
 def engine_command() -> list[str]:
@@ -39,7 +105,9 @@ def engine_command() -> list[str]:
         os.environ.get("MODEL_PATH", "/models/openbmb/VoxCPM2"),
         "--omni",
         "--deploy-config",
-        os.environ.get("DEPLOY_CONFIG", "/opt/app/deploy/voxcpm2-3090.yaml"),
+        deploy_config(
+            os.environ.get("DEPLOY_CONFIG", "/opt/app/deploy/voxcpm2-3090.yaml"), runtime_knobs()
+        ),
         "--served-model-name",
         os.environ.get("ENGINE_MODEL", "openbmb/VoxCPM2"),
         "--host",
@@ -128,8 +196,15 @@ def _write_last_exit() -> None:
 
 
 def main() -> int:
-    argv = engine_command()
     log = EngineLog(log_path())
+    try:
+        argv = engine_command()
+    except ConfigError as exc:  # say why in the engine log instead of starting with wrong knobs
+        _echo(f"[engine] invalid configuration: {exc}\n", log)
+        return 2
+    knobs = runtime_knobs()
+    if knobs:
+        _echo(f"[engine] VoxCPM2 runtime settings: {knobs}\n", log)
     _echo(f"[engine] running: {shlex.join(argv)}\n", log)
 
     try:

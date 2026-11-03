@@ -14,6 +14,13 @@ FROM harbor.dotslash.io/dotslash/qwen3-tts-openai:1.4.3
 
 RUN uv pip install --system --break-system-packages --no-cache voxcpm==2.0.3
 
+# Backport vllm-omni PR #7010: VoxCPM2 CFG and diffusion steps come from
+# hf_overrides.voxcpm2_runtime_config instead of being hard-coded (2.0 / 10). Set them with
+# VOXCPM2_CFG_VALUE / VOXCPM2_INFERENCE_TIMESTEPS (app/engine_runner.py). Exact-text patch:
+# the build fails if vLLM-Omni drifted, and it is a no-op once upstream includes the change.
+COPY deploy/patches/voxcpm2_runtime_knobs.py /tmp/voxcpm2_runtime_knobs.py
+RUN python3 /tmp/voxcpm2_runtime_knobs.py && rm /tmp/voxcpm2_runtime_knobs.py
+
 # Sanity checks at build time (fail the build if the stack drifted)
 RUN python3 -c "import vllm; assert vllm.__version__.startswith('0.30'), vllm.__version__" 2>/dev/null \
  && pip show nvidia-nccl-cu13 | grep -q '^Version: 2.30.7' \

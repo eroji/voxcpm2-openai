@@ -19,9 +19,9 @@ Locally (or on any machine with a registry login):
 
 ```bash
 docker build -f deploy/Containerfile \
-  -t harbor.dotslash.io/dotslash/voxcpm2-openai:v0.3.11 \
+  -t harbor.dotslash.io/dotslash/voxcpm2-openai:v0.3.12 \
   -t harbor.dotslash.io/dotslash/voxcpm2-openai:latest .
-docker push harbor.dotslash.io/dotslash/voxcpm2-openai:v0.3.11
+docker push harbor.dotslash.io/dotslash/voxcpm2-openai:v0.3.12
 docker push harbor.dotslash.io/dotslash/voxcpm2-openai:latest
 ```
 
@@ -50,7 +50,7 @@ The host layout is `/opt/voxcpm2-openai/{compose.yaml,.env,data}`. The image tag
 manual equivalent:
 
 ```bash
-IMAGE=harbor.dotslash.io/dotslash/voxcpm2-openai:v0.3.11
+IMAGE=harbor.dotslash.io/dotslash/voxcpm2-openai:v0.3.12
 ssh jumpbox "sudo -n ssh vllm 'cat > /opt/voxcpm2-openai/compose.yaml'" < deploy/compose.yaml
 ssh jumpbox "sudo -n ssh vllm \"
   cd /opt/voxcpm2-openai
@@ -77,6 +77,20 @@ Volumes and GPU:
 `STT_URL` is `http://vllm.dotslash.io:8890/v1`. HF downloads are off by default
 (`HF_HUB_OFFLINE=1`); export `HF_TOKEN` on the host and set `HF_HUB_OFFLINE=0` in `.env` to allow
 authenticated cache downloads.
+
+**Guidance and diffusion steps.** VoxCPM2's CFG and steps are server-wide and read at engine
+start (vLLM-Omni ignores per-request values, NOTES.md S4). Set them in `.env` on the host, then
+restart the container:
+
+```bash
+VOXCPM2_CFG_VALUE=2.5            # default 2.0; higher follows descriptions/voices more strictly
+VOXCPM2_INFERENCE_TIMESTEPS=10   # default 10; at least 2; more = slower, more detail
+```
+
+The engine runner writes `data/engine-deploy.yaml` (the reference deploy config plus these
+values) and logs `[engine] VoxCPM2 runtime settings: {...}`. An invalid value stops the engine
+with `[engine] invalid configuration: ...` in `data/logs/engine.log`. The image backports
+vllm-omni PR #7010 so the values take effect (`deploy/patches/voxcpm2_runtime_knobs.py`).
 
 Languages are app-level: `data/languages.json` holds enabled/default/presets, while
 `/opt/app/deploy/supported-languages.json` (baked into the image) is the engine set.

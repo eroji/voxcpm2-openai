@@ -881,6 +881,8 @@ def test_speed_slider_zones_and_take_tempo(page, live_app, open_studio):
     track = speed.evaluate("el => getComputedStyle(el).backgroundImage")
     assert "rgb(52, 199, 89)" in track and "rgb(255, 204, 0)" in track  # zones in the track
     assert page.locator("#screen-speak .vs-zone, #speed-zone").count() == 0  # no bar, no text
+    # CFG/steps sliders are gone: the engine ignores them per request (NOTES.md S4)
+    assert page.locator("#cfg, #steps").count() == 0
     page.click("#stream-toggle")
     expect(speed).to_be_enabled()
     expect(page.locator("#speed-out")).to_have_text("1.00×")
@@ -976,3 +978,16 @@ def test_pronunciation_rules_test_import_and_speech(page, live_app, open_studio,
     expect(page.locator("#pron-test-out")).to_have_text("→ Kubernetes with 24 gigabytes")
     # the shared live_app: leave no rules behind for the rest of the suite
     httpx.put(f"{live_app}/api/pronunciation", json={"rules": []})
+
+
+def test_design_description_fits_its_text(page, live_app, open_studio):
+    """14px, and the box grows with the text: never a scrollbar."""
+    open_studio(page, "design")
+    desc = page.locator("#design-desc")
+    expect(desc).to_have_css("font-size", "14px")
+    start = desc.evaluate("el => el.clientHeight")
+    desc.fill(", ".join(["calm, professional, early 30s, warm, slightly husky"] * 8))
+    assert desc.evaluate("el => el.clientHeight") > start  # grew with the text
+    assert desc.evaluate("el => el.scrollHeight <= el.clientHeight + 1")  # nothing hidden
+    desc.fill("calm")
+    assert desc.evaluate("el => el.clientHeight") == start  # shrinks back to three rows

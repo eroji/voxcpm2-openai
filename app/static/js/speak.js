@@ -384,8 +384,6 @@ async function generate() {
     voice: state.selectedVoice,
     input: $("speak-text").value,
     instructions: $("speak-style").value || undefined,
-    cfg: +$("cfg").value,
-    steps: +$("steps").value,
     response_format: stream ? "pcm" : $("fmt").value,
     stream,
   };
@@ -465,13 +463,6 @@ async function init() {
 
   $("speed").addEventListener("input", syncSpeed);
   syncSpeed();
-  for (const id of ["cfg", "steps"]) {
-    const el = $(id);
-    const out = $(`${id}-out`);
-    el.addEventListener("input", () => {
-      out.textContent = id === "cfg" ? (+el.value).toFixed(1) : el.value;
-    });
-  }
 
   const toggle = $("stream-toggle");
   toggle.addEventListener("click", () => {

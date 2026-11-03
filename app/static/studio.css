@@ -49,6 +49,8 @@ code, pre { font-family: var(--vs-mono); }
 /* Inputs */
 .vs-text { width: 100%; border: none; border-bottom: var(--vs-rule-input); background: transparent; padding: var(--vs-s2) 0 var(--vs-s4); resize: vertical; }
 .vs-text.lg { font-size: var(--vs-fs-input-lg); line-height: 1.4; letter-spacing: -0.01em; }
+/* Design description: a step smaller, and it grows with its text (design.js) — never a scrollbar */
+#design-desc { font-size: 14px; resize: none; overflow: hidden; }
 .vs-input { width: 100%; border: none; border-bottom: var(--vs-rule-input); background: transparent; padding: var(--vs-s1) 0; min-height: var(--vs-h-input); }
 .vs-select {
   appearance: none;
@@ -67,25 +69,27 @@ code, pre { font-family: var(--vs-mono); }
 .vs-field > label .hint { display: block; font-weight: 400; }
 .vs-value { font-size: var(--vs-fs-value); font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
 .vs-grid-params { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: var(--vs-s7); }
-input[type="range"] { accent-color: var(--vs-fg); }
-/* Speed slider with its zones in the track: 0.90–1.10× natural (green), the ends may sound
- * processed (yellow). The stops are inset by half the 14px thumb so they line up with the
- * thumb's travel. Disabled (streaming) greys out via the shared :disabled rule. */
-.vs-zone-range {
+/* Sliders: a flat 4px track and a square thumb (zero-radius rule). Stops are inset by half the
+ * 14px thumb so colours meet the thumb's centre. Disabled greys out via the shared :disabled
+ * rule. (Speak's CFG/steps sliders are gone: the engine ignores them per request, NOTES.md S4.) */
+.vs-range {
   -webkit-appearance: none;
   appearance: none;
   height: 16px;
-  margin: 0 2px; /* the native sliders' side margins: same width as CFG/steps */
+  margin: 0 2px;
+}
+/* Speed: zones instead of a fill. 0.90–1.10× natural (green), the ends may sound processed (yellow). */
+.vs-range.vs-zone-range {
   background: linear-gradient(to right,
       var(--vs-zone-warn) calc(7px + (100% - 14px) / 6),
       var(--vs-zone-ok) calc(7px + (100% - 14px) / 6) calc(7px + (100% - 14px) * 5 / 6),
       var(--vs-zone-warn) calc(7px + (100% - 14px) * 5 / 6))
     center / 100% 4px no-repeat;
 }
-.vs-zone-range::-webkit-slider-runnable-track { height: 16px; background: transparent; }
-.vs-zone-range::-moz-range-track { height: 16px; background: transparent; }
-.vs-zone-range::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; margin-top: 1px; border-radius: var(--vs-radius); background: var(--vs-fg); border: 2px solid var(--vs-bg); }
-.vs-zone-range::-moz-range-thumb { box-sizing: border-box; width: 14px; height: 14px; border-radius: var(--vs-radius); background: var(--vs-fg); border: 2px solid var(--vs-bg); }
+.vs-range::-webkit-slider-runnable-track { height: 16px; background: transparent; }
+.vs-range::-moz-range-track { height: 16px; background: transparent; }
+.vs-range::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; margin-top: 1px; border-radius: var(--vs-radius); background: var(--vs-fg); border: 2px solid var(--vs-bg); }
+.vs-range::-moz-range-thumb { box-sizing: border-box; width: 14px; height: 14px; border-radius: var(--vs-radius); background: var(--vs-fg); border: 2px solid var(--vs-bg); }
 input[type="checkbox"] { width: 14px; height: 14px; margin: 0; accent-color: var(--vs-fg); }
 
 /* Buttons */

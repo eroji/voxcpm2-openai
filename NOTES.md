@@ -98,3 +98,22 @@
 |---|---|
 | fields the shim reads (from `openai_api.py`) | _pending_ |
 | field names seen in captured fixtures | _pending_ |
+
+## S4 — Sampling knobs: result (2026-11-03, live engine, vLLM-Omni 0.30.0)
+
+Run by hand against `http://vllm.dotslash.io:8881/v1/audio/speech` (voice `ashley`, same text,
+`response_format: wav`), comparing SHA-256 of the returned audio:
+
+| request | result |
+|---|---|
+| `seed 42, cfg 2.0, steps 10` twice | byte-identical (deterministic) |
+| `seed 42, cfg 1.0, steps 4` | **byte-identical to cfg 2.0 / steps 10** → `cfg`/`steps` are accepted (200) but ignored |
+| `seed 7` | different audio → `seed` is honoured per request |
+| no seed, twice | identical to `seed 42` → the default seed is fixed |
+
+- vLLM-Omni reads VoxCPM2's `cfg_value` / `inference_timesteps` only at server start, from
+  `hf_overrides.voxcpm2_runtime_config` (vllm-project/vllm-omni PR #7010, merged 2026-09-30;
+  before it they were hard-coded 2.0 / 10). There is no per-request field.
+- Consequence (SPEC §12 S4): the Speak CFG/steps sliders have no effect, and a per-candidate CFG
+  for Design is not possible. A server-wide value needs a deploy-config change and a restart, and
+  only works if the running vLLM-Omni build includes PR #7010.

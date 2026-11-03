@@ -307,6 +307,15 @@ spikes remain host-run. CI has not run yet: the branch is local (47+ commits ahe
   track. Tables no longer widen the page at 390 px (`.sr` header labels escaped the scroller).
   Release v0.3.11.
 
+- **2026-11-03 —** S4 run on the live engine: `cfg`/`steps` are accepted but ignored per request
+  (byte-identical audio), `seed` is honoured (NOTES.md). Human decision: backport vllm-omni PR
+  #7010 into the image (`deploy/patches/voxcpm2_runtime_knobs.py`, exact-text patch, no-op once
+  upstream has it) and expose `VOXCPM2_CFG_VALUE` / `VOXCPM2_INFERENCE_TIMESTEPS` (engine runner
+  writes `data/engine-deploy.yaml`; the reference deploy config is unchanged; compose gains the two
+  env lines). Speak's CFG/steps sliders removed per SPEC §12 S4; Design gets no per-candidate CFG
+  (not possible per request). Sliders share one style; Design description 14 px, auto-sized.
+  Release v0.3.12.
+
 ## Next action
 
 1. `git push origin main` and watch the GitLab pipeline (`checks`, `javascript`, `test`, `e2e`,

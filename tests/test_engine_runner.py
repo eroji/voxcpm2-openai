@@ -9,7 +9,8 @@ import time
 from pathlib import Path
 
 import pytest
-from app.engine_runner import EngineLog, engine_command
+import yaml
+from app.engine_runner import ConfigError, EngineLog, engine_command
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -46,6 +47,8 @@ def test_default_argv(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ENGINE_PORT", "8102")
     monkeypatch.delenv("ENGINE_MODEL", raising=False)
     monkeypatch.delenv("ENGINE_COMMAND", raising=False)
+    monkeypatch.delenv("VOXCPM2_CFG_VALUE", raising=False)
+    monkeypatch.delenv("VOXCPM2_INFERENCE_TIMESTEPS", raising=False)
     assert engine_command() == [
         "vllm",
         "serve",
@@ -281,3 +284,67 @@ def test_sigkill_of_the_runner_does_not_orphan_the_child(tmp_path: Path) -> None
             os.kill(child_pid, signal.SIGKILL)
             pytest.fail(f"engine child {child_pid} outlived a SIGKILLed runner")
         time.sleep(0.05)
+
+
+# --- VOXCPM2_CFG_VALUE / VOXCPM2_INFERENCE_TIMESTEPS (vllm-omni PR #7010 backport) ----------
+
+REFERENCE = ROOT / "deploy" / "voxcpm2-3090.yaml"
+
+
+def _knob_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, cfg: str, steps: str) -> None:
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("DEPLOY_CONFIG", str(REFERENCE))
+    monkeypatch.delenv("ENGINE_COMMAND", raising=False)
+    monkeypatch.setenv("VOXCPM2_CFG_VALUE", cfg)
+    monkeypatch.setenv("VOXCPM2_INFERENCE_TIMESTEPS", steps)
+
+
+def test_runtime_knobs_go_into_a_copy_of_the_deploy_config(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    reference = REFERENCE.read_text("utf-8")
+    _knob_env(monkeypatch, tmp_path, "2.8", "12")
+    argv = engine_command()
+    derived = Path(argv[argv.index("--deploy-config") + 1])
+    assert derived == tmp_path / "engine-deploy.yaml"
+    runtime = yaml.safe_load(derived.read_text("utf-8"))["stages"][0]["engine_extras"][
+        "hf_overrides"
+    ]["voxcpm2_runtime_config"]
+    assert runtime["cfg_value"] == 2.8 and runtime["inference_timesteps"] == 12
+    assert runtime["vae_decode_every"] == 3  # the validated settings are kept
+    assert REFERENCE.read_text("utf-8") == reference  # the reference file is never edited
+
+
+def test_no_runtime_knobs_uses_the_reference_config(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _knob_env(monkeypatch, tmp_path, "", "")
+    argv = engine_command()
+    assert argv[argv.index("--deploy-config") + 1] == str(REFERENCE)
+    assert not (tmp_path / "engine-deploy.yaml").exists()
+
+
+@pytest.mark.parametrize(
+    ("cfg", "steps"), [("abc", ""), ("0", ""), ("nan", ""), ("", "1"), ("", "ten")]
+)
+def test_invalid_runtime_knobs_are_rejected(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, cfg: str, steps: str
+) -> None:
+    _knob_env(monkeypatch, tmp_path, cfg, steps)
+    with pytest.raises(ConfigError):
+        engine_command()
+
+
+def test_invalid_runtime_knob_is_logged_and_engine_not_started(tmp_path: Path) -> None:
+    env = dict(_env(tmp_path, ""), VOXCPM2_CFG_VALUE="-1", DEPLOY_CONFIG=str(REFERENCE))
+    env.pop("ENGINE_COMMAND")
+    res = subprocess.run(
+        [sys.executable, "-m", "app.engine_runner"],
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert res.returncode == 2
+    assert "invalid configuration: VOXCPM2_CFG_VALUE='-1'" in _log(tmp_path).read_text()

@@ -84,6 +84,14 @@ async function renderDesignPresets(swapText) {
   }
 }
 
+/* Auto-size: the description grows with its text instead of scrolling (3 rows minimum). */
+function fitDesc() {
+  const desc = $("design-desc");
+  desc.style.height = "auto";
+  // border-box: add the bottom rule so the last line is never clipped
+  desc.style.height = `${desc.scrollHeight + desc.offsetHeight - desc.clientHeight}px`;
+}
+
 function appendTag(tag) {
   const desc = $("design-desc");
   const parts = desc.value.split(",").map(s => s.trim());
@@ -254,6 +262,8 @@ async function save() {
 registerScreen("design", {
   init() {
     persistField($("design-desc"), "vs.designDesc");
+    $("design-desc").addEventListener("input", fitDesc); // typing, and tag chips (they dispatch input)
+    addEventListener("resize", fitDesc);
     for (const tag of document.querySelectorAll("#design-tags button")) {
       tag.addEventListener("click", () => appendTag(tag.textContent.replace(/^\+\s*/, "")));
     }
@@ -281,5 +291,6 @@ registerScreen("design", {
     fillLangs(); // a removed language falls back to Japanese or the default (SPEC §8)
     await renderDesignPresets(false);
     updateSaveState();
+    fitDesc(); // a restored description fits once the screen is visible
   },
 });

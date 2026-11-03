@@ -221,7 +221,8 @@ REFERENCE_SHA256 = {
     "deploy/voxcpm2-3090.yaml": (
         "3ddc3cabf84d86154b66365e18938d3f1f4d8d732d613396b2b97a387734f194"
     ),
-    "deploy/compose.yaml": "5cf3aa7bfe28c58a4f1fb1f541c65c63d22d3e8e3cfd8a7f8583f832444680e4",
+    # re-pinned 2026-11-03: VOXCPM2_CFG_VALUE / VOXCPM2_INFERENCE_TIMESTEPS (human decision, S4)
+    "deploy/compose.yaml": "8b7e0c94111d34aa2875d35403ea2c7e83320e59e156cf89a8bcfe883dd22fec",
 }
 
 
@@ -309,3 +310,24 @@ def test_runbook_documents_cd():
     assert "HARBOR_TOKEN" in rb and "HARBOR_PASSWORD" not in rb
     assert "DEPLOY_SSH_KEY" in rb and "base64" in rb
     assert "git tag vX.Y.Z" in rb, "tag-release procedure documented"
+
+
+# ----------------------------------- VoxCPM2 CFG/steps: vllm-omni PR #7010 backport (S4)
+
+
+def test_containerfile_applies_the_runtime_knobs_patch():
+    text = _folded()
+    patch = "deploy/patches/voxcpm2_runtime_knobs.py"
+    assert f"COPY {patch} /tmp/voxcpm2_runtime_knobs.py" in text
+    assert "RUN python3 /tmp/voxcpm2_runtime_knobs.py" in text
+    # the patch reads both values from voxcpm2_runtime_config and fails on drift
+    source = (ROOT / patch).read_text()
+    assert "self._runtime_config.cfg_value" in source
+    assert "self._runtime_config.inference_timesteps" in source
+    assert "sys.exit(" in source
+
+
+def test_compose_passes_the_runtime_knobs_through():
+    compose = (ROOT / "deploy" / "compose.yaml").read_text()
+    assert 'VOXCPM2_CFG_VALUE: "${VOXCPM2_CFG_VALUE:-}"' in compose
+    assert 'VOXCPM2_INFERENCE_TIMESTEPS: "${VOXCPM2_INFERENCE_TIMESTEPS:-}"' in compose

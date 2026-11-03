@@ -17,6 +17,11 @@ services:
       # STUDIO_AUTH: "admin:<password>"          # basic auth for the Studio UI and /api
       # API_KEYS: "<key1>,<key2>"                # optional bearer tokens for /v1
       STT_URL: http://vllm.dotslash.io:8890/v1   # whisper-stt, for auto-transcribe (verify URL)
+      # VoxCPM2 guidance (CFG) and diffusion steps for every request; empty = engine default
+      # (2.0 / 10). Read at engine start: change in .env, then restart the container.
+      # Higher CFG follows descriptions/voices more strictly; steps trade speed for detail.
+      VOXCPM2_CFG_VALUE: "${VOXCPM2_CFG_VALUE:-}"
+      VOXCPM2_INFERENCE_TIMESTEPS: "${VOXCPM2_INFERENCE_TIMESTEPS:-}"
     volumes:
       - ./data:/data                             # voices, takes, backups, settings
       - /models:/models:ro                       # weights at /models/openbmb/VoxCPM2

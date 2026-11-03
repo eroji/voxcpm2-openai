@@ -221,7 +221,7 @@ export function formatLang(code);                          // enâ†’English, jaâ†
 | Screen | IDs |
 |---|---|
 | header | `engine-status`, `.vs-tab[data-tab]` |
-| speak | `voice-chips`, `speak-text`, `speak-style`, `cfg`, `cfg-out`, `steps`, `steps-out`, `fmt`, `stream-toggle`, `generate`, `takes-list`, `speak-error` |
+| speak | `voice-chips`, `speak-text`, `speak-style`, `speed`, `speed-out`, `fmt`, `stream-toggle`, `generate`, `takes-list`, `speak-error` (no `cfg`/`steps`: per-request values are ignored by the engine, NOTES.md S4; set them server-wide with `VOXCPM2_CFG_VALUE` / `VOXCPM2_INFERENCE_TIMESTEPS`) |
 | voices | `voice-search`, `lang-filters`, `voice-rows`, `voices-count`, `voices-error` |
 | clone | `drop-zone`, `ref-file`, `ref-text`, `auto-transcribe`, `clone-name`, `clone-lang`, `consent`, `test-line`, `save-voice`, `clone-error` |
 | design | `design-desc`, `design-tags`, `design-lang`, `design-n`, `design-sample`, `generate-candidates`, `candidates`, `design-name`, `save-designed`, `design-error` |
