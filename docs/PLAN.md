@@ -187,6 +187,8 @@ Wave 0 is the lead scaffold (contracts + tooling). A task is ready only when eve
 | M2-T18 | M2 | 14 | Remove Qwen3 import (spec v0.2.0) | `app/importer.py`, `app/main.py`, `app/routers/studio_voices.py`, `deploy/compose.yaml`, `tests/test_importer.py`, `tests/test_studio_voices.py`, `tests/test_acceptance.py`, `tests/test_deploy.py` | M2-T4 | `pytest tests/test_studio_voices.py tests/test_acceptance.py` |
 | M1-T18 | M1 | 14 | Empty library 400 + warm-only synthesis/metrics | `app/config.py`, `app/speech.py`, `app/routers/v1.py`, `app/routers/studio_takes.py`, `tests/conftest.py`, `tests/test_v1.py`, `tests/test_studio_takes.py`, `tests/test_speech.py`, `tests/test_metrics.py` | M1-T12, M2-T16 | `pytest tests/test_metrics.py tests/test_v1.py` |
 | M3-T14 | M3 | 14 | Presets, empty states, icons, startup log table | `app/static/index.html`, `app/static/starting.html`, `app/static/studio.css`, `app/static/js/speak.js`, `app/static/js/voices.js`, `app/static/js/design.js`, `app/static/presets.json`, `app/static/icons/**`, `tests/test_ui_assets.py`, `tests/e2e/*` | M3-T13 | `pytest tests/e2e` |
+| M2-T19 | M2 | 15 | 30-language `/api/languages` | `app/languages.py`, `app/routers/languages.py`, `app/main.py`, `tests/test_languages.py` | M2-T5 | `pytest tests/test_languages.py` |
+| M3-T15 | M3 | 16 | Inset select chevron + all 30 languages | `app/static/studio.css`, `app/static/js/core.js`, `app/static/js/speak.js`, `app/static/js/clone.js`, `app/static/js/design.js`, `app/static/js/voices.js`, `tests/test_ui_assets.py`, `tests/e2e/test_studio.py` | M2-T19 | `pytest tests/e2e` |
 | M1-T2 | M1 | 5 | `/v1` API (speech, models, voices) | `app/routers/v1.py`, `tests/test_v1.py`, `tests/test_streaming.py` | M1-T1 | `.venv/bin/python -m pytest tests/test_v1.py tests/test_streaming.py -q` |
 | M1-T4 | M1 | 4 | Startup/warm-up/readiness wiring | `app/warmup.py`, `app/main.py`, `tests/test_warmup.py` | M1-T1 | `.venv/bin/python -m pytest tests/test_warmup.py -q` |
 | M2-T2 | M2 | 2 | Clone + transcribe API | `app/routers/studio_clone.py`, `tests/test_studio_clone.py` | — | `.venv/bin/python -m pytest tests/test_studio_clone.py -q` |
@@ -227,7 +229,8 @@ Wave 0 is the lead scaffold (contracts + tooling). A task is ready only when eve
 - **Wave 11:** M2-T15a, M3-T12.
 - **Wave 12:** M2-T15b.
 - **Wave 13:** M2-T16, M2-T17, M3-T13.
-- **Wave 14 (SPEC v0.2.0):** M2-T18, M1-T18, M3-T14; then full `scripts/verify.sh`, tag v0.2.0.
+- **Wave 14 (SPEC v0.2.0):** M2-T18, M1-T18, M3-T14; full gate, tag v0.2.0.
+- **Wave 15/16:** M2-T19 (languages API), M3-T15 (chevron + 30-language selects).
 
 ## Dependency DAG
 

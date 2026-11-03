@@ -49,6 +49,7 @@ task needs a change, it reports `BLOCKED` and the lead amends this file in a new
 | DELETE | `/api/takes/{id}` | `{"deleted": id}` |
 | POST | `/api/design/candidates` | `{"candidates":[CandidateInfo]}` |
 | POST | `/api/design/save` | `VoiceSummary` |
+| GET | `/api/languages` | `{"languages":[{"code","name"}]}` — the 30 VoxCPM2 model-card languages |
 | GET | `/api/engine` | `EngineStatus` |
 | POST | `/api/engine/warmup` | `{"warm": true}` |
 | POST | `/api/engine/restart` | `{"restarted": true, "warm": true}` |
