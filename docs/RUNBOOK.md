@@ -44,75 +44,59 @@ variables must be unprotected. The job needs a docker-capable runner (Q-015).
 
 ## 2. Run on 8881 (A/B next to qwen3-tts)
 
-`deploy/compose.yaml` pins the current release image (`:v0.3.0`). For any other release, use the
-image override with an explicit `DEPLOY_IMAGE`:
+The host layout is `/opt/voxcpm2-openai/{compose.yaml,.env,data}`. The image tag lives only in
+`.env`; `compose.yaml` reads `${VOXCPM2_IMAGE}`. `./data` resolves to
+`/opt/voxcpm2-openai/data` (the only stateful path). CI updates both files and recreates the pod;
+manual equivalent:
 
 ```bash
-mkdir -p /opt/voxcpm2-openai/deploy/data
-# copy deploy/compose.yaml, deploy/compose.deploy.yaml and deploy/voxcpm2-3090.yaml
-# from the repo into /opt/voxcpm2-openai/deploy
-cd /opt/voxcpm2-openai/deploy
-export DEPLOY_IMAGE=harbor.dotslash.io/dotslash/voxcpm2-openai:v0.3.0
-podman-compose -f compose.yaml -f compose.deploy.yaml up -d
-podman logs -f voxcpm2-openai        # expect "service engine: starting" + VoxCPM2; load takes minutes
-# If [base]/Qwen3-TTS appears, the image still carries the old qwen3 supervisor: rebuild from this
-# repo (the Containerfile removes /opt/app, overrides ENTRYPOINT and neutralizes S6_STAGE2_HOOK).
-# Our s6 run scripts use with-contenv, so ENGINE_PORT/MODEL_PATH must reach the daemon; a
-# "--port ''" error means an old image. A stale data/engines.json is ignored.
-curl -fsS http://127.0.0.1:8881/ready && echo READY
+IMAGE=harbor.dotslash.io/dotslash/voxcpm2-openai:v0.3.0
+ssh jumpbox "sudo -n ssh vllm 'cat > /opt/voxcpm2-openai/compose.yaml'" < deploy/compose.yaml
+ssh jumpbox "sudo -n ssh vllm \"
+  cd /opt/voxcpm2-openai
+  printf 'VOXCPM2_IMAGE=%s\n' '$IMAGE' > .env
+  podman-compose -f compose.yaml up -d --force-recreate --remove-orphans --pull
+  curl -fsS http://127.0.0.1:8881/ready && echo READY
+\""
+podman logs -f voxcpm2-openai   # via ssh; expect "service engine: starting" + VoxCPM2
 ```
 
-Compose resolves relative bind mounts against the **compose file's directory**, so `./data` is
-`/opt/voxcpm2-openai/deploy/data` on the host (not `/opt/voxcpm2-openai/data`). Every backup and
-restore path below must use that directory.
+If `[base]`/Qwen3-TTS appears, the image still carries the old Qwen3 supervisor; rebuild from this
+repo. A `--port ''` error means an old image without `with-contenv` s6 scripts. A stale
+`data/engines.json` from the old supervisor is ignored.
 
-Volumes and GPU (from `deploy/compose.yaml`):
+Volumes and GPU:
 
 | Mount | Meaning |
 |---|---|
-| `./data:/data` = `/opt/voxcpm2-openai/deploy/data` | the only stateful path: voices, takes, backups, settings |
+| `./data:/data` = `/opt/voxcpm2-openai/data` | voices, takes, backups, settings, languages.json |
 | `/models:/models:ro` | weights at `/models/openbmb/VoxCPM2` |
-| `devices: nvidia.com/gpu=GPU-79ad6f3b-…` | CDI GPU 1 (RTX 3090, **host index 1**), shared with `whisper-stt` + TEI |
+| `devices: nvidia.com/gpu=GPU-79ad6f3b-…` | CDI GPU 1 (RTX 3090, host index 1), shared with whisper-stt + TEI |
 | `shm_size: 8g` | engine shared memory |
 
-`STT_URL` is confirmed as `http://vllm.dotslash.io:8890/v1` (whisper-stt, human-verified
-2026-11-02) — that is the value in `deploy/compose.yaml`.
+`STT_URL` is `http://vllm.dotslash.io:8890/v1`. HF downloads are off by default
+(`HF_HUB_OFFLINE=1`); export `HF_TOKEN` on the host and set `HF_HUB_OFFLINE=0` in `.env` to allow
+authenticated cache downloads.
 
-Languages are app-level: `DATA_DIR/languages.json` holds enabled/default/presets, while
-`/opt/app/deploy/supported-languages.json` (baked into the image) is the engine set. Back it up with
-`data/`; the Languages screen edits it through the API.
+Languages are app-level: `data/languages.json` holds enabled/default/presets, while
+`/opt/app/deploy/supported-languages.json` (baked into the image) is the engine set.
 
 The first browser load shows the startup page until `/ready` 200; `/api/engine/startup` reports the
-four steps and the merged engine/app log (`/data/logs/engine.log`). If startup fails, the page
-shows the mapped cause and a Restart button; s6 retries after 30/60/120 s, then waits for a manual
-restart.
-
-Hugging Face downloads are off by default (`HF_HUB_OFFLINE=1`, weights are local). To allow
-authenticated cache downloads, export `HF_TOKEN` in the host environment and start with
-`HF_HUB_OFFLINE=0`; compose passes both through (`HF_TOKEN: "${HF_TOKEN:-}"`). Never put the token
-in the compose file or repo.
+four steps and the merged engine/app log (`data/logs/engine.log`). s6 retries after 30/60/120 s,
+then waits for a manual restart.
 
 Back up the data dir before every cutover and periodically:
 
 ```bash
 mkdir -p /backup
-tar czf /backup/voxcpm2-data-$(date +%F).tar.gz -C /opt/voxcpm2-openai/deploy data
+tar czf /backup/voxcpm2-data-$(date +%F).tar.gz -C /opt/voxcpm2-openai data
 ```
 
-Restore with `tar xzf <tarball> -C /opt/voxcpm2-openai/deploy` (stop the container first).
+Restore with `tar xzf <tarball> -C /opt/voxcpm2-openai` (stop the container first). The app also
+writes `/data/backups` before voice/language edits.
 
-(The app also writes its own backups under `/data/backups` before voice edits/deletes.)
-
-Auth env vars — uncomment in the compose `environment:` block and set real values **on the host
-only**. Placeholders shown; never commit real values:
-
-```yaml
-environment:
-  STUDIO_AUTH: "admin:<pick-a-strong-password>"     # basic auth for / and /api/*
-  API_KEYS: "<generate: openssl rand -hex 32>"      # bearer token(s) for /v1/*, comma-separated
-```
-
-`/health` and `/ready` stay open; `/v1/*` is unauthenticated unless `API_KEYS` is set (SPEC §10).
+Auth env vars go in `.env` on the host only (placeholders):
+`STUDIO_AUTH=user:password`, `API_KEYS=key1,key2`. Do not commit real values.
 
 ## 3. Acceptance on 8881
 
@@ -209,69 +193,54 @@ Only after §3 is fully green and the data dir is backed up (SPEC §11):
 ```bash
 # 1. stop the old service (do not remove it)
 podman stop qwen3-tts-openai
-
-# 2. move the new service to 8880: in /opt/voxcpm2-openai/deploy/compose.yaml change
-#    ports:  "8881:8000"  ->  "8880:8000"  (host copy only)
-cd /opt/voxcpm2-openai/deploy
-export DEPLOY_IMAGE=harbor.dotslash.io/dotslash/voxcpm2-openai:v0.3.0
-podman-compose -f compose.yaml -f compose.deploy.yaml up -d
+# 2. change ports "8881:8000" -> "8880:8000" in the host copy of /opt/voxcpm2-openai/compose.yaml
+cd /opt/voxcpm2-openai && podman-compose -f compose.yaml up -d --force-recreate
 curl -fsS http://127.0.0.1:8880/ready && echo READY
-
 # 3. point the LiteLLM `tts` alias at http://vllm.dotslash.io:8880/v1 and reload LiteLLM
 ```
 
-Consumers to check unchanged: **Open WebUI** TTS, **Hermes**, the **Wyoming bridge** — one spoken
-request each, by voice name. If callers use `/v1` with `API_KEYS` set, configure the same key in
-LiteLLM.
+Consumers to check unchanged: Open WebUI, Hermes, the Wyoming bridge — one spoken request each,
+by voice name.
 
 ## 5. Rollback
 
 ```bash
-# 1. point the LiteLLM `tts` alias back to the qwen3 target and reload LiteLLM
+# 1. point LiteLLM back to the qwen3 target and reload
 # 2. stop the new service and restart the old one
-cd /opt/voxcpm2-openai/deploy && podman-compose -f compose.yaml -f compose.deploy.yaml down
+cd /opt/voxcpm2-openai && podman-compose -f compose.yaml down
 podman start qwen3-tts-openai
 curl -fsS http://127.0.0.1:8880/health && echo BACK
 ```
 
-Keep `/opt/qwen3-tts` untouched until the new service has run cleanly for a week; only then may
-it be archived. Voices created on voxcpm2-openai live in `/opt/voxcpm2-openai/deploy/data` and
-survive a rollback — restore them from the backup tarball (§2) if needed.
+Keep `/opt/qwen3-tts` untouched for a week. Voices created on voxcpm2-openai live in
+`/opt/voxcpm2-openai/data` and survive rollback — restore from the backup tarball (§2) if needed.
 
-## 6. Turning on CD
+## 6. Deploy (CD)
 
-**CD is off by default and has not been exercised on this host.** With no `DEPLOY_TARGET` set, the
-deploy jobs are never created. The pattern is the proven one from the notely repo. Set these CI/CD
-variables (Settings → CI/CD → Variables):
+A `vX.Y.Z` tag pipeline builds the image, then the `deploy` job automatically ships it to `vllm`.
+The runner reaches the host through the jumpbox:
 
-| Variable | Value | Notes |
-|---|---|---|
-| `DEPLOY_TARGET` | `staging` \| `production` | nothing deploys without it |
-| `DEPLOY_HOST` | default `vllm.dotslash.io` | set in `.gitlab-ci.yml`; override only if the host moves |
-| `DEPLOY_USER` | default `deploy` | key-only account in the `docker` group, owns `$DEPLOY_PATH`; public half of `DEPLOY_SSH_KEY` in `~deploy/.ssh/authorized_keys` |
-| `DEPLOY_PATH` | default `/opt/voxcpm2-openai` | must contain `deploy/compose.yaml` **and** `deploy/compose.deploy.yaml` |
-| `DEPLOY_SSH_KEY` | private key, one line: `base64 -w0 id_ed25519` (masked, protected) | decoded to `~/.ssh/id_ed25519` in the job |
-| `HARBOR_USER` / `HARBOR_TOKEN` | same as §1 | the target does its own `docker login` over stdin, so `HARBOR_TOKEN` must be **protected** to reach tag pipelines |
+```
+runner --(JUMP_SSH_KEY)--> jimmy@jumpbox --(sudo -n)--> root@jumpbox --(existing key)--> root@vllm
+```
 
-- `staging`: runs automatically on default-branch pipeline success, deploying the
-  `vX.Y.Z` image the `build` job just pushed.
-- `production`: releases are tags. `git tag vX.Y.Z && git push --follow-tags` builds image
-  `X.Y.Z`, then the manual `deploy:production` job (approve it in the pipeline) pins exactly that
-  image — never a later build — and finishes with a `curl -fsS http://127.0.0.1:8880/ready`
-  health gate over ssh.
+The job copies `deploy/compose.yaml` to `/opt/voxcpm2-openai/compose.yaml`, writes
+`VOXCPM2_IMAGE=harbor.dotslash.io/dotslash/voxcpm2-openai:<tag>` into `.env` (preserving other
+keys), runs `podman-compose up -d --force-recreate --pull`, then waits up to 10 minutes for
+`http://127.0.0.1:8881/ready`.
 
-The image is pinned through `deploy/compose.deploy.yaml` (override:
-`image: ${DEPLOY_IMAGE:?DEPLOY_IMAGE is required}`), so the frozen reference `deploy/compose.yaml`
-keeps its literal `:0.1.0` tag; copy both files to `$DEPLOY_PATH/deploy` on the host.
+Required **protected** CI variables (Settings → CI/CD → Variables):
 
-Caveats before enabling:
+| Variable | Value |
+|---|---|
+| `JUMP_SSH_KEY` | base64 -w0 of the private key whose public half is in `jimmy@jumpbox:~/.ssh/authorized_keys` (fallback: `DEPLOY_SSH_KEY`) |
+| `HARBOR_USER` / `HARBOR_TOKEN` | Harbor push/pull credentials; the job logs `root@vllm` into `harbor.dotslash.io` over stdin |
+| `DEPLOY_HOST` | `vllm` (default in the job) |
+| `DEPLOY_PATH` | `/opt/voxcpm2-openai` (default in the job) |
 
-- The deploy jobs run `docker compose` over ssh, but the `vllm` host uses **Podman**: this only
-  works if a `podman-docker` wrapper is installed there. Otherwise change the deploy commands to
-  `podman-compose -f deploy/compose.yaml -f deploy/compose.deploy.yaml pull/up -d` (a
-  `.gitlab-ci.yml` change — new task).
-- Port 8880 in the health gate assumes the §4 cutover has happened; before cutover the container
-  serves 8881.
+Release: `git tag vX.Y.Z && git push origin vX.Y.Z`. The tag must be protected so protected
+variables are available. Rollback of a bad deploy is §5; redeploy a previous tag by writing its
+image into `.env` and re-running `podman-compose up -d --force-recreate`.
 
 ## 7. M0 spikes
 

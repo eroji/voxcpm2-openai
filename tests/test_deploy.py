@@ -221,7 +221,7 @@ REFERENCE_SHA256 = {
     "deploy/voxcpm2-3090.yaml": (
         "3ddc3cabf84d86154b66365e18938d3f1f4d8d732d613396b2b97a387734f194"
     ),
-    "deploy/compose.yaml": "5c86615aad10094dc69f3f67c435a715c9e60549c3d6cdb9c3c2cb50ea152116",
+    "deploy/compose.yaml": "5cf3aa7bfe28c58a4f1fb1f541c65c63d22d3e8e3cfd8a7f8583f832444680e4",
 }
 
 
@@ -239,15 +239,14 @@ def test_compose_has_no_qwen3_import_mount():
 
 # ------------------------------------------------- M5-T4: CI/CD house pattern (notely parity)
 CI_FILE = ROOT / ".gitlab-ci.yml"
-OVERRIDE = ROOT / "deploy" / "compose.deploy.yaml"
 RUNBOOK = ROOT / "docs" / "RUNBOOK.md"
 STT_URL = "http://vllm.dotslash.io:8890/v1"  # actual value, human 2026-11-02
 
 
-def test_image_override_file_pins_deploy_image():
-    text = OVERRIDE.read_text()
-    assert "${DEPLOY_IMAGE" in text, "override must take the image from CI"
-    assert "voxcpm2-openai" in text
+def test_compose_image_comes_from_env():
+    compose = (ROOT / "deploy" / "compose.yaml").read_text()
+    assert "${VOXCPM2_IMAGE" in compose, "image tag lives in .env / environment"
+    assert not (ROOT / "deploy" / "compose.deploy.yaml").exists()
 
 
 def test_ci_fails_loudly_without_harbor_credentials():
@@ -263,7 +262,6 @@ def test_ci_mirrors_notely_conventions():
     assert "GIT_DEPTH: 0" in ci
     assert 'DOCKER_TLS_CERTDIR: ""' in ci, "dind needs plain tcp://docker:2375"
     assert "docker:27-dind" in ci
-    assert "compose.deploy.yaml" in ci, "CD must pull/up through the image override"
     assert "--password-stdin" in ci
 
 
@@ -280,22 +278,29 @@ def test_ci_builds_only_on_release_tags():
     assert "${CI_COMMIT_TAG#v}" not in ci, "do not strip the v prefix"
 
 
-def test_production_deploy_is_tag_only_and_manual():
-    prod = CI_FILE.read_text().split("deploy:production:")[-1]
-    assert '$DEPLOY_TARGET == "production"' in prod
-    assert r"$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/" in prod
-    assert "when: manual" in prod
-    assert "HEALTH_URL: http://127.0.0.1:8880/ready" in prod, "production readiness target"
-    assert "curl -fsS $HEALTH_URL" in prod, "health gate after up -d"
+def test_deploy_uses_jumpbox_and_podman():
+    deploy = CI_FILE.read_text().split("\ndeploy:")[-1]
+    assert r"$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/" in deploy
+    assert "when: on_success" in deploy, "tag releases deploy automatically"
+    assert "JUMP_HOST: jumpbox.dotslash.io" in deploy
+    assert "JUMP_USER: jimmy" in deploy
+    assert "DEPLOY_HOST: vllm" in deploy
+    assert "sudo -n ssh" in deploy
+    assert "podman login" in deploy and "--password-stdin" in deploy
+    assert "podman-compose -f compose.yaml up -d --force-recreate" in deploy
+    assert "VOXCPM2_IMAGE=%s" in deploy and ".env" in deploy
+    assert "HEALTH_URL: http://127.0.0.1:8881/ready" in deploy
+    assert "docker compose" not in deploy
 
 
 def test_deploy_uses_base64_ssh_key_pattern():
     ci = CI_FILE.read_text()
-    assert "base64 -d" in ci, "DEPLOY_SSH_KEY is base64 -w0 of the key file (notely)"
+    assert "JUMP_SSH_KEY" in ci and "DEPLOY_SSH_KEY" in ci
+    assert "base64 -d" in ci, "jumpbox key is base64 -w0"
     assert "BatchMode=yes" in ci
     assert "StrictHostKeyChecking=accept-new" in ci
-    assert "DEPLOY_HOST: vllm.dotslash.io" in ci
-    assert "DEPLOY_USER: deploy" in ci
+    assert "DEPLOY_HOST: vllm" in ci
+    assert "JUMP_HOST: jumpbox.dotslash.io" in ci
     assert "DEPLOY_PATH: /opt/voxcpm2-openai" in ci
 
 
@@ -304,4 +309,4 @@ def test_runbook_documents_cd():
     assert STT_URL in rb, "runbook must carry the exact STT URL"
     assert "HARBOR_TOKEN" in rb and "HARBOR_PASSWORD" not in rb
     assert "DEPLOY_SSH_KEY" in rb and "base64" in rb
-    assert "--follow-tags" in rb, "tag-release procedure: git tag vX.Y.Z && git push --follow-tags"
+    assert "git tag vX.Y.Z" in rb, "tag-release procedure documented"

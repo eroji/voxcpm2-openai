@@ -110,7 +110,7 @@ Citations are `SPEC.md` section/line. IDs are append-only.
 | R-047 | Acceptance criteria: WAV 48 kHz RTF ≤0.2, streamed first chunk ≤300 ms, 8 voices, warm start, clone+design flows, LiteLLM/Open WebUI/Hermes/Wyoming, VRAM ≤10 GB, concurrency, UI parity + keyboard | §13 L271–282 |
 | R-048 | Milestones M0–M5 | §14 L284–291 |
 | R-049 | **Human decision 2026-11-02:** CI builds/pushes the container image only; all quality gates (format/lint/types/tests+coverage/e2e/build/package contract) live in `scripts/verify.sh` | delivery brief |
-| R-050 | CD opt-in only: deploy jobs excluded unless `DEPLOY_TARGET=staging|production`; production tag + manual approval; not enabled now | delivery brief |
+| R-050 | **Human 2026-11-03:** tag-triggered deploy to `vllm` through the jumpbox (runner → jimmy@jumpbox → sudo → root@vllm), image tag in `/opt/voxcpm2-openai/.env`, podman-compose recreate; branch pushes never deploy | delivery brief |
 | R-051 | No secrets in repo or CI logs | delivery brief, §10 |
 | R-052 | Startup page at `/` until warm, with 4-step progress, live log, failure mapping | `ui/STARTING.md` |
 | R-053 | `/api/engine/startup` contract + `/api` 503 gate with startup/restart exceptions | `ui/STARTING.md` |
@@ -178,7 +178,8 @@ Wave 0 is the lead scaffold (contracts + tooling). A task is ready only when eve
 | M2-T13 | M2 | 8 | Deterministic burst + host RTF evidence (review) | `tests/fake_engine.py`, `tests/test_acceptance.py`, `scripts/smoke.sh`, `docs/RUNBOOK.md` | M5-T2 | `.venv/bin/python -m pytest tests/test_acceptance.py -q` |
 | M3-T10 | M3 | 8 | Disabled affordance, streaming/clone e2e, 390 parity (review) | `app/static/index.html`, `app/static/studio.css`, `app/static/js/speak.js`, `app/static/js/voices.js`, `app/static/js/design.js`, `tests/test_ui_assets.py`, `tests/e2e/**` | M3-T6, M3-T9 | `.venv/bin/python -m pytest tests/e2e -q` |
 | M2-T14 | M2 | 9 | Studio preview via `/api/speak?save=false` + take formats (human) | `app/models.py`, `app/routers/studio_takes.py`, `tests/test_studio_takes.py` | M2-T12 | `.venv/bin/python -m pytest tests/test_studio_takes.py -q` |
-| M5-T4 | M5 | 9 | Align CI/CD with notely conventions + STT URL (human) | `.gitlab-ci.yml`, `deploy/compose.deploy.yaml`, `docs/RUNBOOK.md`, `tests/test_deploy.py` | M1-T13 | `.venv/bin/python -m pytest tests/test_deploy.py -q` |
+| M5-T4 | M5 | 9 | Align CI/CD with notely conventions + STT URL (human) | `.gitlab-ci.yml`, `docs/RUNBOOK.md`, `tests/test_deploy.py` | M1-T13 | `.venv/bin/python -m pytest tests/test_deploy.py -q` |
+| M5-T5 | M5 | 21 | Auto-deploy to vllm via jumpbox + .env image | `.gitlab-ci.yml`, `deploy/compose.yaml`, `docs/RUNBOOK.md`, `tests/test_deploy.py` | M5-T4 | `pytest tests/test_deploy.py` |
 | M3-T11 | M3 | 10 | Studio preview UI + real Format control (human) | `app/static/js/clone.js`, `app/static/js/speak.js`, `app/static/index.html`, `tests/test_ui_assets.py`, `tests/e2e/**` | M2-T14 | `.venv/bin/python -m pytest tests/e2e -q` |
 | M2-T15a | M2 | 11 | Engine log runner + s6 wiring | `app/engine_runner.py`, `deploy/s6/engine/run`, `tests/test_engine_runner.py`, `tests/test_deploy.py` | M1-T3 | `pytest tests/test_engine_runner.py tests/test_deploy.py` |
 | M3-T12 | M3 | 11 | Startup page asset + Engine stat cosmetics | `app/static/starting.html`, `app/static/index.html`, `app/static/studio.css`, `app/static/js/engine.js`, `tests/test_ui_assets.py`, `tests/e2e/test_studio.py` | M3-T10 | `pytest tests/e2e` |

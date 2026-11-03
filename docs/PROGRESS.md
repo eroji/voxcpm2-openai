@@ -250,6 +250,11 @@ spikes remain host-run. CI has not run yet: the branch is local (47+ commits ahe
 - **2026-11-03 —** Release v0.3.0: languages management, stream format/rate fix, design control
   syntax, session-scoped takes, player/editor UX.
 
+- **2026-11-03 —** Deploy is automatic on `vX.Y.Z` tags: runner → jimmy@jumpbox → sudo → root@vllm,
+  writes `VOXCPM2_IMAGE` to `/opt/voxcpm2-openai/.env`, copies `deploy/compose.yaml`, recreates the
+  pod with `podman-compose --force-recreate --pull`, waits for `/ready`. Host was updated to
+  `v0.3.0` and is healthy. `JUMP_SSH_KEY` (or `DEPLOY_SSH_KEY`) must hold the jumpbox key.
+
 ## Next action
 
 1. `git push origin main` and watch the GitLab pipeline (`checks`, `javascript`, `test`, `e2e`,

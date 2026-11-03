@@ -1,7 +1,7 @@
 services:
   voxcpm2-openai:
     container_name: voxcpm2-openai
-    image: harbor.dotslash.io/dotslash/voxcpm2-openai:v0.3.0
+    image: ${VOXCPM2_IMAGE:?set VOXCPM2_IMAGE in .env or the environment}
     restart: always
     stop_grace_period: 25s
     devices:
