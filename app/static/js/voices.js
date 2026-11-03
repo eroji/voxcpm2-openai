@@ -180,7 +180,18 @@ function openEditor(tr) {
     actTd,
   );
   grow(tx); // the stored transcript may already need more than one line
+  slideOpen(txCell);
   nameInput.focus();
+}
+
+/* "Slide down": the transcript cell opens from the one-line row height to its full height.
+ * Only that cell grows; every other cell keeps the normal row's first line. */
+function slideOpen(node) {
+  if (!node.animate || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  node.animate([{ height: "28px" }, { height: `${node.scrollHeight}px` }], {
+    duration: 180,
+    easing: "ease-out",
+  });
 }
 
 /* Editor cell holding one control; the classes keep the column styling of the normal row. */

@@ -746,10 +746,27 @@ def test_voice_editor_is_an_aligned_table_row(page, live_app, open_studio):
 
     aligned()
     columns = page.locator(".vs-table thead tr").evaluate(xs)
+    # vertical centre of each cell's first line: a control's box, else its first text run
+    centres = """tr => [...tr.children].map(td => {
+      const c = td.querySelector('input, select, textarea, button');
+      let box;
+      if (c) box = c.getBoundingClientRect();
+      else {
+        const r = document.createRange();
+        r.selectNodeContents(document.createTreeWalker(td, NodeFilter.SHOW_TEXT).nextNode());
+        box = r.getBoundingClientRect();
+      }
+      return box.top + (c && c.tagName === 'TEXTAREA' ? 14 : box.height / 2);
+    })"""
+    before = row.evaluate(centres)
     row.get_by_role("button", name="Edit").click()
     expect(row.locator('textarea[data-field="ref_text"]')).to_be_visible()
     # fixed layout: opening the editor never moves the columns
     assert page.locator(".vs-table thead tr").evaluate(xs) == columns
+    # "slide down": every first line stays put, only the transcript cell grows downward
+    page.wait_for_timeout(300)  # let the slide-open animation finish
+    for was, now in zip(before, row.evaluate(centres), strict=True):
+        assert abs(was - now) <= 1, (before, row.evaluate(centres))
     assert row.evaluate("tr => tr.children.length") == 6  # a normal row, never a colspan
     aligned()
     expect(row.locator("td.name input")).to_be_visible()

@@ -98,7 +98,7 @@ a.btn-link { color: inherit; text-decoration: none; } /* Download reads as a lin
 .vs-toggle[aria-pressed="true"] .box { background: var(--vs-accent); }
 
 /* Takes */
-.vs-take { border-top: var(--vs-rule-row); padding: var(--vs-s3) 0 var(--vs-s4); display: flex; flex-direction: column; gap: 5px; }
+.vs-take { border-top: var(--vs-rule-row); padding: var(--vs-s3) var(--vs-s4) var(--vs-s4); display: flex; flex-direction: column; gap: 5px; }
 .vs-take:hover, .vs-take.is-playing { background: var(--vs-code-bg); }
 .vs-take.is-playing { border-top-color: var(--vs-accent); }
 .vs-take .top { display: flex; justify-content: space-between; gap: var(--vs-s4); align-items: baseline; }
@@ -147,25 +147,39 @@ a.btn-link { color: inherit; text-decoration: none; } /* Download reads as a lin
 .vs-table td.act { text-align: right; white-space: nowrap; }
 .vs-table td.act .btn-link { margin-left: var(--vs-s6); font-size: var(--vs-fs-small); }
 .vs-table td.act.confirming { white-space: normal; font-size: var(--vs-fs-small); } /* inline delete prompt wraps inside the fixed column */
-/* Inline voice editor: a normal aligned table row; it grows with the transcript. Every cell
- * is top-aligned on one 32px control line so text, inputs and links share a baseline. */
-.vs-edit td { height: auto; vertical-align: top; padding-top: var(--vs-s2); padding-bottom: var(--vs-s3); line-height: var(--vs-h-input); }
-.vs-edit td > .vs-input, .vs-edit td > .vs-select, .vs-edit td > .vs-edit-txcell { width: 100%; line-height: var(--vs-lh); }
-.vs-edit td.act .btn-link { margin-top: var(--vs-s1); }
+/* Inline voice editor: the first line keeps the normal row's geometry (4px padding + a 28px
+ * line), so Name, Language, Source, Reference and the links never move; only the transcript
+ * cell grows downward ("slides down", voices.js animates it open). */
+.vs-edit td { height: auto; vertical-align: top; padding-top: calc(var(--vs-s1) - 1px); padding-bottom: var(--vs-s1); line-height: 28px; }
+.vs-edit td > .vs-input, .vs-edit td > .vs-edit-txcell { width: 100%; }
+.vs-edit td.act .btn-link { vertical-align: top; margin-top: calc((28px - var(--vs-h-link)) / 2 + 0.5px); }
+.vs-edit td > .vs-input { display: block; height: 28px; min-height: 0; padding: 0; line-height: 27px; }
+/* the select's text stays where the plain language text was: the box bleeds into the gutter */
+.vs-edit td > .vs-select {
+  display: block;
+  width: calc(100% + var(--vs-s3) + 1px);
+  height: 28px;
+  min-height: 0;
+  margin-left: calc(-1 * (var(--vs-s3) + 1px));
+  padding-top: 0;
+  padding-bottom: 0;
+  line-height: normal;
+}
 /* editor focus: no accent outline box, the field's own rule turns solid instead */
 .vs-edit .vs-input:focus-visible, .vs-edit .vs-edit-tx:focus-visible { outline: none; border-bottom-color: var(--vs-fg); }
 .vs-edit .vs-select:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--vs-fg); }
-.vs-edit-txcell { display: flex; flex-direction: column; gap: var(--vs-s3); min-width: 0; line-height: var(--vs-lh); }
+.vs-edit-txcell { display: flex; flex-direction: column; gap: var(--vs-s3); min-width: 0; line-height: var(--vs-lh); overflow: hidden; }
 .vs-edit-txcell > .btn-link { align-self: flex-start; }
+/* first line of text sits where the one-line transcript was: centred in the 28px line */
 .vs-edit-tx {
   display: block;
   border: none;
   border-bottom: var(--vs-rule-input);
   background: transparent;
-  padding: var(--vs-s1) 0;
+  padding: calc((28px - var(--vs-lh) * 1em) / 2) 0;
   resize: none;
   overflow: hidden;
-  min-height: var(--vs-h-input);
+  min-height: 28px;
   white-space: pre-wrap;
 }
 .vs-empty { padding: var(--vs-s6) 0; border-top: var(--vs-rule-row); color: var(--vs-muted); font-size: var(--vs-fs-small); display: flex; flex-direction: column; gap: var(--vs-s5); align-items: flex-start; }
@@ -191,7 +205,7 @@ a.btn-link { color: inherit; text-decoration: none; } /* Download reads as a lin
 .vs-steps p { margin: 0; font-size: var(--vs-fs-small); }
 
 /* Design candidates */
-.vs-cand { border-top: var(--vs-rule-row); padding: var(--vs-s4) 0 var(--vs-s5); display: flex; flex-direction: column; gap: var(--vs-s4); }
+.vs-cand { border-top: var(--vs-rule-row); padding: var(--vs-s4) var(--vs-s4) var(--vs-s5); display: flex; flex-direction: column; gap: var(--vs-s4); }
 .vs-cand:hover, .vs-cand.is-selected, .vs-cand.is-playing { background: var(--vs-code-bg); }
 .vs-cand.is-playing .vs-wave path, .vs-cand.is-paused .vs-wave path { fill: var(--vs-wave-idle); }
 .vs-cand.is-playing .vs-wave path.accent, .vs-cand.is-paused .vs-wave path.accent { fill: var(--vs-accent); }

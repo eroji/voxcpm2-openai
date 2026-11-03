@@ -282,9 +282,9 @@ export function stopAudio() {
 }
 
 /* `handoff` (optional) continues audio that is already audible elsewhere (the Speak stream's
- * AudioContext): once this clip can play, `handoff.at()` returns the offset to resume from
- * (null = nothing left, skip), and `handoff.started()` runs when this element is audible so
- * the other source can stop without a gap. */
+ * AudioContext): once this clip can play, `handoff.at()` pauses that source and returns the
+ * offset to resume from (null = nothing left, skip); `handoff.started()` runs when this element
+ * is audible and `handoff.failed()` when it could not start, so the other source resumes. */
 export function play(url, state, handoff) {
   if (audio && playingUrl === url) {
     if (audio.paused) {
@@ -311,6 +311,7 @@ export function play(url, state, handoff) {
         if (handoff) handoff.started();
       })
       .catch(() => {
+        if (handoff) handoff.failed();
         if (audio === el) stopAudio(); // a newer clip may already own the player
       });
   if (!handoff) {

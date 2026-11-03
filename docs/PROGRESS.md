@@ -287,6 +287,11 @@ spikes remain host-run. CI has not run yet: the branch is local (47+ commits ahe
   Description persist in browser localStorage across reloads, restarts and redeploys.
   Release v0.3.8.
 
+- **2026-11-03 —** Voices editor keeps every first line in place and only the transcript cell
+  slides down; takes and candidate rows get horizontal padding; streamed playback buffers 0.3 s
+  (and re-buffers on underrun) instead of stuttering, and the stream→take handoff suspends the
+  stream before the take plays (no overlap). Release v0.3.9.
+
 ## Next action
 
 1. `git push origin main` and watch the GitLab pipeline (`checks`, `javascript`, `test`, `e2e`,
