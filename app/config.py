@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(extra="ignore", case_sensitive=False, env_file=None)
 
     app_name: str = "voxcpm2-openai"
-    version: str = "0.1.1"
+    version: str = "0.1.2"
 
     data_dir: Path = Path("/data")
     import_dir: Path = Path("/import/qwen3-speakers")
