@@ -9,6 +9,7 @@ import {
   noPhrasesNote,
   registerScreen,
   selectVoice,
+  persistField,
   renderWave,
   attachPlayer,
   stopAudio,
@@ -353,6 +354,7 @@ async function generate() {
 
 async function init() {
   syncFmt(); // Format state must be right even if the voices fetch below fails
+  persistField($("speak-style"), "vs.speakStyle");
   await Promise.all([loadVoices(), loadLanguages().catch(() => {})]);
   let saved = null;
   try {

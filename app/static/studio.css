@@ -152,6 +152,9 @@ a.btn-link { color: inherit; text-decoration: none; } /* Download reads as a lin
 .vs-edit td { height: auto; vertical-align: top; padding-top: var(--vs-s2); padding-bottom: var(--vs-s3); line-height: var(--vs-h-input); }
 .vs-edit td > .vs-input, .vs-edit td > .vs-select, .vs-edit td > .vs-edit-txcell { width: 100%; line-height: var(--vs-lh); }
 .vs-edit td.act .btn-link { margin-top: var(--vs-s1); }
+/* editor focus: no accent outline box, the field's own rule turns solid instead */
+.vs-edit .vs-input:focus-visible, .vs-edit .vs-edit-tx:focus-visible { outline: none; border-bottom-color: var(--vs-fg); }
+.vs-edit .vs-select:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--vs-fg); }
 .vs-edit-txcell { display: flex; flex-direction: column; gap: var(--vs-s3); min-width: 0; line-height: var(--vs-lh); }
 .vs-edit-txcell > .btn-link { align-self: flex-start; }
 .vs-edit-tx {
@@ -165,9 +168,6 @@ a.btn-link { color: inherit; text-decoration: none; } /* Download reads as a lin
   min-height: var(--vs-h-input);
   white-space: pre-wrap;
 }
-.src { display: inline-flex; align-items: center; gap: var(--vs-s3); }
-.src::before { content: ""; width: 8px; height: 8px; border: 1.5px solid var(--vs-fg); }
-.src.designed::before { background: var(--vs-fg); }
 .vs-empty { padding: var(--vs-s6) 0; border-top: var(--vs-rule-row); color: var(--vs-muted); font-size: var(--vs-fs-small); display: flex; flex-direction: column; gap: var(--vs-s5); align-items: flex-start; }
 /* Library empty state (SPEC §8): one block, its own buttons — the header actions are hidden. */
 #voices-empty { padding: 28px 0 var(--vs-s6); border-top: var(--vs-rule-section); color: var(--vs-fg); font-size: var(--vs-fs-body); max-width: 560px; align-items: stretch; }

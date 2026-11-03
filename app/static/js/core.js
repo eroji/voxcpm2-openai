@@ -196,6 +196,24 @@ export function selectVoice(name) {
   }
 }
 
+/* Keep a free-text field in this browser (localStorage): it survives reloads, container
+ * restarts and redeploys. Restores the saved value, then saves on every edit. */
+export function persistField(el, key) {
+  try {
+    const saved = localStorage.getItem(key);
+    if (saved != null) el.value = saved;
+  } catch {
+    /* private mode: the field just won't persist */
+  }
+  el.addEventListener("input", () => {
+    try {
+      localStorage.setItem(key, el.value);
+    } catch {
+      /* quota/private mode: keep working without persistence */
+    }
+  });
+}
+
 export function fmtDuration(s) {
   return s == null ? "—" : `${Number(s).toFixed(1)} s`;
 }

@@ -282,6 +282,11 @@ spikes remain host-run. CI has not run yet: the branch is local (47+ commits ahe
   take); Voices table uses fixed column widths so the inline editor never reflows or clips rows.
   Release v0.3.7.
 
+- **2026-11-03 —** Voices editor drops the accent focus outline (field rule turns solid instead);
+  Source column is plain text without the square marker; Speak Style control and Design
+  Description persist in browser localStorage across reloads, restarts and redeploys.
+  Release v0.3.8.
+
 ## Next action
 
 1. `git push origin main` and watch the GitLab pipeline (`checks`, `javascript`, `test`, `e2e`,

@@ -824,3 +824,18 @@ def test_screenshot_390(page, live_app, open_studio, screen):
     _settle(mobile, screen)
     mobile.screenshot(path=str(RESULTS_DIR / f"ui-{screen}-390.png"), full_page=True)
     context.close()
+
+
+def test_style_and_design_description_survive_a_reload(page, live_app, open_studio):
+    """Speak's Style control and Design's Description persist in this browser."""
+    open_studio(page)
+    page.fill("#speak-style", "warm, slow, smiling")
+    open_studio(page, "design")
+    page.fill("#design-desc", "calm, professional")
+    page.locator("#design-tags button").first.click()  # a tag chip persists like typing
+    tagged = page.locator("#design-desc").input_value()
+    page.reload()
+    open_studio(page)
+    expect(page.locator("#speak-style")).to_have_value("warm, slow, smiling")
+    open_studio(page, "design")
+    expect(page.locator("#design-desc")).to_have_value(tagged)

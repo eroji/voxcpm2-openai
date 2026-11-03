@@ -14,6 +14,7 @@ import {
   showError,
   clearError,
   registerScreen,
+  persistField,
 } from "./core.js";
 
 const NAME_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
@@ -89,6 +90,7 @@ function appendTag(tag) {
   if (parts.some(p => p.toLowerCase() === tag.toLowerCase())) return;
   const trimmed = desc.value.trim();
   desc.value = trimmed ? `${trimmed}, ${tag}` : tag;
+  desc.dispatchEvent(new Event("input")); // tag chips persist like typing does
 }
 
 function buildCandidate(c) {
@@ -251,6 +253,7 @@ async function save() {
 
 registerScreen("design", {
   init() {
+    persistField($("design-desc"), "vs.designDesc");
     for (const tag of document.querySelectorAll("#design-tags button")) {
       tag.addEventListener("click", () => appendTag(tag.textContent.replace(/^\+\s*/, "")));
     }
