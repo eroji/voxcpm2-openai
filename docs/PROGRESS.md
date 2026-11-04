@@ -321,7 +321,8 @@ spikes remain host-run. CI has not run yet: the branch is local (47+ commits ahe
   saved row shows "Saved as <name>" and the rest can still be selected and saved under other
   names. The backend already allowed several saves per set; only the UI cleared the list.
   Styled requests (`instructions`) drop `ref_text` so VoxCPM2 uses controllable cloning instead of
-  continuation (which ignored the style and echoed the reference transcript). Release v0.3.13.
+  continuation (which ignored the style and echoed the reference transcript). v0.3.13 shipped
+  the style fix but still reported 0.3.12; Release v0.3.14 carries all of the above.
 
 ## Next action
 
