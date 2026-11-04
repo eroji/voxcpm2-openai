@@ -107,7 +107,7 @@ class DesignRequest(APIModel):
     description: str = Field(min_length=1, max_length=2000)
     sample_text: str = Field(min_length=1, max_length=2000)
     language: str = "en"
-    n: int = Field(default=3, ge=1, le=4)
+    n: int = Field(default=3, ge=1, le=5)
 
 
 class CandidateInfo(APIModel):

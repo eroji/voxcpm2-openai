@@ -316,6 +316,13 @@ spikes remain host-run. CI has not run yet: the branch is local (47+ commits ahe
   (not possible per request). Sliders share one style; Design description 14 px, auto-sized.
   Release v0.3.12.
 
+- **2026-11-03 —** Human decision (departs from SPEC §7/§9, which stays read-only): Design
+  generates up to 5 candidates (`n` 1–5), and saving a candidate keeps the set on screen — the
+  saved row shows "Saved as <name>" and the rest can still be selected and saved under other
+  names. The backend already allowed several saves per set; only the UI cleared the list.
+  Styled requests (`instructions`) drop `ref_text` so VoxCPM2 uses controllable cloning instead of
+  continuation (which ignored the style and echoed the reference transcript). Release v0.3.13.
+
 ## Next action
 
 1. `git push origin main` and watch the GitLab pipeline (`checks`, `javascript`, `test`, `e2e`,

@@ -1,4 +1,4 @@
-/* Design screen: description + tags → candidates → select one → save as voice.
+/* Design screen: description + tags → candidates → select one → save as voice (repeatable per set).
  * All server data goes through textContent (R-044). */
 
 import {
@@ -236,17 +236,25 @@ async function save() {
   const btn = $("save-designed");
   btn.disabled = true;
   clearError("design");
+  const name = $("design-name").value.trim().toLowerCase();
   try {
     await api.post("/api/design/save", {
       candidate_id: selectedCandidate.id,
-      name: $("design-name").value.trim().toLowerCase(),
+      name,
       language: $("design-lang").value,
     });
     await loadVoices();
-    candidates = [];
+    // The set stays: more candidates from it can be saved under other names.
+    const row = document.querySelector(`#candidates .vs-cand[data-id="${selectedCandidate.id}"]`);
+    if (row) {
+      row.classList.remove("is-selected");
+      row.classList.add("is-saved");
+      const pick = row.querySelector(".pick");
+      pick.setAttribute("aria-pressed", "false");
+      pick.disabled = true;
+      pick.textContent = `Saved as ${name}`;
+    }
     selectedCandidate = null;
-    stopAudio();
-    $("candidates").replaceChildren();
     $("design-name").value = "";
     btn.textContent = "Saved ✓";
     setTimeout(() => {

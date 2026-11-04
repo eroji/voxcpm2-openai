@@ -291,7 +291,8 @@ def test_clone_save(page, live_app, open_studio, tmp_path):
 
 
 def test_design_flow(page, live_app, open_studio):
-    httpx.delete(f"{live_app}/api/voices/e2e-designed")  # idempotent across reruns
+    for key in ("e2e-designed", "e2e-designed-2"):  # idempotent across reruns
+        httpx.delete(f"{live_app}/api/voices/{key}")
     open_studio(page, "design")
     page.fill("#design-desc", "calm, professional, early 30s")
     page.fill("#design-sample", "Good morning, here is the sample line.")
@@ -310,9 +311,21 @@ def test_design_flow(page, live_app, open_studio):
     page.click("#save-designed")
     expect(page.locator("#save-designed")).to_have_text("Saved ✓")
 
+    # the set stays after a save: the saved row is marked, the others can still be saved
+    expect(page.locator("#candidates .vs-cand")).to_have_count(2)
+    expect(first.locator(".pick")).to_have_text("Saved as e2e-designed")
+    expect(first.locator(".pick")).to_be_disabled()
+    second = page.locator("#candidates .vs-cand").nth(1)
+    second.locator(".pick").click()
+    page.fill("#design-name", "e2e-designed-2")
+    expect(page.locator("#save-designed")).to_be_enabled()
+    page.click("#save-designed")
+    expect(second.locator(".pick")).to_have_text("Saved as e2e-designed-2")
+
     keys = [v["key"] for v in httpx.get(f"{live_app}/api/voices").json()["voices"]]
-    assert "e2e-designed" in keys
+    assert "e2e-designed" in keys and "e2e-designed-2" in keys
     assert httpx.delete(f"{live_app}/api/voices/e2e-designed").status_code == 200
+    assert httpx.delete(f"{live_app}/api/voices/e2e-designed-2").status_code == 200
 
 
 def test_engine_screen(page, live_app, open_studio, fake_engine):

@@ -61,9 +61,9 @@ def test_three_candidates(client: TestClient, settings: Settings, fake_engine) -
 
 def test_candidate_count_bounds(client: TestClient) -> None:
     assert _candidates(client, n=1).status_code == 200
-    assert _candidates(client, n=4).status_code == 200
+    assert _candidates(client, n=5).status_code == 200
     assert _candidates(client, n=0).status_code == 400
-    assert _candidates(client, n=5).status_code == 400
+    assert _candidates(client, n=6).status_code == 400
 
 
 def test_save_designs_voice(
@@ -97,6 +97,14 @@ def test_save_designs_voice(
         return result.audio
 
     assert asyncio.run(call())
+
+
+def test_save_several_from_one_set(client: TestClient, store) -> None:
+    first, second = _candidates(client, n=2).json()["candidates"]
+    assert _save(client, first["id"], "designed-a").status_code == 200
+    assert _save(client, second["id"], "designed-b").status_code == 200
+    assert store.get("designed-a").metadata["design_seed"] == str(first["seed"])
+    assert store.get("designed-b").metadata["design_seed"] == str(second["seed"])
 
 
 def test_save_unknown_candidate(client: TestClient) -> None:
