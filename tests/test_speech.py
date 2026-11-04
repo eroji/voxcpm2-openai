@@ -423,3 +423,21 @@ async def test_resolve_adhoc_ref_audio_needs_no_stored_voice(
     assert voice.ref_audio == ref
     assert voice.key is None
     await engine.aclose()
+
+
+# --- style control uses controllable cloning, not continuation --------------------------
+
+
+async def test_instructions_drop_ref_text(
+    fake_engine: Any, settings: Settings, library: VoiceStore
+) -> None:
+    """With a transcript VoxCPM2 continues the reference and ignores (style): send audio only."""
+    service, engine = _service(library, settings, fake_engine.url)
+    await engine.start()
+    await service.synthesize(_req(instructions="sleepy and warm, slow pace"))
+    styled = fake_engine.state["last"]
+    assert styled["input"] == "(sleepy and warm, slow pace)hello there"
+    assert styled["ref_audio"] and "ref_text" not in styled
+    await service.synthesize(_req(instructions="   "))  # blank style is a plain request
+    assert fake_engine.state["last"]["ref_text"] == "Thanks for waiting. Everything checks out."
+    await engine.aclose()

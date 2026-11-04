@@ -337,13 +337,18 @@ class SpeechService:
         text = request.input
         if self.pronunciation is not None:
             text = self.pronunciation.apply(text)  # respellings first: never inside (style)
+        ref_text: str | None = voice.ref_text
         if request.instructions and request.instructions.strip():
             # VoxCPM2 controllable cloning/design syntax (SPEC §12 S1): (control)text.
             text = f"({request.instructions.strip()}){text}"
+            # A transcript switches VoxCPM2 to continuation cloning, which ignores the
+            # control prefix and continues the reference: the output then repeats words
+            # from ref_text or babbles. Style needs controllable cloning (audio only).
+            ref_text = None
         return SynthParams(
             text=text,
             ref_audio=voice.ref_audio,
-            ref_text=voice.ref_text,
+            ref_text=ref_text,
             instructions=None,
             # Native speed control is unverified (S4); applying ffmpeg atempo locally avoids
             # double-processing if the engine ever supports it.
