@@ -394,6 +394,35 @@ async def test_synthesize_normal_path_unchanged(
     await engine.aclose()
 
 
+async def test_synthesize_normalizes_loudness(
+    fake_engine: Any, settings: Settings, library: VoiceStore
+) -> None:
+    """Q-027: every clip leaves at one speech level, so consecutive segments match."""
+    service, engine = _service(library, settings, fake_engine.url)
+    await engine.start()
+    result = await service.synthesize(_req("wav"))
+    samples, rate = read_audio(result.audio)
+    assert audio_utils.speech_level_db(samples, rate) == pytest.approx(
+        settings.loudness_target_db, abs=0.5
+    )
+    await engine.aclose()
+
+
+async def test_loudness_normalization_can_be_turned_off(
+    fake_engine: Any, settings: Settings, library: VoiceStore
+) -> None:
+    service, engine = _service(
+        library, settings.model_copy(update={"loudness_target_db": None}), fake_engine.url
+    )
+    await engine.start()
+    raw = await service.synthesize(_req("wav"))
+    samples, rate = read_audio(raw.audio)
+    assert audio_utils.speech_level_db(samples, rate) != pytest.approx(
+        settings.loudness_target_db, abs=0.5
+    )
+    await engine.aclose()
+
+
 # --- M1-T18: empty-library guard (SPEC §8) -----------------------------------------------
 
 

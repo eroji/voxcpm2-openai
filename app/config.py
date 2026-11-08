@@ -5,7 +5,7 @@ from __future__ import annotations
 from functools import cached_property
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 APP_DIR = Path(__file__).resolve().parent
@@ -39,6 +39,23 @@ class Settings(BaseSettings):
     s6_service: str = "engine"
 
     sample_rate: int = 48000
+    # Q-027: speech level (gated RMS, dBFS) every non-streamed clip is scaled to,
+    # peaks capped at -1 dBFS. Empty/unset in the environment keeps the default;
+    # set LOUDNESS_TARGET_DB=off to send the engine's level unchanged.
+    loudness_target_db: float | None = -20.0
+
+    @field_validator("loudness_target_db", mode="before")
+    @classmethod
+    def _loudness_off(cls, value: object) -> object:
+        """``off``/``none`` disable normalization; an empty value keeps the default."""
+        if isinstance(value, str):
+            word = value.strip().lower()
+            if word in ("off", "none"):
+                return None
+            if word == "":
+                return -20.0
+        return value
+
     max_input_chars: int = 4000
     max_upload_bytes: int = 20_000_000
     min_ref_seconds: float = 3.0

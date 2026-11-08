@@ -365,6 +365,13 @@ class SpeechService:
         result = await self.engine.synth(self._params(request, voice, stream=False), record=record)
         try:
             samples, sample_rate = await asyncio.to_thread(audio_utils.read_audio, result.audio)
+            if self.settings.loudness_target_db is not None:
+                samples = await asyncio.to_thread(
+                    audio_utils.normalize_loudness,
+                    samples,
+                    sample_rate,
+                    target_db=self.settings.loudness_target_db,
+                )
             target_rate = request.sample_rate or self.settings.sample_rate
             encoded = await asyncio.to_thread(
                 audio_utils.transcode,

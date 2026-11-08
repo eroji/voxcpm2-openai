@@ -45,3 +45,13 @@ def test_create_app_fails_fast_on_bad_auth(tmp_path: Path) -> None:
         create_app(_settings(tmp_path, studio_auth="admin"))
     with pytest.raises(RuntimeError):
         create_app(_settings(tmp_path, api_keys="   "))
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"), [("off", None), ("None", None), ("", -20.0), ("-23", -23.0)]
+)
+def test_loudness_target_parses_off_and_empty(
+    monkeypatch: pytest.MonkeyPatch, raw: str, expected: float | None
+) -> None:
+    monkeypatch.setenv("LOUDNESS_TARGET_DB", raw)
+    assert Settings().loudness_target_db == expected

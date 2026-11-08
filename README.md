@@ -277,6 +277,7 @@ All values are environment variables (or keys in the compose `.env`). Defaults a
 | `HF_HUB_OFFLINE` | `1` | Keep Hugging Face offline; set `0` to allow downloads |
 | `STARTUP_PAGE` | `1` | Serve the startup page until warm |
 | `STARTUP_FAIL_AFTER_S` | `600` | Startup failure timeout |
+| `LOUDNESS_TARGET_DB` | `-20` | Speech level (gated RMS, dBFS) every non-streamed clip is scaled to, peaks capped at -1 dBFS; `off` sends the engine's level unchanged (Q-027) |
 | `VOXCPM2_CFG_VALUE` | *(engine default 2.0)* | Guidance for every request; read at engine start |
 | `VOXCPM2_INFERENCE_TIMESTEPS` | *(engine default 10)* | Diffusion steps for every request; read at engine start |
 

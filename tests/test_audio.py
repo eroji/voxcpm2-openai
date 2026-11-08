@@ -92,3 +92,42 @@ def test_info_duration_s_reads_header_without_decode():
 def test_decode_data_uri_rejects_non_data():
     with pytest.raises(ValueError):
         audio.decode_data_uri("http://example.com/a.wav")
+
+
+# --- Loudness normalization (Q-027) ---------------------------------------------------
+
+
+def speechlike(amplitude: float, rate: int = 48000) -> np.ndarray:
+    """0.4 s tone bursts separated by 0.4 s of silence: half the clip is pause."""
+    burst = amplitude * np.sin(2 * np.pi * 220 * np.arange(int(0.4 * rate)) / rate)
+    gap = np.zeros(int(0.4 * rate))
+    return np.concatenate([burst, gap] * 5).astype(np.float32)
+
+
+@pytest.mark.parametrize("amplitude", [0.03, 0.1, 0.5])
+def test_normalize_loudness_brings_any_level_to_the_target(amplitude: float):
+    out = audio.normalize_loudness(speechlike(amplitude), 48000, target_db=-20.0)
+    assert audio.speech_level_db(out, 48000) == pytest.approx(-20.0, abs=0.3)
+    assert float(np.max(np.abs(out))) <= 10 ** (-1 / 20) + 1e-6
+
+
+def test_normalize_loudness_measures_speech_not_pauses():
+    """Half the clip is silence: an ungated RMS would read 3 dB low and over-boost."""
+    clip = speechlike(0.1)
+    burst_only = clip[np.abs(clip) > 0]
+    out = audio.normalize_loudness(clip, 48000, target_db=-20.0)
+    gain = float(np.max(np.abs(out))) / float(np.max(np.abs(clip)))
+    expected = 10 ** ((-20.0 - audio.speech_level_db(burst_only, 48000)) / 20)
+    assert gain == pytest.approx(expected, rel=0.05)
+
+
+def test_normalize_loudness_never_pushes_peaks_past_minus_one_dbfs():
+    clip = np.zeros(48000, dtype=np.float32)
+    clip[::4800] = 0.9  # sharp clicks: reaching -20 dB RMS would need far more than 0 dBFS
+    out = audio.normalize_loudness(clip, 48000, target_db=-20.0)
+    assert float(np.max(np.abs(out))) == pytest.approx(10 ** (-1 / 20), abs=1e-4)
+
+
+def test_normalize_loudness_leaves_silence_alone():
+    silent = np.zeros(48000, dtype=np.float32)
+    assert np.array_equal(audio.normalize_loudness(silent, 48000, target_db=-20.0), silent)

@@ -185,6 +185,45 @@ def peak_normalize(samples: np.ndarray, *, peak_db: float = -1.0) -> np.ndarray:
     return np.ascontiguousarray(samples * (target / peak), dtype=np.float32)
 
 
+def speech_level_db(samples: np.ndarray, sample_rate: int) -> float:
+    """RMS level of the speech in a clip, in dBFS, ignoring pauses.
+
+    Two-stage gate in the spirit of EBU R128: 50 ms blocks below -70 dBFS are
+    dropped, then blocks more than 20 dB under the remaining mean. A clip with
+    long pauses therefore measures the same as the same speech said straight
+    through. Returns -inf for silence.
+    """
+    block = max(1, int(sample_rate * 0.05))
+    usable = len(samples) // block * block
+    if usable == 0:
+        return float("-inf")
+    power = np.mean(np.square(samples[:usable].reshape(-1, block), dtype=np.float64), axis=1)
+    power = power[power > 10 ** (-70 / 10)]
+    if power.size == 0:
+        return float("-inf")
+    power = power[power > np.mean(power) * 10 ** (-20 / 10)]
+    return float(10 * np.log10(np.mean(power)))
+
+
+def normalize_loudness(
+    samples: np.ndarray, sample_rate: int, *, target_db: float, peak_db: float = -1.0
+) -> np.ndarray:
+    """Scale a clip so its speech level is ``target_db`` dBFS, without letting
+    any peak exceed ``peak_db`` (the gain is capped, never limited/compressed).
+
+    VoxCPM2 renders each request at its own level; long-form listening needs
+    consecutive clips at one level (Q-027).
+    """
+    level = speech_level_db(samples, sample_rate)
+    if not np.isfinite(level):
+        return samples
+    gain_db = target_db - level
+    peak = float(np.max(np.abs(samples)))
+    if peak > 0:
+        gain_db = min(gain_db, peak_db - 20 * np.log10(peak))
+    return np.ascontiguousarray(samples * np.float32(10 ** (gain_db / 20)), dtype=np.float32)
+
+
 def rms_envelope(samples: np.ndarray, buckets: int = 72) -> list[float]:
     """Return ``buckets`` RMS values normalized to 0..1 (SPEC §7 wave endpoint)."""
     if samples.size == 0:
