@@ -324,6 +324,11 @@ spikes remain host-run. CI has not run yet: the branch is local (47+ commits ahe
   continuation (which ignored the style and echoed the reference transcript). v0.3.13 shipped
   the style fix but still reported 0.3.12; Release v0.3.14 carries all of the above.
 
+- **2026-11-08 —** Q-027 (human decision): non-streamed speech is loudness-normalized to
+  `LOUDNESS_TARGET_DB` (-20 dBFS gated RMS, peaks capped at -1 dBFS; `off` disables). Measured
+  for Folio: VoxCPM2's per-clip level spread 3.2 dB across seeds with a style prompt; 0.0 dB after.
+  Release v0.3.15.
+
 ## Next action
 
 1. `git push origin main` and watch the GitLab pipeline (`checks`, `javascript`, `test`, `e2e`,
