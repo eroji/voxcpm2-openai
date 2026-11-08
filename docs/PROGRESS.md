@@ -329,6 +329,10 @@ spikes remain host-run. CI has not run yet: the branch is local (47+ commits ahe
   for Folio: VoxCPM2's per-clip level spread 3.2 dB across seeds with a style prompt; 0.0 dB after.
   Release v0.3.15.
 
+- **2026-11-08 —** Q-028 (human decision): `aac` response format (AAC-LC 96 kbps, ADTS,
+  `audio/aac`) for `/v1`, streaming and take downloads, so Folio can serve audiobooks to iOS as an
+  HLS stream of packed-audio segments. Release v0.3.16.
+
 ## Next action
 
 1. `git push origin main` and watch the GitLab pipeline (`checks`, `javascript`, `test`, `e2e`,
