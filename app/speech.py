@@ -154,6 +154,8 @@ def _ffmpeg_args(fmt: str, sample_rate_in: int, sample_rate_out: int) -> list[st
         args += ["-c:a", "libopus", "-b:a", "64k", "-f", "ogg"]
     elif fmt == "flac":
         args += ["-c:a", "flac", "-f", "flac"]
+    elif fmt == "aac":
+        args += ["-c:a", "aac", "-b:a", "96k", "-f", "adts"]
     else:
         raise ValueError(f"unsupported streaming format: {fmt}")
     args += ["-ac", "1", "pipe:1"]

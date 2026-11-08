@@ -21,8 +21,16 @@ MIME_TYPES = {
     "mp3": "audio/mpeg",
     "opus": "audio/ogg",
     "flac": "audio/flac",
+    "aac": "audio/aac",  # ADTS: Q-028, the packed-audio form HLS clients stream
 }
-EXTENSIONS = {"wav": "wav", "pcm": "pcm", "mp3": "mp3", "opus": "opus", "flac": "flac"}
+EXTENSIONS = {
+    "wav": "wav",
+    "pcm": "pcm",
+    "mp3": "mp3",
+    "opus": "opus",
+    "flac": "flac",
+    "aac": "aac",
+}
 
 
 def mime_for(fmt: str) -> str:
@@ -154,6 +162,8 @@ def transcode(
         args += ["-c:a", "libmp3lame", "-b:a", "128k", "-f", "mp3"]
     elif fmt == "opus":
         args += ["-c:a", "libopus", "-b:a", "64k", "-f", "ogg"]
+    elif fmt == "aac":
+        args += ["-c:a", "aac", "-b:a", "96k", "-f", "adts"]
     else:
         args += ["-c:a", "flac", "-f", "flac"]
     args += ["-ac", "1", "pipe:1"]

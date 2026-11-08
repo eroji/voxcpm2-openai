@@ -62,6 +62,14 @@ def test_transcode_mp3_produces_audio_bytes():
     assert data[:3] == b"ID3" or data[:1] == b"\xff"
 
 
+def test_transcode_aac_is_adts_frames():
+    """Q-028: AAC in ADTS framing, the packed-audio form HLS segments carry."""
+    data = audio.transcode(tone(0.5), 48000, "aac")
+    assert data[0] == 0xFF and data[1] & 0xF6 == 0xF0  # ADTS syncword, layer 0
+    frame_len = ((data[3] & 0x03) << 11) | (data[4] << 3) | (data[5] >> 5)
+    assert data[frame_len] == 0xFF  # the next frame follows directly
+
+
 def test_transcode_speed_shortens_duration():
     slow = audio.transcode(tone(1.0), 48000, "wav", target_rate=48000, speed=2.0)
     fast_samples, _ = audio.read_audio(slow)

@@ -39,7 +39,7 @@ def _req(fmt: str = "wav", *, input: str = "hello there", **kw: Any) -> SpeechRe
     return SpeechRequest(model="voxcpm2", input=input, voice="ashley-en", response_format=fmt, **kw)
 
 
-@pytest.mark.parametrize("fmt", ["pcm", "wav", "mp3"])
+@pytest.mark.parametrize("fmt", ["pcm", "wav", "mp3", "aac"])
 async def test_stream_completes_and_releases_slot(
     fake_engine: Any, settings: Settings, library: VoiceStore, fmt: str
 ) -> None:

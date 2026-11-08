@@ -59,7 +59,7 @@ voice sounds.
 
 | Area | Capability |
 |---|---|
-| OpenAI API | `POST /v1/audio/speech`, `GET /v1/models`, `GET /v1/audio/voices`; `wav`, `pcm`, `mp3`, `opus`, `flac`; streaming; bearer auth (`API_KEYS`, optional) |
+| OpenAI API | `POST /v1/audio/speech`, `GET /v1/models`, `GET /v1/audio/voices`; `wav`, `pcm`, `mp3`, `opus`, `flac`, `aac` (ADTS); streaming; bearer auth (`API_KEYS`, optional) |
 | Voice Studio | Seven hash-routed screens: Speak, Voices, Clone, Design, Languages, Pronunciation, Engine |
 | Voice cloning | Upload 3–30 s of clean speech (≤20 MB), optional STT transcription, consent gate, silence trim + peak normalize |
 | Voice design | Describe a voice, pick 1–5 candidates, audition/select, save several voices from one set |
@@ -408,7 +408,7 @@ curl -fsS http://vllm.dotslash.io:8881/v1/audio/voices
 ```
 
 Fields: `model` (any accepted string), `input` (≤4000 chars), `voice` (library key,
-case-insensitive), `response_format` (`wav|pcm|mp3|opus|flac`), `stream`, `instructions` (style),
+case-insensitive), `response_format` (`wav|pcm|mp3|opus|flac|aac`), `stream`, `instructions` (style),
 `speed` (0.5–2.0), `sample_rate`, `ref_audio`/`ref_text` (ad-hoc clone), `seed`, `cfg`, `steps`.
 Unknown voices are a 400 listing valid names. Errors use the OpenAI shape:
 

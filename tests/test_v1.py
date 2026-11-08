@@ -105,6 +105,7 @@ def test_unknown_fields_accepted(client, library):
         ("mp3", "audio/mpeg"),
         ("opus", "audio/ogg"),
         ("flac", "audio/flac"),
+        ("aac", "audio/aac"),
     ],
 )
 def test_response_formats(client, library, fmt, ctype):

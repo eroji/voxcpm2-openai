@@ -6,7 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-ResponseFormat = Literal["wav", "pcm", "mp3", "opus", "flac"]
+ResponseFormat = Literal["wav", "pcm", "mp3", "opus", "flac", "aac"]
 Language = str  # en | ja | ko | zh; unknown codes pass through
 
 VOICE_NAME_PATTERN = r"^[a-z0-9][a-z0-9_-]{0,63}$"
