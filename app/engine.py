@@ -154,7 +154,7 @@ class EngineClient:
             metrics_window=settings.metrics_window,
             timeout=settings.request_timeout_s,
             s6_service=settings.s6_service,
-            kv_cache=settings.kv_cache_label,
+            kv_cache=settings.effective_kv_cache_label(),
         )
 
     @property

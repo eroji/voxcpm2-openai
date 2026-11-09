@@ -55,3 +55,16 @@ def test_loudness_target_parses_off_and_empty(
 ) -> None:
     monkeypatch.setenv("LOUDNESS_TARGET_DB", raw)
     assert Settings().loudness_target_db == expected
+
+
+def test_kv_cache_label_prefers_env_then_deploy_yaml(tmp_path):
+    cfg = tmp_path / "deploy.yaml"
+    cfg.write_text("stages:\n  - stage_id: 0\n    kv_cache_memory_bytes: 4294967296\n", "utf-8")
+    derived = Settings(data_dir=tmp_path / "data", deploy_config=cfg, kv_cache_label="")
+    assert derived.effective_kv_cache_label() == "4 GiB"
+    explicit = Settings(data_dir=tmp_path / "data", deploy_config=cfg, kv_cache_label="6 GiB")
+    assert explicit.effective_kv_cache_label() == "6 GiB"
+    missing = Settings(
+        data_dir=tmp_path / "data", deploy_config=tmp_path / "missing.yaml", kv_cache_label=""
+    )
+    assert missing.effective_kv_cache_label() is None

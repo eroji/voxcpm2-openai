@@ -67,7 +67,7 @@ voice sounds.
 | Pronunciation | Respelling rules (whole word / after-number units), import/export/test, applied to `/v1` and Speak |
 | Engine management | Live status, VRAM, RTF, first-audio latency, queue depth, warm-up and restart |
 | Streaming | Raw s16le PCM to the browser, WAV/MP3/Opus/FLAC streaming for API clients; `X-Sample-Rate` drives playback |
-| Reliability | 2 concurrent engine requests + 16 queued, then 429; warm-up gates `/ready`; startup page with live engine log/failure mapping |
+| Reliability | 4 concurrent engine requests + 16 queued, then 429; warm-up gates `/ready`; startup page with live engine log/failure mapping |
 | Data | Voices in Qwen3-compatible safetensors, takes as WAV, backups before destructive edits |
 | Delivery | Tag-driven image build + automatic deployment, health-gated, with `.env`-pinned image tag |
 
@@ -83,9 +83,9 @@ The reference deployment is the `vllm` host:
 | Host GPU index | 1 (container sees it as device 0 via CDI) |
 | Weights | `/models/openbmb/VoxCPM2`, ~4.7 GB, mounted read-only |
 | Runtime | vLLM 0.30.0 + vLLM-Omni 0.30.0 + `voxcpm==2.0.3` |
-| Engine concurrency | 2 sequences; app queue 16 |
-| Measured engine VRAM | ~9.3 GB for the engine; ~14.5 GB used on the whole card with the other services |
-| Warm speed | RTF ≈ 0.14; first streamed audio ≈ 154–285 ms |
+| Engine concurrency | 4 sequences; app queue 16 |
+| Measured VRAM | ~15.9 GB used on the whole card after moving to 4 sequences (includes the other services) |
+| Warm speed | RTF ≈ 0.14 at low load; first streamed audio ≈ 154–285 ms |
 | Cold start | first request ≈ 14.5 s; hidden by warm-up before `/ready` |
 | Output | 48 kHz mono |
 | Container | Podman, CDI GPU, `deploy/compose.yaml`, published on **8881** while Qwen3-TTS still owns 8880 |
@@ -136,7 +136,7 @@ flowchart TB
 | Component | Responsibility |
 |---|---|
 | **FastAPI app** (`app/`) | Public surface, voice resolution, queueing, audio re-encoding, Studio API, startup/readiness |
-| **Engine client** (`app/engine.py`) | Loopback HTTP client, health polling, 2-slot semaphore + bounded queue, streaming format/rate parsing, RTF metrics |
+| **Engine client** (`app/engine.py`) | Loopback HTTP client, health polling, 4-slot semaphore + bounded queue, streaming format/rate parsing, RTF metrics |
 | **Engine runner** (`app/engine_runner.py`) | Supervises `vllm serve`, tees logs to `/data/logs/engine.log`, forwards signals, applies restart backoff |
 | **vLLM-Omni engine** | Loads VoxCPM2, accepts speech requests with inline reference audio or description control text |
 | **Voice/take stores** (`app/store.py`) | Safetensors voices + `voices.json`; session-scoped WAV takes + JSON metadata; backups |
@@ -229,13 +229,115 @@ curl -fsS http://127.0.0.1:8881/ready
 `./data` is relative to the compose file’s directory. On the reference host that is
 `/opt/voxcpm2-openai/data`; keep that path in backups and restores.
 
+### Optional engine-config override
+
+The image contains `deploy/voxcpm2-3090.yaml` at `/opt/app/deploy/voxcpm2-3090.yaml`, and that is
+used by default. To tune the engine without rebuilding the image, copy the YAML to the host and opt
+in with a second compose file:
+
+```bash
+# on the host
+cp /opt/voxcpm2-openai/voxcpm2-3090.yaml /opt/voxcpm2-openai/voxcpm2-3090.yaml.bak
+printf 'VOXCPM2_DEPLOY_CONFIG=/opt/voxcpm2-openai/voxcpm2-3090.yaml\n' >> /opt/voxcpm2-openai/.env
+podman-compose -f compose.yaml -f compose.config.yaml up -d --force-recreate
+```
+
+The override is mounted read-only over the baked path. Remove the `VOXCPM2_DEPLOY_CONFIG` line and
+recreate to fall back to the image default. CFG/steps set via `VOXCPM2_CFG_VALUE` /
+`VOXCPM2_INFERENCE_TIMESTEPS` still apply on top of whichever base file is used (the runner writes
+a `/data/engine-deploy.yaml` copy when those are set).
+
+### Engine deploy config reference
+
+`deploy/voxcpm2-3090.yaml` is a vLLM-Omni **deploy** file, not a model file. The pipeline topology
+is fixed in vLLM-Omni; the YAML controls runtime placement, memory, scheduling and defaults.
+
+| Key | Current value | Meaning | Quality/performance effect |
+|---|---|---|---|
+| `async_chunk` | `false` | Cross-stage chunk streaming. VoxCPM2 is a single-stage pipeline, so there is no inter-stage stream to chunk. | No audio effect. |
+| `dtype` | `bfloat16` | Model/compute dtype. `float16` is possible on some cards; `bfloat16` is the stable default. | Precision/memory; differences are usually subtle, not a quality dial. |
+| `stages[].stage_id` | `0` | Matches the fixed VoxCPM2 pipeline stage. | — |
+| `max_num_seqs` | `4` | Max concurrently decoding sequences in the engine. | Concurrency and throughput. Does not make a single clip better; batched decode can change numerics slightly. |
+| `gpu_memory_utilization` | `0.5` | Per-stage memory target (fraction of the visible 24 GB card); used for memory profiling / automatic KV sizing. | Higher gives more room but less room for whisper-stt/TEI; OOM risk on the shared card. |
+| `kv_cache_memory_bytes` | `4294967296` (4 GiB) | Explicit per-rank KV-cache budget; overrides automatic sizing. | Must grow with concurrency × context; too low limits concurrent/long requests, too high can OOM. |
+| `enforce_eager` | `true` | Disables CUDA graphs. | Stability/compatibility vs speed; not audio quality. |
+| `trust_remote_code` | `true` | Allow the HF checkpoint’s remote code. | Required by VoxCPM2. |
+| `enable_prefix_caching` | `false` | Prefix-cache reuse across requests. | TTS conditioning is per-request and cache reuse is not a quality win here; keep off unless benchmarking. |
+| `async_scheduling` | `true` | Overlap scheduling/execution work. | Latency/throughput. |
+| `max_num_batched_tokens` | `8192` | Per-step prefill/token budget; must be ≥ `max_num_seqs`. | Higher admits more parallel prefill; memory and latency trade-off. |
+| `max_model_len` | `4096` | Per-request context/KV length. | Long inputs can be truncated/rejected above this; raise with KV budget if needed. |
+| `devices` | `"0"` | GPU visible inside the container (CDI exposes the 3090 as device 0). | Must match the CDI device; changing it does not change quality. |
+| `engine_extras.hf_overrides.voxcpm2_runtime_config` | see below | VoxCPM2-specific runtime flags passed to the model implementation. | Mostly latency/batching; see notes. |
+| `default_sampling_params` | `temperature 0.0`, `top_p 1.0`, `top_k -1`, `max_tokens 4096`, `seed 42`, `repetition_penalty 1.0` | Defaults for every TTS request. | **Quality/variation knobs** (see below). |
+
+**VoxCPM2 runtime flags** (model-specific; not part of the generic vLLM schema):
+
+| Flag | Current | Effect |
+|---|---|---|
+| `audio_emit_every` | `1` | Emit an audio chunk every N decode steps. `1` is lowest latency; larger values batch emission and can smooth CPU/host overhead. |
+| `vae_decode_every` | `3` | Run the VAE decoder every N steps. Lower = more frequent decode (more compute, potentially smoother seams); higher = more batching. |
+| `enable_batched_cfm` / `enable_batched_vae_decode` | `true` | Batch flow-matching and VAE decode across concurrent sequences. Throughput-oriented; A/B with one request if you suspect batched numerics. |
+| `coalesce_audio_d2h` | `true` | Coalesce device-to-host audio copies. Host-transfer efficiency. |
+| `enable_loc_dit_fused_qkv` / `..._fused_mlp` | `true` | Fused LocDiT kernels. Speed/memory; expected to be numerically equivalent. |
+| `enable_loc_dit_zero_dt_cache` / `..._skip_qkv_contig` / `..._reduce_overhead_no_cg` | `true` | LocDiT kernel/graph overhead reductions. Speed; not a timbre control. |
+| `enable_unified_decode_graph` | `true` | Capture the unified decode graph for lower overhead. |
+| `unified_decode_graph_max_batch_size` | `4` | Max batch captured by that graph. Keep it equal to (or above) the intended concurrency; graph capture uses memory. |
+
+Where to find the schema and examples:
+
+- [Pipeline and deploy configurations](https://docs.vllm.ai/projects/vllm-omni/en/latest/configuration/stage_configs/) — field reference, precedence, overlays, examples.
+- [vLLM-Omni configuration overview](https://docs.vllm.ai/projects/vllm-omni/en/latest/configuration/) and [GPU memory guide](https://docs.vllm.ai/projects/vllm-omni/en/latest/configuration/gpu_memory_utilization/).
+- [vLLM-Omni `serve` CLI](https://docs.vllm.ai/projects/vllm-omni/en/latest/cli/serve/) — `--deploy-config`, `--stage-overrides`, stage-based CLI.
+- Bundled examples: [`vllm_omni/deploy/`](https://github.com/vllm-project/vllm-omni/tree/main/vllm_omni/deploy) — many model profiles; VoxCPM2’s default is `vllm_omni/deploy/voxcpm2.yaml`.
+- Schema source: [`vllm_omni/config/stage_config.py`](https://github.com/vllm-project/vllm-omni/blob/main/vllm_omni/config/stage_config.py) (`DeployConfig`, `StageDeployConfig`).
+- vLLM engine arguments (for `max_num_seqs`, `gpu_memory_utilization`, `max_model_len`, …): <https://docs.vllm.ai/en/latest/configuration/engine_args/>.
+- VoxCPM2 model-specific flags: `vllm_omni/model_executor/models/voxcpm2/` and the upstream `voxcpm` package (source is the final authority).
+
+### Audio quality knobs
+
+Audio quality is mostly **model + input**, not serving config. In this stack the controls that
+actually matter are:
+
+1. **CFG guidance** (`VOXCPM2_CFG_VALUE`, currently `3.0` on the reference host): higher follows the
+   reference/description more strictly; too high can sound rigid or introduce artifacts. The engine
+   default is `2.0`.
+2. **Diffusion steps** (`VOXCPM2_INFERENCE_TIMESTEPS`, engine default `10`): more steps can add
+   detail/continuity at a latency cost; fewer is faster. These are **server-wide** and read at engine
+   start — set them in `.env`, then recreate the container.
+3. **Sampling defaults** in `default_sampling_params`: `temperature 0.0` is deterministic; raising
+   it adds variation/naturalness but reduces reproducibility. `top_p`/`top_k` only matter when
+   sampling; `repetition_penalty` above 1 can reduce repeats but may distort. `seed` makes A/B tests
+   repeatable; `max_tokens` only truncates long output.
+4. **Reference recording and transcript** (Clone): clean 3–30 s single speaker and an exact
+   transcript matter more than any flag. Design quality depends on the description and sample line.
+5. **Style/design instructions**: VoxCPM2 applies them as `(instruction)text`; phrasing has a large
+   effect.
+6. **Pronunciation rules**: correct respellings fix names/units without retraining.
+7. **Streaming chunking** (`audio_emit_every`, `vae_decode_every`): can change seam artifacts and
+   latency, not the model’s timbre. Try `vae_decode_every: 1` if streamed seams are audible.
+8. **Loudness normalization** (`LOUDNESS_TARGET_DB`, app-level, currently `-20`): makes consecutive
+   clips equally loud; `off` preserves the engine level. It is loudness, not fidelity.
+9. **dtype**: `bfloat16` is the default; `float16` may be slightly different numerically and uses
+   less memory, but is not a reliable quality upgrade.
+
+Memory/scheduling values (`max_num_seqs`, KV bytes, graph batch, batched tokens, prefix caching) are
+capacity/latency controls. If quality changes when you alter them, that is a batching/numerics
+effect — A/B with one request and a fixed seed before treating it as a tuning knob.
+
+Tuning for N concurrent users: set `max_num_seqs=N`, `ENGINE_CONCURRENCY=N`,
+`unified_decode_graph_max_batch_size=N`, and size `kv_cache_memory_bytes` for
+`N × max_model_len` plus headroom. Watch engine VRAM and startup logs; on the shared 3090 leave
+room for whisper-stt and TEI. The current 4-user profile uses 4 GiB KV and measured ~15.9 GB on the
+whole card.
+
 ### CI/CD
 
 - `build` runs **only on `vX.Y.Z` tags** and pushes `:vX.Y.Z` plus `:latest` to
   `harbor.dotslash.io/dotslash/voxcpm2-openai`.
 - `deploy` runs after a tag build: ssh to `deploy@vllm.dotslash.io` with `DEPLOY_SSH_KEY`, logs in
   to Harbor over stdin, updates `VOXCPM2_IMAGE` in `/opt/voxcpm2-openai/.env`, and recreates the
-  container from the host's `compose.yaml` with `podman-compose`. It then waits for `/ready`.
+  container from the host's `compose.yaml` with `podman-compose` (adding `compose.config.yaml` when
+  `VOXCPM2_DEPLOY_CONFIG` is set). It then waits for `/ready`.
 - Branch pushes create no pipeline.
 
 Required protected CI variables: `HARBOR_USER`, `HARBOR_TOKEN`, `DEPLOY_SSH_KEY`
@@ -262,13 +364,15 @@ All values are environment variables (or keys in the compose `.env`). Defaults a
 | `MODEL_PATH` | `/models/openbmb/VoxCPM2` | Local VoxCPM2 weights |
 | `ENGINE_URL` | `http://127.0.0.1:8102` | Loopback vLLM-Omni endpoint |
 | `ENGINE_PORT` | `8102` | Engine port inside the container |
-| `DEPLOY_CONFIG` | `/opt/app/deploy/voxcpm2-3090.yaml` | vLLM-Omni deploy config |
+| `DEPLOY_CONFIG` | `/opt/app/deploy/voxcpm2-3090.yaml` | vLLM-Omni deploy config inside the image |
+| `VOXCPM2_DEPLOY_CONFIG` | *(unset)* | Optional host YAML path; when set with `compose.config.yaml`, overrides the baked config |
 | `SUPPORTED_LANGUAGES_FILE` | `deploy/supported-languages.json` | Engine language set (30 for VoxCPM2) |
 | `STT_URL` | *(empty)* | OpenAI-compatible whisper base ending in `/v1`; empty disables transcription |
 | `STUDIO_AUTH` | *(empty)* | `user:password` HTTP Basic for `/`, `/api/*`, `/static/*` |
 | `API_KEYS` | *(empty)* | Comma-separated bearer tokens for `/v1/*` |
-| `ENGINE_CONCURRENCY` | `2` | Max simultaneous engine requests |
+| `ENGINE_CONCURRENCY` | `4` | Max simultaneous engine requests (container profile) |
 | `MAX_QUEUE` | `16` | Waiting requests before HTTP 429 |
+| `KV_CACHE_LABEL` | *(derived)* | Optional override; by default the app reads `kv_cache_memory_bytes` from the active deploy YAML |
 | `SAMPLE_RATE` | `48000` | Default output rate |
 | `TAKE_RETENTION` | `50` | Newest takes retained on disk |
 | `MAX_UPLOAD_BYTES` | `20000000` | Clone upload cap (20 MB) |
@@ -530,7 +634,7 @@ ui/                  static visual reference
 | `/` stays on the startup page | Engine not warm: check `data/logs/engine.log`, GPU/CDI device, `/models` mount, VRAM. The page shows the mapped failure and can restart. |
 | `/ready` 503 | Warm-up has not completed or the engine died. `/api/engine/startup` and `podman logs` show why. |
 | `/v1` 503 with `Retry-After` | Still warming or restarting; retry. |
-| 429 on `/v1` | Queue full (2 active + 16 waiting). Retry after the header; reduce burst size. |
+| 429 on `/v1` | Queue full (4 active + 16 waiting). Retry after the header; reduce burst size. |
 | 400 `no_voices` | The library is empty; create a voice in Clone/Design, or pass `ref_audio`. |
 | Unknown voice 400 | The `voice` field is the library **key** (lowercase), not the display name. |
 | Language not enabled / unsupported | Add it in Languages; unsupported-by-engine voices are blocked in Speak. |
@@ -587,8 +691,7 @@ Model-specific caveats:
 
 ## Delivery notes
 
-- **Current release:** `v0.3.14` (`main`), image
-  `harbor.dotslash.io/dotslash/voxcpm2-openai:v0.3.14` and `:latest`.
+- **Current deployment:** image `harbor.dotslash.io/dotslash/voxcpm2-openai:v0.3.16` and `:latest`.
 - **Current deployment:** `vllm` host, Podman, port **8881**, container `voxcpm2-openai`,
   data at `/opt/voxcpm2-openai/data`. Qwen3-TTS still runs on 8880; cutover is optional.
 - **Deploy model:** a tag is the release. CI builds the image and the `deploy` job updates
@@ -621,4 +724,4 @@ Model-specific caveats:
 | [`AGENTS.md`](AGENTS.md) | Operating contract for agent-assisted changes |
 | [`NOTES.md`](NOTES.md) | Host spike results (M0) |
 
-Screenshots in this README are from the running `v0.3.14` deployment.
+Screenshots in this README are from the running deployment (v0.3.16).

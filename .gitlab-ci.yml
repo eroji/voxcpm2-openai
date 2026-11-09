@@ -88,6 +88,14 @@ deploy:
     - |
       ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
         "$DEPLOY_USER@$DEPLOY_HOST" \
+        "mkdir -p $DEPLOY_PATH && cat > $DEPLOY_PATH/compose.yaml" < deploy/compose.yaml
+    - |
+      ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
+        "$DEPLOY_USER@$DEPLOY_HOST" \
+        "cat > $DEPLOY_PATH/compose.config.yaml" < deploy/compose.config.yaml
+    - |
+      ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
+        "$DEPLOY_USER@$DEPLOY_HOST" \
         "bash -s -- '$HARBOR_IMAGE:$IMAGE_TAG' '$HEALTH_URL'" <<'REMOTE'
       set -euo pipefail
       IMAGE="$1"; HEALTH="$2"
@@ -98,8 +106,14 @@ deploy:
       mv .env.tmp .env
       chmod 600 .env
       export VOXCPM2_IMAGE="$IMAGE"
-      sudo -n podman-compose -f compose.yaml pull
-      sudo -n podman-compose -f compose.yaml up -d --force-recreate --remove-orphans
+      # A host-managed YAML is opt-in via VOXCPM2_DEPLOY_CONFIG in .env; otherwise the
+      # image's baked /opt/app/deploy/voxcpm2-3090.yaml remains in use.
+      COMPOSE_FILES="-f compose.yaml"
+      if grep -q '^VOXCPM2_DEPLOY_CONFIG=' .env; then
+        COMPOSE_FILES="$COMPOSE_FILES -f compose.config.yaml"
+      fi
+      sudo -n podman-compose $COMPOSE_FILES pull
+      sudo -n podman-compose $COMPOSE_FILES up -d --force-recreate --remove-orphans
       for i in $(seq 1 60); do
         if curl -fsS "$HEALTH" >/dev/null; then echo READY; exit 0; fi
         sleep 10

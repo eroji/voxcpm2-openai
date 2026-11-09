@@ -10,6 +10,12 @@ services:
     environment:
       DATA_DIR: /data
       MODEL_PATH: /models/openbmb/VoxCPM2
+      # Keep the app's admission cap aligned with the engine's max_num_seqs (4 in the
+      # multi-user profile); the app queues up to MAX_QUEUE more, then returns 429.
+      ENGINE_CONCURRENCY: "${ENGINE_CONCURRENCY:-4}"
+      MAX_QUEUE: "${MAX_QUEUE:-16}"
+      # Optional override; normally derived from the mounted deploy YAML.
+      KV_CACHE_LABEL: "${KV_CACHE_LABEL:-}"
       # Set HF_HUB_OFFLINE=0 on the host to allow cache misses to be downloaded.
       HF_HUB_OFFLINE: "${HF_HUB_OFFLINE:-1}"
       # Optional: export HF_TOKEN in the host environment for authenticated downloads.

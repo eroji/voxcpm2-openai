@@ -30,9 +30,9 @@ class Settings(BaseSettings):
     engine_url: str = "http://127.0.0.1:8102"
     engine_model: str = "openbmb/VoxCPM2"
     engine_port: int = 8102
-    deploy_config: str = "/opt/app/deploy/voxcpm2-3090.yaml"
+    deploy_config: Path = APP_DIR.parent / "deploy" / "voxcpm2-3090.yaml"
     engine_concurrency: int = 2
-    kv_cache_label: str = "2 GiB"
+    kv_cache_label: str = ""
     max_queue: int = 16
     metrics_window: int = 20
     warmup_timeout_s: float = 300.0
@@ -109,6 +109,23 @@ class Settings(BaseSettings):
         if not user:
             return None
         return user, password
+
+    def effective_kv_cache_label(self) -> str | None:
+        """Prefer KV_CACHE_LABEL; otherwise read the active deploy YAML's KV budget."""
+        if self.kv_cache_label.strip():
+            return self.kv_cache_label.strip()
+        try:
+            import yaml
+
+            data = yaml.safe_load(Path(self.deploy_config).read_text("utf-8"))
+            stages = data.get("stages") or []
+            budget = stages[0].get("kv_cache_memory_bytes") if stages else None
+            if isinstance(budget, (int, float)) and budget > 0:
+                gib = budget / (1024**3)
+                return f"{gib:g} GiB"
+        except Exception:  # noqa: BLE001 - a label must never block startup
+            pass
+        return None
 
     def validate(self) -> None:  # type: ignore[override]  # shadows deprecated pydantic classmethod
         """Fail closed on auth misconfiguration (SPEC §10): never boot with auth silently off."""

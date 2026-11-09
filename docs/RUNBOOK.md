@@ -61,6 +61,12 @@ ssh jumpbox "sudo -n ssh vllm \"
 podman logs -f voxcpm2-openai   # via ssh; expect "service engine: starting" + VoxCPM2
 ```
 
+By default the engine uses the YAML baked into the image
+(`/opt/app/deploy/voxcpm2-3090.yaml`). To tune it on the host without rebuilding, copy
+`deploy/voxcpm2-3090.yaml` to `/opt/voxcpm2-openai/voxcpm2-3090.yaml`, add
+`VOXCPM2_DEPLOY_CONFIG=/opt/voxcpm2-openai/voxcpm2-3090.yaml` to `.env`, and recreate with both
+compose files (`-f compose.yaml -f compose.config.yaml`). Remove that line to fall back.
+
 If `[base]`/Qwen3-TTS appears, the image still carries the old Qwen3 supervisor; rebuild from this
 repo. A `--port ''` error means an old image without `with-contenv` s6 scripts. A stale
 `data/engines.json` from the old supervisor is ignored.
@@ -251,6 +257,7 @@ Required **protected** CI variables (Settings → CI/CD → Variables):
 | `HARBOR_USER` / `HARBOR_TOKEN` | Harbor credentials; the job logs `deploy@vllm` in over stdin |
 | `DEPLOY_HOST` | `vllm.dotslash.io` (default in the job) |
 | `DEPLOY_PATH` | `/opt/voxcpm2-openai` (default in the job) |
+| `VOXCPM2_DEPLOY_CONFIG` | optional host YAML path in `.env`; set it to opt into `compose.config.yaml` |
 
 Release: `git tag vX.Y.Z && git push origin vX.Y.Z`; the tag must be protected so protected
 variables are available. Rollback a bad deploy with §5, or write a previous tag's image into `.env`

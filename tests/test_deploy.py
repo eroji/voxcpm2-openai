@@ -219,10 +219,10 @@ def test_inherited_cmd_cleared():
 # the v0.2.0 state (M2-T18 removed the /import/qwen3-speakers mount).
 REFERENCE_SHA256 = {
     "deploy/voxcpm2-3090.yaml": (
-        "3ddc3cabf84d86154b66365e18938d3f1f4d8d732d613396b2b97a387734f194"
+        "a97e7dc7984bf2ef697d96a5fd37d46afa3f394a655db0e560822ff99a2640a9"
     ),
-    # re-pinned 2026-11-03: VOXCPM2_CFG_VALUE / VOXCPM2_INFERENCE_TIMESTEPS (human decision, S4)
-    "deploy/compose.yaml": "8b7e0c94111d34aa2875d35403ea2c7e83320e59e156cf89a8bcfe883dd22fec",
+    # re-pinned 2026-11-09: multi-user engine profile (4 seqs) + app concurrency env
+    "deploy/compose.yaml": "6639b6782cf2e29b017518ead9a1c0d95f9f57469d3af79bbdb0ef6752a23ff0",
 }
 
 
@@ -230,6 +230,16 @@ def test_reference_deploy_files_byte_identical():
     for rel, want in REFERENCE_SHA256.items():
         got = hashlib.sha256((ROOT / rel).read_bytes()).hexdigest()
         assert got == want, f"{rel} was edited (sha256 {got} != pinned {want})"
+
+
+def test_deploy_config_override_is_optional():
+    override = (ROOT / "deploy" / "compose.config.yaml").read_text()
+    assert "${VOXCPM2_DEPLOY_CONFIG" in override
+    assert "/opt/app/deploy/voxcpm2-3090.yaml:ro" in override
+    ci = CI_FILE.read_text()
+    assert "compose.config.yaml" in ci
+    assert "VOXCPM2_DEPLOY_CONFIG" in ci
+    assert 'COMPOSE_FILES="-f compose.yaml"' in ci
 
 
 def test_compose_has_no_qwen3_import_mount():
@@ -288,7 +298,7 @@ def test_deploy_uses_jumpbox_and_podman():
     assert "sudo -n podman" in deploy, "deploy runs rootful podman through scoped sudo"
     assert "jumpbox" not in deploy
     assert "sudo -n podman login" in deploy and "--password-stdin" in deploy
-    assert "sudo -n podman-compose -f compose.yaml up -d --force-recreate" in deploy
+    assert "sudo -n podman-compose $COMPOSE_FILES up -d --force-recreate" in deploy
     assert "VOXCPM2_IMAGE=%s" in deploy and ".env" in deploy
     assert "HEALTH_URL: http://127.0.0.1:8881/ready" in deploy
     assert "docker compose" not in deploy

@@ -1,21 +1,26 @@
 # VoxCPM2 deploy config for vLLM-Omni 0.30.0, sized for a shared 24 GB RTX 3090.
-# Validated on the vllm host (GPU 1): ~9.3 GB VRAM, warm RTF ~0.14, ~154 ms to first
-# streamed audio. Derived from vllm_omni/deploy/voxcpm2.yaml with:
-#   max_num_seqs 8 -> 2, gpu_memory_utilization 0.9 -> 0.4,
-#   kv_cache_memory_bytes 6 GiB -> 2 GiB, unified_decode_graph_max_batch_size 8 -> 2.
+# Multi-user profile: 4 active sequences + 16 app-queued requests. Validated on the vllm
+# host (GPU 1); raise/lower max_num_seqs, kv_cache_memory_bytes and the app's
+# ENGINE_CONCURRENCY together. Leave headroom for whisper-stt and TEI on the same card.
+# Derived from vllm_omni/deploy/voxcpm2.yaml:
+#   max_num_seqs 8 -> 4, gpu_memory_utilization 0.9 -> 0.5,
+#   kv_cache_memory_bytes 6 GiB -> 4 GiB, unified_decode_graph_max_batch_size 8 -> 4,
+#   max_num_batched_tokens 4096 -> 8192.
 # devices "0" is correct: the container only sees the speech card (CDI).
+# Field-by-field reference: README.md § "Engine deploy config reference" and
+# https://docs.vllm.ai/projects/vllm-omni/en/latest/configuration/stage_configs/
 async_chunk: false
 dtype: bfloat16
 stages:
   - stage_id: 0
-    max_num_seqs: 2
-    gpu_memory_utilization: 0.4
-    kv_cache_memory_bytes: 2147483648   # 2 GiB, single-user
+    max_num_seqs: 4
+    gpu_memory_utilization: 0.5
+    kv_cache_memory_bytes: 4294967296   # 4 GiB for 4 concurrent sequences
     enforce_eager: true
     trust_remote_code: true
     enable_prefix_caching: false
     async_scheduling: true
-    max_num_batched_tokens: 4096
+    max_num_batched_tokens: 8192
     max_model_len: 4096
     devices: "0"
     engine_extras:
@@ -32,7 +37,7 @@ stages:
           enable_loc_dit_skip_qkv_contig: true
           enable_loc_dit_reduce_overhead_no_cg: true
           enable_unified_decode_graph: true
-          unified_decode_graph_max_batch_size: 2
+          unified_decode_graph_max_batch_size: 4
     default_sampling_params:
       temperature: 0.0
       top_p: 1.0

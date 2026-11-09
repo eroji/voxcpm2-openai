@@ -1,0 +1,11 @@
+# Optional deploy-config override — use as the SECOND compose file only when you want a
+# host-managed vLLM-Omni config instead of the one baked into the image:
+#
+#   VOXCPM2_DEPLOY_CONFIG=/opt/voxcpm2-openai/voxcpm2-3090.yaml
+#   podman-compose -f compose.yaml -f compose.config.yaml up -d --force-recreate
+#
+# Without this file the image's /opt/app/deploy/voxcpm2-3090.yaml is used unchanged.
+services:
+  voxcpm2-openai:
+    volumes:
+      - ${VOXCPM2_DEPLOY_CONFIG:?set VOXCPM2_DEPLOY_CONFIG to a host YAML file}:/opt/app/deploy/voxcpm2-3090.yaml:ro
