@@ -1,7 +1,8 @@
 """Engine warm-up and readiness gating (SPEC §4).
 
-The warm-up must finish before ``/ready`` returns 200: one non-streamed synthesis
-plus one streamed request, using the first library voice or the bundled clip.
+The warm-up must finish before ``/ready`` returns 200: one non-streamed synthesis,
+one streamed request, and a concurrent batch that initializes the batched decode path,
+using the first library voice or the bundled clip.
 """
 
 from __future__ import annotations
@@ -71,6 +72,26 @@ class WarmupService:
                     pass
             finally:
                 await handle.aclose()
+
+            # The batched decode path initializes on the first concurrent batch: on
+            # vLLM-Omni 0.32 that first burst took ~76 s on the reference 3090, while later
+            # bursts were normal. Pay that cost before /ready opens instead of on the first
+            # real multi-user request. engine_concurrency matches the app admission cap.
+            batch = max(1, self.settings.engine_concurrency)
+            await asyncio.gather(
+                *(
+                    self.engine.synth(
+                        SynthParams(
+                            text="Warm-up.",
+                            ref_audio=ref_uri,
+                            ref_text=ref_text,
+                            fmt="wav",
+                        ),
+                        record=False,
+                    )
+                    for _ in range(batch)
+                )
+            )
         except Exception as exc:  # noqa: BLE001 - warm-up failure only gates /ready
             self.warm = False
             self.last_error = str(exc)

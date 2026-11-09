@@ -408,7 +408,9 @@ page first.
 
 The page shows four steps (container → weights → engine → warm-up), elapsed time, the live merged
 engine/app log, and a Restart button. `/api/*` is gated with 503 while starting (except startup
-state and restart); `/v1` also returns 503 until warm. On failure it shows a plain-language cause
+state and restart); `/v1` also returns 503 until warm. Warm-up runs one full synthesis, one
+streamed request and a concurrent batch at `ENGINE_CONCURRENCY`; on the 0.32 stack the first
+concurrent batch costs ~1 min, so cold start is longer but the first users do not pay it. On failure it shows a plain-language cause
 and the retry countdown.
 
 ![Startup failure](docs/images/startup-failed.png)
@@ -643,7 +645,7 @@ ui/                  static visual reference
 | UI still looks old after deploy | Static assets now send `Cache-Control: no-cache`; hard-reload the tab once. |
 | CUDA out of memory | The card is shared. Lower other GPU workloads or reduce engine memory settings; restart after freeing VRAM. |
 | Voice sounds different across runs | VoxCPM2 generation is stochastic; use a fixed `seed` for repeatability and expect some variation. |
-| First concurrent burst after a cold start is slow (~1 min once) | The batched CFM path initializes on the first multi-request batch; later bursts run at normal RTF. Warm up with one request (`POST /api/engine/warmup`) before a load test. |
+| Cold start takes ~1 min longer than 0.3.x | vLLM-Omni 0.32 initializes its batched decode/CFM path on the first multi-request batch. Warm-up now runs one full, one streamed and `ENGINE_CONCURRENCY` concurrent syntheses before `/ready`, so the cost is paid before traffic. |
 
 ---
 
@@ -692,8 +694,8 @@ Model-specific caveats:
 
 ## Delivery notes
 
-- **Current release:** `v0.4.0` (vLLM-Omni/vLLM 0.32.0 engine stack), image
-  `harbor.dotslash.io/dotslash/voxcpm2-openai:v0.4.0` and `:latest`.
+- **Current release:** `v0.4.1` (vLLM-Omni/vLLM 0.32.0 engine stack, batched warm-up), image
+  `harbor.dotslash.io/dotslash/voxcpm2-openai:v0.4.1` and `:latest`.
 - **Current deployment:** `vllm` host, Podman, port **8881**, container `voxcpm2-openai`,
   data at `/opt/voxcpm2-openai/data`. Qwen3-TTS still runs on 8880; cutover is optional.
 - **Deploy model:** a tag is the release. CI builds the image and the `deploy` job updates

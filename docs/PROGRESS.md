@@ -343,7 +343,8 @@ spikes remain host-run. CI has not run yet: the branch is local (47+ commits ahe
   `vLLM-Omni 0.32.0 · vLLM 0.32.0`, WAV + raw PCM streaming 48 kHz, design candidates, Studio
   screens, 22 voices, 4/6/8 parallel requests at ~0.4–0.9 s each, ~16.2 GB whole-card VRAM. One
   first-burst initialization (~77 s) on the first concurrent batch after startup; later bursts are
-  normal (documented in README troubleshooting).
+  normal. Follow-up v0.4.1: warm-up now includes `ENGINE_CONCURRENCY` concurrent syntheses, so
+  `/ready` only opens after the batched path is initialized (cold start ~1 min longer).
 
 ## Next action
 

@@ -36,8 +36,10 @@ async def test_run_synthesizes_and_streams(
         assert await warmup.run() is True
     finally:
         await engine.aclose()
-    assert fake_engine.state["calls"] >= 2  # one WAV + one stream
-    assert fake_engine.state["last"]["stream"] is True  # second call was the stream
+    # one WAV + one stream + one concurrent batch (engine_concurrency) to warm the
+    # batched decode path before /ready opens
+    assert fake_engine.state["calls"] >= 2 + settings.engine_concurrency
+    assert fake_engine.state["max_active"] >= settings.engine_concurrency
     assert warmup.warm is True
     assert warmup.last_error is None
     assert str(fake_engine.state["last"]["ref_audio"]).startswith("data:")
