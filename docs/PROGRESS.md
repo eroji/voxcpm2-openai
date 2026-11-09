@@ -1,6 +1,6 @@
 # Progress
 
-**Current wave:** 14 — SPEC v0.2.0 complete
+**Current wave:** 23 — engine stack vLLM-Omni 0.32.0 / release v0.4.0
 **Resume:** `scripts/verify.sh` then `/status`; next human action is `git push` to run GitLab CI
 
 ## Task table
@@ -333,10 +333,22 @@ spikes remain host-run. CI has not run yet: the branch is local (47+ commits ahe
   `audio/aac`) for `/v1`, streaming and take downloads, so Folio can serve audiobooks to iOS as an
   HLS stream of packed-audio segments. Release v0.3.16.
 
+- **2026-11-09 —** Engine stack upgraded to vLLM 0.32.0 + vLLM-Omni 0.32.0 (base
+  `docker.io/vllm/vllm-omni:v0.32.0`), `voxcpm==2.0.3` unchanged. s6-overlay is copied from the
+  proven `qwen3-tts-openai:1.4.3` base (upstream vLLM image has no supervisor). The
+  `voxcpm2_runtime_knobs` patch is retained but is a no-op: 0.32 reads `cfg_value` /
+  `inference_timesteps` from `voxcpm2_runtime_config` upstream. Release **v0.4.0**.
+  `SPEC.md` still names 0.30.0 in its environment table; it is read-only, so the drift is recorded
+  as Q-029 rather than edited. Host validation of the candidate image: `/ready` 200, engine reports
+  `vLLM-Omni 0.32.0 · vLLM 0.32.0`, WAV + raw PCM streaming 48 kHz, design candidates, Studio
+  screens, 22 voices, 4/6/8 parallel requests at ~0.4–0.9 s each, ~16.2 GB whole-card VRAM. One
+  first-burst initialization (~77 s) on the first concurrent batch after startup; later bursts are
+  normal (documented in README troubleshooting).
+
 ## Next action
 
-1. `git push origin main` and watch the GitLab pipeline (`checks`, `javascript`, `test`, `e2e`,
-   `build`, `package:check`; `package` runs when `HARBOR_USER`/`HARBOR_PASSWORD` are set).
+1. Deploy/verify `v0.4.0` on `vllm` (engine 0.32 startup, streaming, design, 4-user profile) and
+   watch the tag pipeline.
 2. Run M0 spikes on the `vllm` host (`scripts/spikes/README.md`) and append results to `NOTES.md`.
 3. Remaining human inputs: Q-015 (runner docker/Harbor creds for `package`/CD), Q-014 (real
    warm-up clip). `STT_URL` is now documented as `http://vllm.dotslash.io:8890/v1`.

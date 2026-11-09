@@ -24,7 +24,7 @@ function stat(label, value, sub, title) {
 
 const gb = mb => (mb == null ? "—" : `${(mb / 1024).toFixed(1)} GB`);
 
-// "vLLM-Omni 0.30.0 · vLLM 0.30.0" → note "0.30.0 · vLLM 0.30.0" (value is the product name)
+// "vLLM-Omni 0.32.0 · vLLM 0.32.0" → note "0.30.0 · vLLM 0.30.0" (value is the product name)
 const RUNTIME_NAME = "vLLM-Omni";
 const runtimeNote = runtime => (runtime || "").slice(RUNTIME_NAME.length).trim();
 

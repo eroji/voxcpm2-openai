@@ -82,7 +82,7 @@ The reference deployment is the `vllm` host:
 | GPU | NVIDIA RTX 3090, 24 GB, **shared** with `whisper-stt`, `tei-embed`, `tei-rerank` |
 | Host GPU index | 1 (container sees it as device 0 via CDI) |
 | Weights | `/models/openbmb/VoxCPM2`, ~4.7 GB, mounted read-only |
-| Runtime | vLLM 0.30.0 + vLLM-Omni 0.30.0 + `voxcpm==2.0.3` |
+| Runtime | vLLM 0.32.0 + vLLM-Omni 0.32.0 (`vllm/vllm-omni:v0.32.0`) + `voxcpm==2.0.3` |
 | Engine concurrency | 4 sequences; app queue 16 |
 | Measured VRAM | ~15.9 GB used on the whole card after moving to 4 sequences (includes the other services) |
 | Warm speed | RTF ≈ 0.14 at low load; first streamed audio ≈ 154–285 ms |
@@ -643,6 +643,7 @@ ui/                  static visual reference
 | UI still looks old after deploy | Static assets now send `Cache-Control: no-cache`; hard-reload the tab once. |
 | CUDA out of memory | The card is shared. Lower other GPU workloads or reduce engine memory settings; restart after freeing VRAM. |
 | Voice sounds different across runs | VoxCPM2 generation is stochastic; use a fixed `seed` for repeatability and expect some variation. |
+| First concurrent burst after a cold start is slow (~1 min once) | The batched CFM path initializes on the first multi-request batch; later bursts run at normal RTF. Warm up with one request (`POST /api/engine/warmup`) before a load test. |
 
 ---
 
@@ -661,7 +662,7 @@ Authoritative links:
 
 - Model card: <https://huggingface.co/openbmb/VoxCPM2>
 - Upstream repository: <https://github.com/OpenBMB/VoxCPM>
-- Serving stack: [vLLM-Omni](https://github.com/vllm-project/vllm-omni) (0.30.0 here)
+- Serving stack: [vLLM-Omni](https://github.com/vllm-project/vllm-omni) (0.32.0 here)
 - Local weights: `/models/openbmb/VoxCPM2`; `voxcpm==2.0.3`
 
 ### How this app uses VoxCPM2
@@ -691,7 +692,8 @@ Model-specific caveats:
 
 ## Delivery notes
 
-- **Current deployment:** image `harbor.dotslash.io/dotslash/voxcpm2-openai:v0.3.16` and `:latest`.
+- **Current release:** `v0.4.0` (vLLM-Omni/vLLM 0.32.0 engine stack), image
+  `harbor.dotslash.io/dotslash/voxcpm2-openai:v0.4.0` and `:latest`.
 - **Current deployment:** `vllm` host, Podman, port **8881**, container `voxcpm2-openai`,
   data at `/opt/voxcpm2-openai/data`. Qwen3-TTS still runs on 8880; cutover is optional.
 - **Deploy model:** a tag is the release. CI builds the image and the `deploy` job updates
@@ -699,6 +701,10 @@ Model-specific caveats:
   `/ready`. Branch pushes never deploy.
 - **Data safety:** voices/takes/languages/pronunciation are on the data volume; take a tarball
   before upgrades or cutover. The app also snapshots before destructive edits.
+- **Engine stack:** v0.4.0 runs vLLM 0.32.0 + vLLM-Omni 0.32.0 from
+  `docker.io/vllm/vllm-omni:v0.32.0`; s6-overlay is copied from the proven qwen3 base because the
+  upstream image has no supervisor. The `voxcpm2_runtime_knobs` build patch is a no-op on 0.32
+  (CFG/steps are upstream), retained as a drift guard.
 - **Rollback:** deploy a previous image tag by writing it to `.env` and recreating the container, or
   stop VoxCPM2 and restart `qwen3-tts-openai` with LiteLLM pointed back to 8880.
 - **Verification:** `scripts/verify.sh` is the local gate; `scripts/smoke.sh` checks a live
@@ -724,4 +730,4 @@ Model-specific caveats:
 | [`AGENTS.md`](AGENTS.md) | Operating contract for agent-assisted changes |
 | [`NOTES.md`](NOTES.md) | Host spike results (M0) |
 
-Screenshots in this README are from the running deployment (v0.3.16).
+Screenshots in this README are from the running deployment.

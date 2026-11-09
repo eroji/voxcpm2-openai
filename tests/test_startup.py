@@ -31,7 +31,7 @@ class StubEngine:
         return self._ready
 
     def stats(self):
-        return SimpleNamespace(runtime="vLLM-Omni 0.30.0", kv_cache="2 GiB", gpu=self._gpu)
+        return SimpleNamespace(runtime="vLLM-Omni 0.32.0", kv_cache="2 GiB", gpu=self._gpu)
 
 
 class StubWarmup:
@@ -82,7 +82,7 @@ def test_progression(settings: Settings) -> None:
     steps = snap["steps"]
     assert steps[0]["detail"] == "App online, voice library loaded (2 voices)"
     assert settings.model_path in steps[1]["detail"]
-    assert steps[2]["detail"] == "vLLM-Omni 0.30.0 · 2 GiB KV cache · GPU"  # gpu fallback
+    assert steps[2]["detail"] == "vLLM-Omni 0.32.0 · 2 GiB KV cache · GPU"  # gpu fallback
     assert steps[3]["detail"] == (
         "One full and one streamed synthesis, so the first real request is fast"
     )
@@ -104,7 +104,7 @@ def test_gpu_detail_drops_the_vendor_prefix(settings: Settings) -> None:
     settings.startup_fail_after_s = 3600
     tracker, _, _ = make_tracker(settings, gpu="NVIDIA GeForce RTX 3090")
     detail = tracker.snapshot()["steps"][2]["detail"]
-    assert detail == "vLLM-Omni 0.30.0 · 2 GiB KV cache · RTX 3090"
+    assert detail == "vLLM-Omni 0.32.0 · 2 GiB KV cache · RTX 3090"
 
 
 def test_fatal_cuda_marks_current_step_failed(settings: Settings) -> None:

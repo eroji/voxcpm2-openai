@@ -134,6 +134,12 @@ def test_voxcpm_stays_on_uv():
     assert "pip install voxcpm" not in cf  # plain pip would downgrade NCCL
 
 
+def test_engine_base_is_vllm_omni_032():
+    cf = CONTAINERFILE.read_text()
+    assert "FROM docker.io/vllm/vllm-omni:v0.32.0" in cf
+    assert "__version__.startswith('0.32')" in cf
+
+
 def test_compose_keeps_hf_offline_by_default_but_allows_token():
     compose = (ROOT / "deploy" / "compose.yaml").read_text()
     assert 'HF_HUB_OFFLINE: "${HF_HUB_OFFLINE:-1}"' in compose
@@ -219,7 +225,7 @@ def test_inherited_cmd_cleared():
 # the v0.2.0 state (M2-T18 removed the /import/qwen3-speakers mount).
 REFERENCE_SHA256 = {
     "deploy/voxcpm2-3090.yaml": (
-        "a97e7dc7984bf2ef697d96a5fd37d46afa3f394a655db0e560822ff99a2640a9"
+        "ae69faffc09db92cde7d580d8b8039b17cbe7b8cfea839211e6982b72a0a98fd"
     ),
     # re-pinned 2026-11-09: multi-user engine profile (4 seqs) + app concurrency env
     "deploy/compose.yaml": "6639b6782cf2e29b017518ead9a1c0d95f9f57469d3af79bbdb0ef6752a23ff0",

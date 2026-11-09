@@ -10,7 +10,7 @@ Status words: `todo`, `wip`, `pass`, `blocked`. A milestone closes only when all
 | **M2 Voice store + Studio API** | voices CRUD + audio, clone (validation/normalization/consent), transcribe, takes list/audio/wave/save-as-voice/delete, engine status/warmup/restart; backups before destructive changes | M2-T1…T17 | `scripts/verify.sh` | **pass locally** |
 | **M3 UI** | five hash-routed screens wired to the API; tokens/layout match `ui/studio.html`; smooth 72-bucket waveforms; keyboard-only navigation; inline errors | M3-T1…T16 | `scripts/verify.sh` e2e (startup + six-screen screenshots) + lead review | **pass locally** |
 | **M4 Design flow** | description → 1–4 candidates (distinct seeds) → select → save → voice usable by name over `/v1` | M4-T1, M4-T2 | `scripts/verify.sh` | **pass locally** (S2 transport still Q-002) |
-| **M5 Delivery + cutover** | image builds in CI, tag deploy to vllm works, runbook + rollback documented, acceptance suite present | M5-T1…T5 | CI `build`, `deploy` | **partial** — CI build/deploy need protected vars; cutover external |
+| **M5 Delivery + cutover** | image builds in CI, tag deploy to vllm works, runbook + rollback documented, acceptance suite present | M5-T1…T5 | CI `build`, `deploy` | **partial** — CI build/deploy need protected vars; cutover external. v0.4.0 moves the stack to vLLM-Omni 0.32.0 (Q-029: SPEC still names 0.30.0) |
 
 ## Known external blockers
 

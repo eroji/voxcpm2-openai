@@ -1,4 +1,4 @@
-# VoxCPM2 deploy config for vLLM-Omni 0.30.0, sized for a shared 24 GB RTX 3090.
+# VoxCPM2 deploy config for vLLM-Omni 0.32.0, sized for a shared 24 GB RTX 3090.
 # Multi-user profile: 4 active sequences + 16 app-queued requests. Validated on the vllm
 # host (GPU 1); raise/lower max_num_seqs, kv_cache_memory_bytes and the app's
 # ENGINE_CONCURRENCY together. Leave headroom for whisper-stt and TEI on the same card.

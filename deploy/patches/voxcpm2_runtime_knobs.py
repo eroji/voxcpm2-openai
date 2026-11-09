@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Backport vllm-project/vllm-omni PR #7010 into vLLM-Omni 0.30.0 (build-time patch).
+"""Backport vllm-project/vllm-omni PR #7010 (build-time patch; no-op on 0.32+).
 
 0.30.0 hard-codes VoxCPM2's CFM solver steps (10) and classifier-free guidance (2.0) in
 ``voxcpm2_talker.py``. PR #7010 (merged 2026-09-30) reads them from

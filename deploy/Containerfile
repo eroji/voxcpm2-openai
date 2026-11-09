@@ -2,33 +2,36 @@
 # Mirrors the qwen3-tts-openai layout: s6-overlay supervises the vLLM-Omni engine
 # (internal port) and the FastAPI app (port 8000).
 #
-# Proven during testing:
-#   - vllm/vllm-openai:v0.30.0 + vllm-omni 0.30.0 serve VoxCPM2 (deploy/voxcpm2-3090.yaml)
+# Engine stack:
+#   - vllm/vllm-omni:v0.32.0 ships vLLM 0.32.0 + vLLM-Omni 0.32.0, ffmpeg, curl, uv
 #   - VoxCPM2 support needs the upstream `voxcpm` package (2.0.3 tested)
-#   - install it with uv so /etc/uv-overrides.txt keeps nvidia-nccl-cu13 at 2.30.7;
-#     plain pip downgrades NCCL to 2.29.7
+#   - s6-overlay is copied from the proven qwen3 base image (same Ubuntu 24.04 layout)
+#     because the upstream vLLM image has no supervisor
 #
-# The quickest path is to start FROM the existing image, which already has
-# vllm 0.30.0, vllm-omni 0.30.0, s6-overlay and the uv override file:
-FROM harbor.dotslash.io/dotslash/qwen3-tts-openai:1.4.3
+# The upstream image has no s6-overlay; take the installed v3 tree from the image this
+# project already ran in production rather than re-downloading it at build time.
+FROM harbor.dotslash.io/dotslash/qwen3-tts-openai:1.4.3 AS s6
+FROM docker.io/vllm/vllm-omni:v0.32.0
+
+COPY --from=s6 /command /command
+COPY --from=s6 /package /package
+COPY --from=s6 /etc/s6-overlay /etc/s6-overlay
+COPY --from=s6 /init /init
 
 RUN uv pip install --system --break-system-packages --no-cache voxcpm==2.0.3
 
-# Backport vllm-omni PR #7010: VoxCPM2 CFG and diffusion steps come from
-# hf_overrides.voxcpm2_runtime_config instead of being hard-coded (2.0 / 10). Set them with
-# VOXCPM2_CFG_VALUE / VOXCPM2_INFERENCE_TIMESTEPS (app/engine_runner.py). Exact-text patch:
-# the build fails if vLLM-Omni drifted, and it is a no-op once upstream includes the change.
+# vLLM-Omni 0.32 already reads VoxCPM2 CFG/diffusion steps from
+# hf_overrides.voxcpm2_runtime_config, so this backport of PR #7010 is a no-op; it stays
+# to fail loudly if a future base image regresses and to document the knob wiring.
 COPY deploy/patches/voxcpm2_runtime_knobs.py /tmp/voxcpm2_runtime_knobs.py
 RUN python3 /tmp/voxcpm2_runtime_knobs.py && rm /tmp/voxcpm2_runtime_knobs.py
 
 # Sanity checks at build time (fail the build if the stack drifted)
-RUN python3 -c "import vllm; assert vllm.__version__.startswith('0.30'), vllm.__version__" 2>/dev/null \
+RUN python3 -c "import vllm, vllm_omni; assert vllm.__version__.startswith('0.32'), vllm.__version__; assert vllm_omni.__version__.startswith('0.32'), vllm_omni.__version__" 2>/dev/null \
  && pip show nvidia-nccl-cu13 | grep -q '^Version: 2.30.7' \
  && python3 -c "from voxcpm.core import VoxCPM" 2>/dev/null
 
 # trust_remote_code writes to the HF modules cache; keep it off the read-only /models mount.
-# Neutralize the inherited qwen3-tts stage-2 hook (it generates Qwen3 engine services at
-# runtime) and fail stage 2 normally.
 ENV HF_HOME=/var/cache/hf \
     HF_HUB_OFFLINE=1 \
     DATA_DIR=/data \
@@ -50,12 +53,11 @@ RUN uv pip install --system --break-system-packages --no-cache --no-deps \
 RUN python3 -c "import fastapi, uvicorn, httpx, numpy, soundfile, safetensors, pydantic, pydantic_settings, multipart"
 
 # ffmpeg (mp3/opus transcoding, R-016) and curl (compose healthcheck, R-045) are needed at
-# runtime. Install ffmpeg with the distro package manager only if the base lacks it.
+# runtime. The upstream image already ships both; apt is only a fallback.
 RUN (command -v ffmpeg >/dev/null || (apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*)) \
  && ffmpeg -version >/dev/null && curl --version >/dev/null
 
-# Drop the inherited Qwen3 app/supervisor entirely; keeping it would let start.sh and
-# engines.default.json start Qwen3-TTS next to our VoxCPM2 engine.
+# Drop any inherited app/supervisor (absent in the upstream image; kept as a guard).
 RUN rm -rf /opt/app
 
 # App (OpenAI API + Studio API + static UI), engine deploy config, and s6-overlay v3
@@ -68,8 +70,8 @@ COPY deploy/supported-languages.json /opt/app/deploy/supported-languages.json
 # SPEC §5a: the Studio enables languages from this file, so it must ship and parse.
 RUN python3 -c "import json; d = json.load(open('/opt/app/deploy/supported-languages.json')); assert len(d['languages']) == 30, len(d['languages'])"
 
-# Remove inherited qwen3-tts service dirs and their user/contents.d markers so the base
-# cannot start an old engine or double-bind :8000. s6-overlay base bundles are untouched.
+# Remove inherited service dirs and their user/contents.d markers so the base cannot start
+# another engine or double-bind :8000. Then install our two services.
 RUN rm -rf /etc/s6-overlay/s6-rc.d/engine /etc/s6-overlay/s6-rc.d/app /etc/s6-overlay/s6-rc.d/qwen3* \
     /etc/s6-overlay/s6-rc.d/user/contents.d/engine \
     /etc/s6-overlay/s6-rc.d/user/contents.d/app \
@@ -84,7 +86,5 @@ RUN stale=$(grep -RlE 'qwen3|vllm serve|uvicorn' /etc/s6-overlay/s6-rc.d --inclu
       | grep -vE '^/etc/s6-overlay/s6-rc.d/(engine|app)/run$' || true); \
     [ -z "$stale" ] || { echo "stale s6 services: $stale"; exit 1; }
 
-# The base image's ENTRYPOINT ran its Qwen3 supervisor as the s6 main program.
-# Run /init alone so only our s6 services start.
 ENTRYPOINT ["/init"]
 CMD []
